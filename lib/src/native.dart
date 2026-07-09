@@ -20,7 +20,9 @@ typedef _FreeDartFn = void Function(Pointer<Utf8>);
 class NativeCore {
   late final DynamicLibrary _lib;
   late final _StrDartFn _version, _load, _status, _stopAll;
+  late final _StrDartFn _ddbGet, _ddbStart, _ddbStop, _ddbLogs;
   late final _StrArgDartFn _saveConfig, _deleteConfig, _setSettings, _start, _stop, _logs;
+  late final _StrArgDartFn _ddbSet;
   late final _FreeDartFn _free;
 
   NativeCore() {
@@ -35,6 +37,11 @@ class NativeCore {
     _start = _lib.lookupFunction<_StrArgNativeFn, _StrArgDartFn>('rm_start');
     _stop = _lib.lookupFunction<_StrArgNativeFn, _StrArgDartFn>('rm_stop');
     _logs = _lib.lookupFunction<_StrArgNativeFn, _StrArgDartFn>('rm_logs');
+    _ddbGet = _lib.lookupFunction<_StrNativeFn, _StrDartFn>('rm_ddb_get');
+    _ddbStart = _lib.lookupFunction<_StrNativeFn, _StrDartFn>('rm_ddb_start');
+    _ddbStop = _lib.lookupFunction<_StrNativeFn, _StrDartFn>('rm_ddb_stop');
+    _ddbLogs = _lib.lookupFunction<_StrNativeFn, _StrDartFn>('rm_ddb_logs');
+    _ddbSet = _lib.lookupFunction<_StrArgNativeFn, _StrArgDartFn>('rm_ddb_set');
     _free = _lib.lookupFunction<_FreeNativeFn, _FreeDartFn>('rm_free');
   }
 
@@ -117,6 +124,19 @@ class NativeCore {
 
   List<String> logs(String id) {
     final j = jsonDecode(_call1(_logs, id)) as Map<String, dynamic>;
+    return ((j['lines'] as List?) ?? []).map((e) => e.toString()).toList();
+  }
+
+  // ---- Local DynamoDB ----
+  LocalDdbInfo ddbGet() =>
+      LocalDdbInfo.fromJson(jsonDecode(_call0(_ddbGet)) as Map<String, dynamic>);
+  void ddbSet(LocalDdbConfig c) =>
+      _expectOk(_call1(_ddbSet, jsonEncode(c.toJson())));
+  void ddbStart() => _expectOk(_call0(_ddbStart));
+  void ddbStop() => _expectOk(_call0(_ddbStop));
+
+  List<String> ddbLogs() {
+    final j = jsonDecode(_call0(_ddbLogs)) as Map<String, dynamic>;
     return ((j['lines'] as List?) ?? []).map((e) => e.toString()).toList();
   }
 

@@ -23,6 +23,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -56,6 +57,7 @@ type Config struct {
 	MultiDB         bool     `json:"multiDb"`
 	AutoCreateTable bool     `json:"autoCreateTable"`
 	AutoRestart     bool     `json:"autoRestart"`
+	RunMode         string   `json:"runMode"` // "" | "native" | "docker"
 	Requirepass     string   `json:"requirepass"`
 	ExtraFlags      []FlagKV `json:"extraFlags"`
 }
@@ -71,11 +73,20 @@ type FlagKV struct {
 type Settings struct {
 	RedimosV1Path string `json:"redimosV1Path"`
 	RedimosV2Path string `json:"redimosV2Path"`
+	// DynamoDbLocalDir overrides where the Java DynamoDBLocal package lives
+	// (DynamoDBLocal.jar + DynamoDBLocal_lib). Empty = ~/.redimos/dynamodb-local,
+	// auto-downloaded on first use.
+	DynamoDbLocalDir string `json:"dynamoDbLocalDir"`
+	// Docker images used when a config's RunMode is "docker". Empty falls back
+	// to redimos-v1:local / redimos-v2:local.
+	RedimosV1Image string `json:"redimosV1Image"`
+	RedimosV2Image string `json:"redimosV2Image"`
 }
 
 type store struct {
-	Configs  []Config `json:"configs"`
-	Settings Settings `json:"settings"`
+	Configs  []Config       `json:"configs"`
+	Settings Settings       `json:"settings"`
+	LocalDdb LocalDdbConfig `json:"localDdb"`
 }
 
 // ---------------------------------------------------------------------------
@@ -105,6 +116,7 @@ type instance struct {
 	bin        string
 	launchArgs []string
 	launchEnv  []string
+	container  string // docker container name when the child runs containerised ("" = plain process)
 
 	// Supervisor state.
 	autoRestart  bool
@@ -112,6 +124,25 @@ type instance struct {
 	restarts     int       // successful supervised restarts so far
 	failCount    int       // failures within the current crash-loop window
 	failWindow   time.Time // start of the current crash-loop window
+
+	// Monitoring (filled by the sampler loop).
+	cpuPercent   float64       // % of all cores, Task-Manager style
+	memBytes     uint64        // working set
+	prevBusy     time.Duration // accumulated CPU time at the previous sample
+	prevSampleAt time.Time
+
+	// redimos /metrics scraping (filled by the scraper loop).
+	metricsAddr  string    // resolved reachable host:port ("" until discovered)
+	mtxOK        bool      // last scrape reached the endpoint
+	mtxHealthy   bool      // /healthz == 200
+	mtxReady     bool      // /readyz == 200
+	opsPerSec    float64   // rate of redimos_commands_total across the last interval
+	avgLatencyMs float64   // delta(duration_sum)/delta(duration_count) in ms
+	throttled    int64     // redimos_dynamodb_throttled_total (cumulative)
+	prevCmdTotal float64   // previous cumulative command count
+	prevDurSum   float64   // previous cumulative duration sum (seconds)
+	prevDurCount float64   // previous cumulative duration count
+	prevMtxAt    time.Time // timestamp of the previous successful scrape
 }
 
 func (in *instance) appendLog(line string) {
@@ -140,6 +171,7 @@ type manager struct {
 	st        store
 	running   map[string]*instance
 	storePath string
+	ddb       *instance // the Local DynamoDB child (nil until first start)
 }
 
 var mgr = newManager()
@@ -147,7 +179,66 @@ var mgr = newManager()
 func newManager() *manager {
 	m := &manager{running: map[string]*instance{}, storePath: defaultStorePath()}
 	m.load()
+	go m.samplerLoop()
+	go m.scraperLoop()
 	return m
+}
+
+// samplerLoop refreshes per-child CPU/memory stats every 2s so rm_status stays
+// a cheap cached read. Plain processes are sampled via the OS (procstats_*);
+// containerised children via `docker stats`. A restarted child (new pid)
+// resets its CPU baseline.
+func (m *manager) samplerLoop() {
+	numCPU := float64(runtime.NumCPU())
+	t := time.NewTicker(2 * time.Second)
+	for range t.C {
+		m.mu.Lock()
+		ins := make([]*instance, 0, len(m.running)+1)
+		for _, in := range m.running {
+			ins = append(ins, in)
+		}
+		if m.ddb != nil {
+			ins = append(ins, m.ddb)
+		}
+		m.mu.Unlock()
+		for _, in := range ins {
+			in.mu.Lock()
+			pid, running, cont := in.pid, in.status == "running", in.container
+			in.mu.Unlock()
+			if !running {
+				continue
+			}
+			if cont != "" {
+				cpu, mem, err := sampleContainer(in.bin, cont)
+				if err == nil {
+					in.mu.Lock()
+					in.cpuPercent, in.memBytes = cpu/numCPU, mem
+					in.mu.Unlock()
+				}
+				continue
+			}
+			if pid <= 0 {
+				continue
+			}
+			busy, mem, err := sampleProcess(pid)
+			now := time.Now()
+			in.mu.Lock()
+			if err != nil || in.pid != pid {
+				in.mu.Unlock()
+				continue
+			}
+			in.memBytes = mem
+			if !in.prevSampleAt.IsZero() && busy >= in.prevBusy {
+				wall := now.Sub(in.prevSampleAt)
+				if wall > 0 {
+					in.cpuPercent = float64(busy-in.prevBusy) / float64(wall) / numCPU * 100
+				}
+			}
+			in.prevBusy = busy
+			in.prevSampleAt = now
+			in.mu.Unlock()
+		}
+	}
 }
 
 func defaultStorePath() string {
@@ -212,10 +303,15 @@ func (m *manager) binaryFor(cfg *Config) (string, error) {
 	return p, nil
 }
 
-func (cfg *Config) args() []string {
+func (cfg *Config) args() []string { return cfg.argsFor(cfg.Endpoint, ":0") }
+
+// argsFor builds the redimos CLI flags. endpoint and metricsDefault are
+// parameters so the docker run-mode can rewrite the endpoint host (localhost ->
+// host.docker.internal) and pin metrics to a known container port.
+func (cfg *Config) argsFor(endpoint, metricsDefault string) []string {
 	a := []string{"-addr", fmt.Sprintf(":%d", cfg.Port), "-table", cfg.Table}
-	if strings.TrimSpace(cfg.Endpoint) != "" {
-		a = append(a, "-endpoint-url", cfg.Endpoint)
+	if strings.TrimSpace(endpoint) != "" {
+		a = append(a, "-endpoint-url", endpoint)
 	}
 	if strings.TrimSpace(cfg.PartitionID) != "" {
 		a = append(a, "-endpoint-partition-id", cfg.PartitionID)
@@ -254,7 +350,7 @@ func (cfg *Config) args() []string {
 	// one port and every instance after the first would fail to start, so
 	// auto-select a free port unless the user pinned one via an extra flag.
 	if !userMetrics {
-		a = append(a, "-metrics-addr", ":0")
+		a = append(a, "-metrics-addr", metricsDefault)
 	}
 	return a
 }
@@ -270,36 +366,18 @@ func (m *manager) start(id string) error {
 	if cfg == nil {
 		return fmt.Errorf("no config with id %s", id)
 	}
-	bin, err := m.binaryFor(cfg)
+	bin, args, env, container, err := m.buildLaunch(cfg)
 	if err != nil {
 		return err
-	}
-
-	env := os.Environ()
-	if cfg.AccessKeyID != "" {
-		env = append(env, "AWS_ACCESS_KEY_ID="+cfg.AccessKeyID)
-	}
-	if cfg.SecretKey != "" {
-		env = append(env, "AWS_SECRET_ACCESS_KEY="+cfg.SecretKey)
-	}
-	if cfg.SessionToken != "" {
-		env = append(env, "AWS_SESSION_TOKEN="+cfg.SessionToken)
-	}
-	if cfg.Region != "" {
-		env = append(env, "AWS_REGION="+cfg.Region, "AWS_DEFAULT_REGION="+cfg.Region)
-	}
-	// A local DynamoDB endpoint still needs *some* credentials for the SDK to
-	// sign requests; supply harmless dummies when the user left them blank.
-	if cfg.Endpoint != "" && cfg.AccessKeyID == "" {
-		env = append(env, "AWS_ACCESS_KEY_ID=local", "AWS_SECRET_ACCESS_KEY=local")
 	}
 
 	// A fresh user-initiated start: new instance with restart counters reset.
 	in := &instance{
 		port:        cfg.Port,
 		bin:         bin,
-		launchArgs:  cfg.args(),
+		launchArgs:  args,
 		launchEnv:   env,
+		container:   container,
 		autoRestart: cfg.AutoRestart,
 	}
 	m.running[id] = in
@@ -313,9 +391,97 @@ func (m *manager) start(id string) error {
 	return nil
 }
 
+// awsCredEnv returns AWS_* env entries in "K=V" form for a config.
+func (cfg *Config) awsCredEnv() []string {
+	var e []string
+	if cfg.AccessKeyID != "" {
+		e = append(e, "AWS_ACCESS_KEY_ID="+cfg.AccessKeyID)
+	}
+	if cfg.SecretKey != "" {
+		e = append(e, "AWS_SECRET_ACCESS_KEY="+cfg.SecretKey)
+	}
+	if cfg.SessionToken != "" {
+		e = append(e, "AWS_SESSION_TOKEN="+cfg.SessionToken)
+	}
+	if cfg.Region != "" {
+		e = append(e, "AWS_REGION="+cfg.Region, "AWS_DEFAULT_REGION="+cfg.Region)
+	}
+	// A local DynamoDB endpoint still needs *some* credentials for the SDK to
+	// sign requests; supply harmless dummies when the user left them blank.
+	if cfg.Endpoint != "" && cfg.AccessKeyID == "" {
+		e = append(e, "AWS_ACCESS_KEY_ID=local", "AWS_SECRET_ACCESS_KEY=local")
+	}
+	return e
+}
+
+// buildLaunch resolves how to run a config: bin + args + env, and a container
+// name when it runs in docker mode ("" for a plain process). Caller holds m.mu.
+func (m *manager) buildLaunch(cfg *Config) (bin string, args []string, env []string, container string, err error) {
+	if cfg.RunMode == "docker" {
+		return m.buildDockerLaunch(cfg)
+	}
+	bin, err = m.binaryFor(cfg)
+	if err != nil {
+		return "", nil, nil, "", err
+	}
+	return bin, cfg.args(), append(os.Environ(), cfg.awsCredEnv()...), "", nil
+}
+
+// dockerLocalhostRewrite rewrites a localhost endpoint to host.docker.internal
+// so a containerised redimos reaches services published on the host.
+func dockerLocalhostRewrite(endpoint string) string {
+	e := endpoint
+	e = strings.ReplaceAll(e, "127.0.0.1", "host.docker.internal")
+	e = strings.ReplaceAll(e, "localhost", "host.docker.internal")
+	return e
+}
+
+// buildDockerLaunch produces a `docker run` command line for a redimos config.
+// All container ports are published to the host: the RESP port 1:1, and the
+// metrics port (:9121 inside) to an OS-chosen host port read back later via
+// `docker port`. The DynamoDB endpoint's host is rewritten to
+// host.docker.internal, and AWS creds are passed through as container env.
+func (m *manager) buildDockerLaunch(cfg *Config) (string, []string, []string, string, error) {
+	docker, ok := dockerBin()
+	if !ok {
+		return "", nil, nil, "", fmt.Errorf("docker not available (install Docker Desktop, or use Native run mode)")
+	}
+	var image string
+	switch cfg.Version {
+	case "v1":
+		image = m.st.Settings.RedimosV1Image
+	case "v2":
+		image = m.st.Settings.RedimosV2Image
+	default:
+		return "", nil, nil, "", fmt.Errorf("config %q has unknown version %q", cfg.Name, cfg.Version)
+	}
+	if strings.TrimSpace(image) == "" {
+		image = "redimos-" + cfg.Version + ":local"
+	}
+	cname := "redimos-mgr-" + cfg.ID
+
+	run := []string{
+		"run", "--rm", "--name", cname,
+		"--add-host", "host.docker.internal:host-gateway",
+		"-p", fmt.Sprintf("%d:%d", cfg.Port, cfg.Port),
+		"-p", "127.0.0.1::9121",
+	}
+	for _, kv := range cfg.awsCredEnv() {
+		run = append(run, "-e", kv)
+	}
+	run = append(run, image)
+	run = append(run, cfg.argsFor(dockerLocalhostRewrite(cfg.Endpoint), ":9121")...)
+	return docker, run, os.Environ(), cname, nil
+}
+
 // spawn launches (or re-launches) the child from the captured spec and wires up
 // the log pumps plus the supervisor's exit watcher.
 func (in *instance) spawn() error {
+	if in.container != "" {
+		// A containerised child runs through a foreground `docker run --rm --name X`
+		// CLI, so the container may survive a dead CLI; clear any leftover first.
+		_ = exec.Command(in.bin, "rm", "-f", in.container).Run()
+	}
 	cmd := exec.Command(in.bin, in.launchArgs...)
 	cmd.Env = in.launchEnv
 	stdout, _ := cmd.StdoutPipe()
@@ -328,6 +494,15 @@ func (in *instance) spawn() error {
 	in.pid = cmd.Process.Pid
 	in.started = time.Now()
 	in.status = "running"
+	in.prevBusy = 0
+	in.prevSampleAt = time.Time{} // fresh pid → fresh CPU baseline
+	in.cpuPercent = 0
+	// Fresh listener → rediscover the metrics endpoint (docker maps a new host
+	// port each run; native -metrics-addr :0 auto-picks a new port too).
+	in.metricsAddr = ""
+	in.mtxOK, in.mtxHealthy, in.mtxReady = false, false, false
+	in.opsPerSec, in.avgLatencyMs, in.throttled = 0, 0, 0
+	in.prevMtxAt = time.Time{}
 	in.appendLogLocked(fmt.Sprintf("$ %s %s", in.bin, strings.Join(in.launchArgs, " ")))
 	in.mu.Unlock()
 
@@ -416,17 +591,29 @@ func (m *manager) stop(id string) error {
 	if !ok {
 		return fmt.Errorf("not running")
 	}
+	in.terminate()
+	return nil
+}
+
+// terminate stops a child for good: marks the stop as intended (suppressing the
+// supervisor), removes the container for containerised children, and kills the
+// process. Safe to call in any state.
+func (in *instance) terminate() {
 	in.mu.Lock()
-	in.intendedStop = true // suppress supervisor auto-restart
+	in.intendedStop = true
 	proc := in.cmd
-	if in.status == "restarting" {
-		in.status = "stopped" // in backoff, no live process to kill
+	cont := in.container
+	bin := in.bin
+	if in.status == "restarting" || in.status == "preparing" {
+		in.status = "stopped" // no live process right now
 	}
 	in.mu.Unlock()
-	if proc != nil && proc.Process != nil {
+	if cont != "" {
+		// Removing the container makes the foreground docker CLI exit on its own.
+		_ = exec.Command(bin, "rm", "-f", cont).Run()
+	} else if proc != nil && proc.Process != nil {
 		_ = proc.Process.Kill()
 	}
-	return nil
 }
 
 func (m *manager) stopAll() {
@@ -442,14 +629,25 @@ func (m *manager) stopAll() {
 }
 
 type statusRow struct {
-	ID          string `json:"id"`
-	Status      string `json:"status"` // running|restarting|stopped|error|failed
-	PID         int    `json:"pid"`
-	Port        int    `json:"port"`
-	UptimeSec   int64  `json:"uptimeSec"`
-	ExitMsg     string `json:"exitMsg"`
-	Restarts    int    `json:"restarts"`
-	AutoRestart bool   `json:"autoRestart"`
+	ID          string  `json:"id"`
+	Status      string  `json:"status"` // running|restarting|stopped|error|failed
+	PID         int     `json:"pid"`
+	Port        int     `json:"port"`
+	UptimeSec   int64   `json:"uptimeSec"`
+	ExitMsg     string  `json:"exitMsg"`
+	Restarts    int     `json:"restarts"`
+	AutoRestart bool    `json:"autoRestart"`
+	CPUPercent  float64 `json:"cpuPercent"`
+	MemBytes    int64   `json:"memBytes"`
+	RunMode     string  `json:"runMode"` // "native" | "docker"
+
+	// redimos /metrics-derived fields (zero/false until the first scrape).
+	MetricsOK    bool    `json:"metricsOk"`    // scrape reached the endpoint
+	Healthy      bool    `json:"healthy"`      // /healthz == 200
+	Ready        bool    `json:"ready"`        // /readyz == 200
+	OpsPerSec    float64 `json:"opsPerSec"`    // command rate over the last interval
+	AvgLatencyMs float64 `json:"avgLatencyMs"` // average command latency (ms)
+	Throttled    int64   `json:"throttled"`    // cumulative DynamoDB throttles
 }
 
 func (m *manager) statuses() []statusRow {
@@ -457,7 +655,11 @@ func (m *manager) statuses() []statusRow {
 	defer m.mu.Unlock()
 	rows := make([]statusRow, 0, len(m.st.Configs))
 	for _, cfg := range m.st.Configs {
-		r := statusRow{ID: cfg.ID, Status: "stopped", Port: cfg.Port, AutoRestart: cfg.AutoRestart}
+		runMode := cfg.RunMode
+		if runMode == "" {
+			runMode = "native"
+		}
+		r := statusRow{ID: cfg.ID, Status: "stopped", Port: cfg.Port, AutoRestart: cfg.AutoRestart, RunMode: runMode}
 		if in, ok := m.running[cfg.ID]; ok {
 			in.mu.Lock()
 			r.Status = in.status
@@ -466,8 +668,19 @@ func (m *manager) statuses() []statusRow {
 			r.ExitMsg = in.exitMsg
 			r.Restarts = in.restarts
 			r.AutoRestart = in.autoRestart
+			if in.container != "" {
+				r.RunMode = "docker"
+			}
 			if in.status == "running" {
 				r.UptimeSec = int64(time.Since(in.started).Seconds())
+				r.CPUPercent = in.cpuPercent
+				r.MemBytes = int64(in.memBytes)
+				r.MetricsOK = in.mtxOK
+				r.Healthy = in.mtxHealthy
+				r.Ready = in.mtxReady
+				r.OpsPerSec = in.opsPerSec
+				r.AvgLatencyMs = in.avgLatencyMs
+				r.Throttled = in.throttled
 			}
 			in.mu.Unlock()
 		}

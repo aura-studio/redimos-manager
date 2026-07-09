@@ -10,9 +10,9 @@
 |---|---|
 | Auto-restart 默认 | **On**("监控它不挂掉"是本意;人为 Stop 不触发,崩溃循环有上限保护) |
 | 监控面板位置 | detail 区里和 `logs` 并列的**可折叠 `monitor` 条** |
-| redimos Docker 镜像 | Settings 里填镜像名/tag(每版一个),默认 `redimos-v1:local` / `redimos-v2:local`;manager 不自动 build |
-| 监控深度 | 先做**进程级**(CPU/内存/存活/重启,gopsutil);redimos `/metrics`(ops/延迟/throttle)第二步 |
-| gopsutil 依赖 | 采用(跨平台取 CPU/内存最干净) |
+| redimos Docker 镜像 | Settings 里填镜像名/tag(每版一个),默认 `redimos-v1:local` / `redimos-v2:local`;manager 不自动 build,用 `scripts/build-images.sh`(mac/linux)或 `scripts/build-images.ps1`(Windows)一键构建两镜像 |
+| 监控深度 | ✅ 进程级(CPU/内存/存活/重启)+ ✅ redimos `/metrics`(ops/延迟/throttle/健康)均已落地 |
+| 进程指标实现 | 标准库 + 平台系统调用(`procstats_darwin.go` 用 libproc、`procstats_windows.go` 用 psapi);容器走 `docker stats`。**未用 gopsutil**(避免额外依赖) |
 | Java 组件获取 | **自动下载**官方 DynamoDBLocal 包并缓存本地 + Settings 可手填路径覆盖 |
 | Local DynamoDB 默认引擎 | 有 Docker → `dynamodb-local · In-memory`;否则 → `Java · In-memory` |
 | Docker 网络 | 一律 `-p` 把端口发布到 host;容器间/容器→宿主服务全走 `host.docker.internal:<发布口>`(不碰 `--network host`) |
@@ -72,8 +72,8 @@ detail 区里和 `logs` 并列的可折叠 `monitor` 条。
 
 | 层 | 指标 | 来源 |
 |---|---|---|
-| 进程级(所有子进程) | CPU% / 内存 / 存活 / 重启数 | gopsutil 采 PID;Docker 子进程走 `docker stats` |
-| redimos 专属 | 健康、连接数、ops/s、DDB throttle、p99 | redimos `/healthz`+`/readyz`+`/metrics`(端口从启动日志 `metrics=[::]:PORT` 抓) |
+| 进程级(所有子进程) | CPU% / 内存 / 存活 / 重启数 | 系统调用采 PID(procstats_*);Docker 子进程走 `docker stats` |
+| redimos 专属 | 健康(healthy/ready)、ops/s、平均延迟、DDB throttle | redimos `/healthz`+`/readyz`+`/metrics`(native 端口从启动日志 `metrics=[::]:PORT` 抓;docker 用 `docker port` 回读)。⚠️**无连接数指标**(redimos 未导出),故不展示 |
 
 侧栏每行加健康色 + mini CPU/内存 + 重启计数;`Failed` 置红。
 
@@ -95,13 +95,20 @@ Native 和 Docker 两套统一到一个 `childProcess` 抽象,只是底层实现
 
 ## 实施阶段
 
-1. **Supervisor**(auto-restart + 退避 + 崩溃循环保护 + 状态暴露 + UI 开关)← 先做
-2. **进程级监控**(gopsutil:CPU/内存/uptime/重启 → `monitor` 折叠面板 + 侧栏 mini)
-3. **Local DynamoDB 控件**(5 种启动方式;Engine/Storage/端口/落盘;Java 自动下载;Docker 容器)
-4. **redimos Run mode = Docker**(容器化 redimos + 端口/网络改写 + metrics 端口回读)
-5. **redimos /metrics 抓取**(ops/延迟/throttle/连接数 → 监控面板 sparkline)
+1. ✅ **Supervisor**(auto-restart + 退避 + 崩溃循环保护 + 状态暴露 + UI 开关)
+2. ✅ **进程级监控**(标准库 procstats:CPU/内存/uptime/重启 → `monitor` 折叠面板 + 侧栏 mini)
+3. ✅ **Local DynamoDB 控件**(5 种启动方式;Engine/Storage/端口/落盘;Java 自动下载;Docker 容器)
+   — 5 法(java/mem、java/persist、docker/mem、docker/persist、localstack)ctypes 实测全绿。
+4. ✅ **redimos Run mode = Docker**(容器化 redimos + 端口/网络改写 + metrics 端口回读)
+   — `redimos-v1:local`/`redimos-v2:local` 镜像 + endpoint→`host.docker.internal` 改写 + RESP 往返 + supervisor 重启容器,全绿。
+5. ✅ **redimos /metrics 抓取**(ops/延迟/throttle/**健康** → 监控面板 sparkline+tiles)
+   — native 从启动日志 `metrics=[::]:PORT` 抓端口;docker 用 `docker port` 回读;ops/s、avgLatency、throttled、healthy/ready 双模式实测全绿。
 
-每阶段:改 Go core(`native/`)→ 重建 DLL(docker+mingw)→ 改 UI(`lib/`)→ 重建 app → 实测验证。
+每阶段:改 Go core(`native/`)→ 重建库(mac 原生 dylib / Windows docker+mingw DLL)→ 改 UI(`lib/`)→ ctypes 实测(Go 面)→ Windows Flutter 构建(Dart 面)。
+
+## 已知限制
+- **连接数(connection count)无对应指标**:redimos `/metrics` 不导出连接计数,故监控面板不展示;可用指标只有 `redimos_commands_total`(ops)、`redimos_command_duration_seconds`(延迟直方图)、`redimos_dynamodb_throttled_total`(throttle)。若确需连接数,须在 redimos 侧新增指标。
+- Dart UI 只能在 Windows(装 Flutter)侧构建验证;mac 无 Flutter/Xcode,只跑 Go 面 ctypes 实测 + dylib 构建。
 
 ## 开放项
 - 崩溃循环阈值(默认 30s 内 5 次)是否可配。
