@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -9,11 +10,38 @@ import 'src/models.dart';
 import 'src/native.dart';
 
 void main() {
+  _loadThemeMode();
   runApp(const RedimosManagerApp());
 }
 
 /// App-wide light/dark selection, toggled from the app bar.
 final ValueNotifier<ThemeMode> appThemeMode = ValueNotifier(ThemeMode.dark);
+
+// The theme choice is persisted next to the Go core's store, in ~/.redimos/theme.
+File? _themeFile() {
+  final home = Platform.environment['HOME'] ?? Platform.environment['USERPROFILE'];
+  if (home == null || home.isEmpty) return null;
+  return File('$home${Platform.pathSeparator}.redimos${Platform.pathSeparator}theme');
+}
+
+void _loadThemeMode() {
+  try {
+    final f = _themeFile();
+    if (f != null && f.existsSync()) {
+      appThemeMode.value =
+          f.readAsStringSync().trim() == 'light' ? ThemeMode.light : ThemeMode.dark;
+    }
+  } catch (_) {}
+}
+
+void _saveThemeMode(ThemeMode m) {
+  try {
+    final f = _themeFile();
+    if (f == null) return;
+    f.parent.createSync(recursive: true);
+    f.writeAsStringSync(m == ThemeMode.light ? 'light' : 'dark');
+  } catch (_) {}
+}
 
 ThemeData _appTheme(Brightness b) => ThemeData(
       useMaterial3: true,
@@ -270,8 +298,11 @@ class _HomePageState extends State<HomePage> {
             icon: Icon(appThemeMode.value == ThemeMode.dark
                 ? Icons.light_mode_outlined
                 : Icons.dark_mode_outlined),
-            onPressed: () => appThemeMode.value =
-                appThemeMode.value == ThemeMode.dark ? ThemeMode.light : ThemeMode.dark,
+            onPressed: () {
+              appThemeMode.value =
+                  appThemeMode.value == ThemeMode.dark ? ThemeMode.light : ThemeMode.dark;
+              _saveThemeMode(appThemeMode.value);
+            },
           ),
           IconButton(
             tooltip: 'Stop all',
@@ -974,21 +1005,23 @@ class _LogsViewState extends State<LogsView> {
         ? _lines.sublist(_lines.length - maxTail)
         : _lines;
     if (widget.embedded) {
+      final scheme = Theme.of(context).colorScheme;
       return Container(
-        color: Colors.black,
+        color: scheme.surfaceContainerLowest,
         padding: const EdgeInsets.all(12),
         alignment: Alignment.topLeft,
         child: tail.isEmpty
-            ? const Text('(no output)', style: TextStyle(color: Colors.grey))
+            ? Text('(no output)',
+                style: TextStyle(color: Theme.of(context).textTheme.bodySmall?.color))
             : SingleChildScrollView(
                 controller: _scroll,
                 child: SelectableText(
                   tail.join('\n'),
-                  style: const TextStyle(
+                  style: TextStyle(
                       fontFamily: 'monospace',
                       fontSize: 12,
                       height: 1.4,
-                      color: Color(0xFFC8E1CB)),
+                      color: scheme.onSurface),
                 ),
               ),
       );
@@ -1348,6 +1381,7 @@ class _LocalDdbPanelState extends State<LocalDdbPanel> {
   final _port = TextEditingController();
   final _store = TextEditingController(); // volume (docker) / dataDir (java)
   bool _seeded = false;
+  bool _expanded = false; // collapsed by default → just the status line
 
   @override
   void dispose() {
@@ -1483,30 +1517,56 @@ class _LocalDdbPanelState extends State<LocalDdbPanel> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         mainAxisSize: MainAxisSize.min,
         children: [
-          Row(children: [
-            Container(
-              width: 10,
-              height: 10,
-              decoration: BoxDecoration(color: dotColor, shape: BoxShape.circle),
-            ),
-            const SizedBox(width: 8),
-            const Text('Local DynamoDB',
-                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
-            const Spacer(),
-            Text(
-              active && status == 'running'
-                  ? '$pillText · :${cfg.port}'
-                      '${info!.restarts > 0 ? " · ↻${info.restarts}" : ""}'
-                  : pillText,
-              style: const TextStyle(fontSize: 11, color: Colors.grey),
-            ),
-            IconButton(
-              tooltip: 'Logs',
-              visualDensity: VisualDensity.compact,
-              icon: const Icon(Icons.terminal, size: 16),
-              onPressed: _showLogs,
-            ),
-          ]),
+          InkWell(
+            onTap: () => setState(() => _expanded = !_expanded),
+            child: Row(children: [
+              Icon(_expanded ? Icons.expand_less : Icons.expand_more,
+                  size: 18, color: Colors.grey),
+              const SizedBox(width: 4),
+              Container(
+                width: 10,
+                height: 10,
+                decoration: BoxDecoration(color: dotColor, shape: BoxShape.circle),
+              ),
+              const SizedBox(width: 8),
+              const Text('Local DynamoDB',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
+              const Spacer(),
+              Text(
+                active && status == 'running'
+                    ? '$pillText · :${cfg.port}'
+                        '${info!.restarts > 0 ? " · ↻${info.restarts}" : ""}'
+                    : pillText,
+                style: const TextStyle(fontSize: 11, color: Colors.grey),
+              ),
+              if (_expanded)
+                IconButton(
+                  tooltip: 'Logs',
+                  visualDensity: VisualDensity.compact,
+                  icon: const Icon(Icons.terminal, size: 16),
+                  onPressed: _showLogs,
+                )
+              else
+                IconButton(
+                  tooltip: active ? 'Stop' : 'Start',
+                  visualDensity: VisualDensity.compact,
+                  icon: Icon(active ? Icons.stop : Icons.play_arrow,
+                      size: 18, color: active ? Colors.redAccent : Colors.greenAccent),
+                  onPressed: () => _startStop(active),
+                ),
+            ]),
+          ),
+          // Slide the body open/closed instead of snapping.
+          AnimatedSize(
+            duration: const Duration(milliseconds: 180),
+            curve: Curves.easeInOut,
+            alignment: Alignment.topCenter,
+            child: !_expanded
+                ? const SizedBox(width: double.infinity)
+                : Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
           if (!active) ...[
             const SizedBox(height: 6),
             DropdownButtonFormField<String>(
@@ -1622,6 +1682,9 @@ class _LocalDdbPanelState extends State<LocalDdbPanel> {
               ),
             ],
           ]),
+                    ],
+                  ),
+          ),
         ],
       ),
     );
