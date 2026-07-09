@@ -25,6 +25,12 @@ class MainFlutterWindow: NSWindow {
     RegisterGeneratedPlugins(registry: flutterViewController)
     super.awakeFromNib()
 
+    // Human-readable window title. Deferred to the next runloop turn because the
+    // launch sequence sets the title to the bundle name (redimos_manager) after
+    // awakeFromNib; setting it async lets ours win.
+    self.title = "Redimos Manager"
+    DispatchQueue.main.async { [weak self] in self?.title = "Redimos Manager" }
+
     // Force the window visible + frontmost. Under some launch contexts the
     // storyboard's "visible at launch" doesn't order the window front, leaving
     // a running app with no on-screen window.

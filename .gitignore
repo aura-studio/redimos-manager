@@ -28,3 +28,6 @@ bin/
 
 # packaged release artifacts (scripts/build.ps1)
 dist/
+
+# DynamoDB Local shared-db artifact (created when the java engine runs)
+dynamodb-local-metadata.json

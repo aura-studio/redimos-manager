@@ -115,6 +115,47 @@ class _LogoPainter extends CustomPainter {
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
+/// Stylised "Redimos Manager" logotype: the geometric Righteous display face,
+/// its glyphs filled with a blue→cyan→green gradient echoing the logo, over a
+/// soft blue glow. "Manager" is tracked wider and slightly dimmed so the two
+/// words read as a mark rather than plain text.
+class _Wordmark extends StatelessWidget {
+  const _Wordmark();
+
+  @override
+  Widget build(BuildContext context) {
+    const glow = [
+      Shadow(color: Color(0x555FA8E8), blurRadius: 12),
+      Shadow(color: Color(0x3346D38A), blurRadius: 18),
+    ];
+    return ShaderMask(
+      blendMode: BlendMode.srcIn,
+      shaderCallback: (rect) => const LinearGradient(
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+        colors: [Color(0xFF8FC6FF), Color(0xFF5A93D4), Color(0xFF33C1D6), Color(0xFF46D38A)],
+        stops: [0.0, 0.4, 0.72, 1.0],
+      ).createShader(rect),
+      child: const Text.rich(
+        TextSpan(children: [
+          TextSpan(text: 'Redimos', style: TextStyle(letterSpacing: 0.5)),
+          TextSpan(
+            text: '  Manager',
+            style: TextStyle(letterSpacing: 2.0, color: Color(0xCCFFFFFF)),
+          ),
+        ]),
+        style: TextStyle(
+          fontFamily: 'Righteous',
+          fontSize: 22,
+          height: 1.0,
+          color: Colors.white,
+          shadows: glow,
+        ),
+      ),
+    );
+  }
+}
+
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
   @override
@@ -290,7 +331,7 @@ class _HomePageState extends State<HomePage> {
         title: const Row(mainAxisSize: MainAxisSize.min, children: [
           RedimosLogo(size: 26),
           SizedBox(width: 11),
-          Text('Redimos Manager'),
+          _Wordmark(),
         ]),
         actions: [
           IconButton(
