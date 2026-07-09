@@ -466,7 +466,7 @@ class _HomePageState extends State<HomePage> {
         trailing: IconButton(
           tooltip: active ? 'Stop' : 'Start',
           icon: Icon(active ? Icons.stop : Icons.play_arrow,
-              color: active ? Colors.redAccent : Colors.greenAccent),
+              color: active ? Colors.redAccent : goGreen(context)),
           onPressed: () => _startStop(c),
         ),
         onTap: () => setState(() => _selectedId = c.id),
@@ -476,7 +476,7 @@ class _HomePageState extends State<HomePage> {
 
   Widget _statusDot(String status) {
     final color = switch (status) {
-      'running' => Colors.greenAccent,
+      'running' => goGreen(context),
       'restarting' => Colors.amberAccent,
       'error' => Colors.redAccent,
       'failed' => Colors.redAccent,
@@ -1293,6 +1293,12 @@ class MonitorView extends StatelessWidget {
   }
 }
 
+// The "running / start" green. greenAccent is bright on dark surfaces but too
+// pale on a light background, so use a deeper green there.
+Color goGreen(BuildContext context) => Theme.of(context).brightness == Brightness.dark
+    ? Colors.greenAccent
+    : const Color(0xFF12994F);
+
 Color _tileColor(BuildContext context) =>
     Theme.of(context).colorScheme.surfaceContainerHighest;
 Color? _tileLabelColor(BuildContext context) =>
@@ -1511,8 +1517,8 @@ class _LocalDdbPanelState extends State<LocalDdbPanel> {
     );
   }
 
-  (Color, String) _pill(String status) => switch (status) {
-        'running' => (Colors.greenAccent, 'Running'),
+  (Color, String) _pill(BuildContext context, String status) => switch (status) {
+        'running' => (goGreen(context), 'Running'),
         'preparing' => (Colors.amberAccent, 'Preparing…'),
         'restarting' => (Colors.amberAccent, 'Restarting…'),
         'error' => (Colors.redAccent, 'Error'),
@@ -1527,7 +1533,7 @@ class _LocalDdbPanelState extends State<LocalDdbPanel> {
     final cfg = _cfg;
     final status = info?.status ?? 'stopped';
     final active = info?.isActive ?? false;
-    final (dotColor, pillText) = _pill(status);
+    final (dotColor, pillText) = _pill(context, status);
     final dockerOk = info?.dockerOk ?? false;
     final javaOk = info?.javaOk ?? false;
 
@@ -1592,7 +1598,7 @@ class _LocalDdbPanelState extends State<LocalDdbPanel> {
                   tooltip: active ? 'Stop' : 'Start',
                   visualDensity: VisualDensity.compact,
                   icon: Icon(active ? Icons.stop : Icons.play_arrow,
-                      size: 18, color: active ? Colors.redAccent : Colors.greenAccent),
+                      size: 18, color: active ? Colors.redAccent : goGreen(context)),
                   onPressed: () => _startStop(active),
                 ),
             ]),
