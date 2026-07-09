@@ -1,0 +1,127 @@
+import 'dart:convert';
+import 'dart:ffi';
+import 'dart:io';
+
+import 'package:ffi/ffi.dart';
+
+import 'models.dart';
+
+// C signatures: every function returns a heap char* (freed via rm_free);
+// the mutating ones take a single UTF-8 char* argument.
+typedef _StrNativeFn = Pointer<Utf8> Function();
+typedef _StrDartFn = Pointer<Utf8> Function();
+typedef _StrArgNativeFn = Pointer<Utf8> Function(Pointer<Utf8>);
+typedef _StrArgDartFn = Pointer<Utf8> Function(Pointer<Utf8>);
+typedef _FreeNativeFn = Void Function(Pointer<Utf8>);
+typedef _FreeDartFn = void Function(Pointer<Utf8>);
+
+/// Thin Dart wrapper over the Go core dynamic library. All state (configs,
+/// child processes) lives in Go; this just marshals JSON across the boundary.
+class NativeCore {
+  late final DynamicLibrary _lib;
+  late final _StrDartFn _version, _load, _status, _stopAll;
+  late final _StrArgDartFn _saveConfig, _deleteConfig, _setSettings, _start, _stop, _logs;
+  late final _FreeDartFn _free;
+
+  NativeCore() {
+    _lib = DynamicLibrary.open(_resolveLibraryPath());
+    _version = _lib.lookupFunction<_StrNativeFn, _StrDartFn>('rm_version');
+    _load = _lib.lookupFunction<_StrNativeFn, _StrDartFn>('rm_load');
+    _status = _lib.lookupFunction<_StrNativeFn, _StrDartFn>('rm_status');
+    _stopAll = _lib.lookupFunction<_StrNativeFn, _StrDartFn>('rm_stop_all');
+    _saveConfig = _lib.lookupFunction<_StrArgNativeFn, _StrArgDartFn>('rm_save_config');
+    _deleteConfig = _lib.lookupFunction<_StrArgNativeFn, _StrArgDartFn>('rm_delete_config');
+    _setSettings = _lib.lookupFunction<_StrArgNativeFn, _StrArgDartFn>('rm_set_settings');
+    _start = _lib.lookupFunction<_StrArgNativeFn, _StrArgDartFn>('rm_start');
+    _stop = _lib.lookupFunction<_StrArgNativeFn, _StrArgDartFn>('rm_stop');
+    _logs = _lib.lookupFunction<_StrArgNativeFn, _StrArgDartFn>('rm_logs');
+    _free = _lib.lookupFunction<_FreeNativeFn, _FreeDartFn>('rm_free');
+  }
+
+  static String _resolveLibraryPath() {
+    final base = _libBaseName();
+    // 1) next to the executable (the bundled location — see build_native script)
+    final exeDir = File(Platform.resolvedExecutable).parent.path;
+    final beside = '$exeDir${Platform.pathSeparator}$base';
+    if (File(beside).existsSync()) return beside;
+    // 2) an override for `flutter run` dev loops
+    final env = Platform.environment['REDIMOS_CORE_LIB'];
+    if (env != null && env.isNotEmpty && File(env).existsSync()) return env;
+    // 3) let the loader search (PATH / cwd)
+    return base;
+  }
+
+  static String _libBaseName() {
+    if (Platform.isWindows) return 'redimos_core.dll';
+    if (Platform.isMacOS) return 'redimos_core.dylib';
+    return 'redimos_core.so';
+  }
+
+  // ---- raw call helpers ----
+  String _call0(_StrDartFn fn) {
+    final p = fn();
+    final s = p.toDartString();
+    _free(p);
+    return s;
+  }
+
+  String _call1(_StrArgDartFn fn, String arg) {
+    final a = arg.toNativeUtf8();
+    try {
+      final p = fn(a);
+      final s = p.toDartString();
+      _free(p);
+      return s;
+    } finally {
+      malloc.free(a);
+    }
+  }
+
+  // ---- typed API ----
+  String version() => _call0(_version);
+
+  ({List<RedimosConfig> configs, Settings settings}) load() {
+    final j = jsonDecode(_call0(_load)) as Map<String, dynamic>;
+    final configs = ((j['configs'] as List?) ?? [])
+        .map((e) => RedimosConfig.fromJson(e as Map<String, dynamic>))
+        .toList();
+    final settings =
+        Settings.fromJson((j['settings'] as Map<String, dynamic>?) ?? {});
+    return (configs: configs, settings: settings);
+  }
+
+  Map<String, InstanceStatus> status() {
+    final list = jsonDecode(_call0(_status)) as List;
+    final out = <String, InstanceStatus>{};
+    for (final e in list) {
+      final s = InstanceStatus.fromJson(e as Map<String, dynamic>);
+      out[s.id] = s;
+    }
+    return out;
+  }
+
+  /// Returns the saved config id, or throws with the core's error message.
+  String saveConfig(RedimosConfig c) {
+    final r = jsonDecode(_call1(_saveConfig, jsonEncode(c.toJson())))
+        as Map<String, dynamic>;
+    if (r['ok'] != true) throw StateError(r['error']?.toString() ?? 'save failed');
+    return (r['id'] ?? c.id) as String;
+  }
+
+  void deleteConfig(String id) => _expectOk(_call1(_deleteConfig, id));
+  void setSettings(Settings s) =>
+      _expectOk(_call1(_setSettings, jsonEncode(s.toJson())));
+  void start(String id) => _expectOk(_call1(_start, id));
+  void stop(String id) => _expectOk(_call1(_stop, id));
+  void stopAll() => _call0(_stopAll);
+
+  List<String> logs(String id) {
+    final j = jsonDecode(_call1(_logs, id)) as Map<String, dynamic>;
+    return ((j['lines'] as List?) ?? []).map((e) => e.toString()).toList();
+  }
+
+  void _expectOk(String raw) {
+    final r = jsonDecode(raw) as Map<String, dynamic>;
+    if (r['ok'] != true) throw StateError(r['error']?.toString() ?? 'call failed');
+  }
+}

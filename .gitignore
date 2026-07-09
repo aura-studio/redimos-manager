@@ -1,0 +1,30 @@
+# Flutter / Dart
+.dart_tool/
+.packages
+.pub-cache/
+.pub/
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+*.iml
+.idea/
+.vscode/
+
+# Native build artifacts (produced by scripts/build_native.ps1)
+redimos_core.dll
+redimos_core.so
+redimos_core.dylib
+native/redimos_core.dll
+native/redimos_core.h
+native/redimos_core.so
+native/redimos_core.dylib
+
+# OS
+.DS_Store
+Thumbs.db
+
+# built redimos binaries
+bin/
+
+# packaged release artifacts (scripts/build.ps1)
+dist/

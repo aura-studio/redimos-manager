@@ -1,0 +1,16 @@
+<svg width="256" height="256" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="badge" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#5A93D4"/>
+      <stop offset="1" stop-color="#2C5B91"/>
+    </linearGradient>
+  </defs>
+  <!-- badge -->
+  <rect x="8" y="8" width="240" height="240" rx="60" fill="url(#badge)"/>
+  <!-- hexagon: a nod to the DynamoDB store -->
+  <polygon points="128,48 197.28,88 197.28,168 128,208 58.72,168 58.72,88" fill="#FFFFFF"/>
+  <!-- the RESP / db0 "wire" through the store -->
+  <rect x="66" y="116" width="124" height="24" rx="12" fill="#3A6AA6"/>
+  <!-- green live-dot (running-instance status colour) -->
+  <circle cx="176" cy="128" r="12" fill="#46D38A"/>
+</svg>
