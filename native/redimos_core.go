@@ -395,6 +395,13 @@ func (m *manager) start(id string) error {
 		autoRestart: cfg.AutoRestart,
 	}
 	m.running[id] = in
+	// A native redimos we started in a prior session may have outlived an
+	// ungraceful app exit and still hold this port; reap our own straggler so the
+	// fresh child can bind instead of crash-looping on "address already in use".
+	// Only matches our own binary path, so a real Redis on the same port is safe.
+	if container == "" {
+		reapStalePort(cfg.Port, bin)
+	}
 	if err := in.spawn(); err != nil {
 		in.mu.Lock()
 		in.status = "error"

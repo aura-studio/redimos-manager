@@ -458,7 +458,7 @@ func (m *manager) ddbStart() error {
 			// this port (a child survives an ungraceful app exit). Reap our own
 			// straggler first so the fresh child can bind instead of crash-looping
 			// on "address already in use".
-			reapStaleDdbJava(cfg.Port, jarPath)
+			reapStalePort(cfg.Port, jarPath)
 			if err := ensureDdbJar(in, dir); err != nil {
 				in.mu.Lock()
 				if !in.intendedStop {
@@ -489,15 +489,19 @@ func (m *manager) ddbStart() error {
 	}
 }
 
-// reapStaleDdbJava kills any process listening on `port` whose command line
-// references our managed `jarPath` — i.e. a DynamoDBLocal we launched in a prior
-// session that outlived an ungraceful app exit. It only ever kills processes
-// matching our own jar path, so it can't touch unrelated apps that happen to use
-// the same port. Best-effort: any failure is ignored (the caller falls back to
-// the normal spawn/supervisor path). No-op on platforms without lsof/ps.
-func reapStaleDdbJava(port int, jarPath string) {
+// reapStalePort kills any process listening on `port` whose command line
+// references `match` — i.e. one of our own children (a redimos binary or the
+// DynamoDBLocal jar) launched in a prior session that outlived an ungraceful app
+// exit and is still holding the port. Matching on our own path means it can't
+// touch unrelated apps that happen to use the same port (e.g. a real Redis on
+// 6379). Best-effort: any failure is ignored (the caller falls back to the
+// normal spawn/supervisor path). No-op on platforms without lsof/ps.
+func reapStalePort(port int, match string) {
 	if runtime.GOOS == "windows" {
 		return // no lsof; the port-in-use case is handled by the supervisor guard
+	}
+	if match == "" {
+		return
 	}
 	out, err := exec.Command("lsof", "-nP", "-iTCP:"+strconv.Itoa(port), "-sTCP:LISTEN", "-t").Output()
 	if err != nil {
@@ -509,7 +513,7 @@ func reapStaleDdbJava(port int, jarPath string) {
 			continue
 		}
 		cmd, cerr := exec.Command("ps", "-o", "command=", "-p", line).Output()
-		if cerr != nil || !strings.Contains(string(cmd), jarPath) {
+		if cerr != nil || !strings.Contains(string(cmd), match) {
 			continue // not ours — leave it alone
 		}
 		if proc, ferr := os.FindProcess(pid); ferr == nil {
