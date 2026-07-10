@@ -932,12 +932,16 @@ class _ConfigEditorState extends State<ConfigEditor> {
   Widget build(BuildContext context) {
     return LayoutBuilder(builder: (context, cons) {
       final w = cons.maxWidth.isFinite ? cons.maxWidth : 880.0;
-      // Cap the form width so fields don't stretch absurdly wide on a large
-      // Responsive: the form takes ~55% of the pane (so it grows a bit in full
-      // screen and stays compact at the initial size), left-aligned, clamped to
-      // a sane range that keeps each row's field + 3 controls readable.
-      final cw = (w * 0.55).clamp(700.0, 960.0).toDouble();
-      const dropW = 140.0; // one width for every inline dropdown (and Port)
+      // Fill the whole config pane, and size everything as a PROPORTION of it so
+      // the form scales uniformly with the window (initial size and full screen
+      // look identical, just bigger/smaller). Subtract the 16px horizontal
+      // padding on each side of the scroll view so the row width matches the
+      // real content area — otherwise the trailing column overflows the pane and
+      // clips at the window edge.
+      final cw = (w - 32).clamp(360.0, 6000.0).toDouble();
+      // Each inline dropdown (and Port) is a fixed fraction of the row so the
+      // columns keep their ratio at any width.
+      final dropW = ((cw - 36) * 0.13).clamp(110.0, 400.0).toDouble();
       // Auth / Table / Url / AccessKeyID / SessionToken share one leading-field
       // width so every left-column field lines up on both edges; each row's
       // trailing controls fill the rest and flush right.
