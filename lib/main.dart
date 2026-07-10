@@ -1002,7 +1002,7 @@ class _ConfigEditorState extends State<ConfigEditor> {
               child: DropdownButtonFormField<String>(
                 initialValue: _runMode,
                 isDense: true,
-                decoration: _dd('RunMode'),
+                decoration: _dd('Engine'),
                 items: const [
                   DropdownMenuItem(value: 'native', child: Text('Native')),
                   DropdownMenuItem(value: 'docker', child: Text('Docker')),
@@ -1469,7 +1469,7 @@ class MonitorView extends StatelessWidget {
         _InfoTile(label: 'Restarts', value: '${st?.restarts ?? 0}'),
         _InfoTile(label: 'Port', value: running ? '${st!.port}' : '—'),
         _InfoTile(
-            label: 'Run mode',
+            label: 'Engine',
             value: (st?.runMode ?? 'native') == 'docker' ? 'Docker' : 'Native'),
         _InfoTile(
             label: 'Auto-restart',
@@ -1564,7 +1564,7 @@ class MonitorView extends StatelessWidget {
           // and the port is the more useful thing to see here anyway.
           _InfoTile(label: 'Port', value: running ? '${st!.port}' : '—'),
           _InfoTile(
-              label: 'RunMode',
+              label: 'Engine',
               value: (st?.runMode ?? 'native') == 'docker' ? 'Docker' : 'Native'),
         ]),
         if (ddb != null) _ddbSection(context, ddb!),
@@ -1611,17 +1611,21 @@ class MonitorView extends StatelessWidget {
         ),
         const SizedBox(height: 12),
         Wrap(spacing: 12, runSpacing: 12, children: [
-          // Dynamic first …
+          // Dynamic first … These 7 tiles mirror the redimos section's 7 so the
+          // two rows align column-for-column: Uptime · Restarts · Latency · (a
+          // section-specific pair) · Port · Engine.
           _InfoTile(label: 'Uptime', value: up ? _fmtUptime(d.uptimeSec) : '—'),
           _InfoTile(label: 'Restarts', value: '${d.restarts}'),
+          // Latency sits at column 3 to line up with the redimos Latency tile.
+          // DynamoDB Local / LocalStack expose no latency metric, so it's a
+          // placeholder ('—') that keeps the columns aligned.
+          const _InfoTile(label: 'Latency', value: '—'),
           _InfoTile(label: 'Status', value: up ? 'Running' : d.status),
-          // … fixed config last. PID is second-to-last and Engine last, so both
-          // line up with the redimos section's PID and RunMode tiles above.
-          // (DDB says "Engine" because the choice is a different backend product —
-          // dynamodb-local vs LocalStack — not just a native/docker run mode.)
           _InfoTile(label: 'Storage', value: d.config.storage == 'persist' ? 'Persisted' : 'In-mem'),
+          // Port + Engine last, aligning with the redimos section's Port + Engine
+          // tiles above. (DDB says "Engine" because the choice is a different
+          // backend product — dynamodb-local vs LocalStack — not just a run mode.)
           _InfoTile(label: 'Port', value: '${d.config.port}'),
-          _InfoTile(label: 'PID', value: up && d.pid > 0 ? '${d.pid}' : '—'),
           _InfoTile(label: 'Engine', value: engine),
         ]),
       ],
