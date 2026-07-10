@@ -1509,6 +1509,12 @@ class MonitorView extends StatelessWidget {
     ]);
   }
 
+  // The longest tile value on screen (the DDB "runtime · product" engine label);
+  // shared as the fit reference by every info tile in both sections so all
+  // values render at one identical, width-adaptive size. Null (no local DDB
+  // section) means nothing long is on screen — tiles stay at the full 17px.
+  String? get _fitRef => ddb != null ? _ddbEngineLabel(ddb!.config.engine) : null;
+
   // Lay out a fixed set of info tiles as equal-width columns that fill the whole
   // pane (every tile the same size, the row stretching edge-to-edge) in both the
   // initial window and full screen — instead of fixed-width tiles clustered on
@@ -1548,18 +1554,25 @@ class MonitorView extends StatelessWidget {
           ]),
         ),
         const SizedBox(height: 12),
+        // Every tile in BOTH rows shares one fit reference — the longest value
+        // on screen (the DDB engine label). All values therefore render at one
+        // identical size: full 17px when the reference fits the tile width,
+        // uniformly smaller when the window narrows. No tile ever stands out
+        // bigger or smaller than its neighbours.
         _tileRow([
           // Dynamic metrics first …
-          _InfoTile(label: 'Uptime', value: running ? _fmtUptime(st!.uptimeSec) : '—'),
-          _InfoTile(label: 'Restarts', value: '${st?.restarts ?? 0}'),
+          _InfoTile(label: 'Uptime', fitReference: _fitRef, value: running ? _fmtUptime(st!.uptimeSec) : '—'),
+          _InfoTile(label: 'Restarts', fitReference: _fitRef, value: '${st?.restarts ?? 0}'),
           _InfoTile(
               label: 'Latency',
+              fitReference: _fitRef,
               value: running && st!.metricsOk ? '${st.avgLatencyMs.toStringAsFixed(2)} ms' : '—'),
           // Status (col 4) mirrors the DDB section's Status tile so the two rows
           // align on this column too.
-          _InfoTile(label: 'Status', value: running ? 'Running' : (st?.status ?? 'stopped')),
+          _InfoTile(label: 'Status', fitReference: _fitRef, value: running ? 'Running' : (st?.status ?? 'stopped')),
           _InfoTile(
               label: 'Health',
+              fitReference: _fitRef,
               value: !running || !st!.metricsOk
                   ? '—'
                   : st.healthy
@@ -1569,12 +1582,10 @@ class MonitorView extends StatelessWidget {
           // PID/Container id: in docker run-mode the value was still the host
           // PID (never the container id), so the "Container" label was wrong —
           // and the port is the more useful thing to see here anyway.
-          _InfoTile(label: 'Port', value: running ? '${st!.port}' : '—'),
+          _InfoTile(label: 'Port', fitReference: _fitRef, value: running ? '${st!.port}' : '—'),
           _InfoTile(
               label: 'Engine',
-              // Fit to the DDB engine label (the longer of the two) so this tile
-              // and the DDB Engine tile render at the same size.
-              fitReference: ddb != null ? _ddbEngineLabel(ddb!.config.engine) : null,
+              fitReference: _fitRef,
               value: (st?.runMode ?? 'native') == 'docker' ? 'Docker' : 'Native'),
         ]),
         if (ddb != null) _ddbSection(context, ddb!),
@@ -1620,21 +1631,22 @@ class MonitorView extends StatelessWidget {
         _tileRow([
           // Dynamic first … These 7 tiles mirror the redimos section's 7 so the
           // two rows align column-for-column: Uptime · Restarts · Latency · (a
-          // section-specific pair) · Port · Engine.
-          _InfoTile(label: 'Uptime', value: up ? _fmtUptime(d.uptimeSec) : '—'),
-          _InfoTile(label: 'Restarts', value: '${d.restarts}'),
+          // section-specific pair) · Port · Engine. Every tile shares the same
+          // fit reference (the engine label) so both rows render at one size.
+          _InfoTile(label: 'Uptime', fitReference: engine, value: up ? _fmtUptime(d.uptimeSec) : '—'),
+          _InfoTile(label: 'Restarts', fitReference: engine, value: '${d.restarts}'),
           // Latency sits at column 3 to line up with the redimos Latency tile.
           // DynamoDB Local / LocalStack expose no latency metric, so it's a
           // placeholder ('—') that keeps the columns aligned.
-          const _InfoTile(label: 'Latency', value: '—'),
-          _InfoTile(label: 'Status', value: up ? 'Running' : d.status),
+          _InfoTile(label: 'Latency', fitReference: engine, value: '—'),
+          _InfoTile(label: 'Status', fitReference: engine, value: up ? 'Running' : d.status),
           // Health (col 5) lines up with the redimos Health tile. DDB exposes no
           // health endpoint, so this is derived from the running state.
-          _InfoTile(label: 'Health', value: up ? 'Ready' : 'Down'),
+          _InfoTile(label: 'Health', fitReference: engine, value: up ? 'Ready' : 'Down'),
           // Port + Engine last, aligning with the redimos section's Port + Engine
           // tiles above. (DDB says "Engine" because the choice is a different
           // backend product — dynamodb-local vs LocalStack — not just a run mode.)
-          _InfoTile(label: 'Port', value: '${d.config.port}'),
+          _InfoTile(label: 'Port', fitReference: engine, value: '${d.config.port}'),
           _InfoTile(label: 'Engine', fitReference: engine, value: engine),
         ]),
       ],
