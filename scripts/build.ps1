@@ -148,6 +148,23 @@ try {
 if (-not (Test-Path (Join-Path $relDir 'redimos_manager.exe'))) { Die "redimos_manager.exe was not produced." }
 # flutter build does not know about the native DLL - drop it next to the exe.
 Copy-Item (Join-Path $native 'redimos_core.dll') (Join-Path $relDir 'redimos_core.dll') -Force
+# Bundle the VC++ runtime (msvcp140/vcruntime140*) next to the exe so the app
+# starts on machines WITHOUT the VC++ redistributable installed
+# (flutter_windows.dll depends on them; app-local deployment is MS-sanctioned).
+$vswherePath = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+$vsRoot = if (Test-Path $vswherePath) { & $vswherePath -latest -products * -property installationPath } else { $null }
+$crtDir = if ($vsRoot) {
+    Get-ChildItem "$vsRoot\VC\Redist\MSVC\*\x64\Microsoft.VC143.CRT" -Directory -ErrorAction SilentlyContinue |
+        Select-Object -First 1
+} else { $null }
+if ($crtDir) {
+    foreach ($d in 'msvcp140.dll', 'vcruntime140.dll', 'vcruntime140_1.dll') {
+        Copy-Item (Join-Path $crtDir.FullName $d) $relDir -Force
+    }
+    Ok "VC++ CRT DLLs bundled (from $($crtDir.FullName))"
+} else {
+    Write-Host "    WARN  VC++ redist CRT not found - app may fail on machines without vc_redist" -ForegroundColor Yellow
+}
 Ok "app built -> $relDir"
 
 # =============================================================================
