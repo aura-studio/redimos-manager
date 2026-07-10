@@ -943,21 +943,26 @@ class _ConfigEditorState extends State<ConfigEditor> {
       // real content area — otherwise the trailing column overflows the pane and
       // clips at the window edge.
       final cw = (w - 32).clamp(360.0, 6000.0).toDouble();
-      // Each inline dropdown (and Port) is a fixed fraction of the row so the
-      // columns keep their ratio at any width.
-      final dropW = ((cw - 36) * 0.13).clamp(110.0, 400.0).toDouble();
-      // Auth / Table / Url / AccessKeyID / SessionToken share one leading-field
-      // width so every left-column field lines up on both edges; each row's
-      // trailing controls fill the rest and flush right.
-      final leadW = (cw - 36 - dropW * 3).clamp(140.0, 4000.0).toDouble();
-      final redisAuthW = leadW;
-      final redimosTableW = leadW;
-      final urlW = leadW;
-      // PartitionID + SigningRegion split the remainder of the endpoint row so
-      // Url lines up with Table/Auth (and they get wider than before).
-      final endW = ((cw - leadW - 24) / 2).clamp(120.0, 4000.0).toDouble();
-      // The right credential field fills whatever is left after the leadW column.
-      final credRightW = (cw - leadW - 12).clamp(120.0, 4000.0).toDouble();
+      // Strict two-column grid: the content splits into two equal 50% halves
+      // separated by one 12px gutter. Every field snaps to this grid —
+      //   • Name spans the full width (both halves);
+      //   • the leading field of each row (Auth / Table / Url / AccessKeyID /
+      //     SessionToken) fills the LEFT half;
+      //   • the right half is subdivided per row: three equal thirds for
+      //     Port + the two dropdowns (so Port is ⅓ of a half), two equal
+      //     halves for PartitionID + SigningRegion, or one full half for
+      //     SecretAccessKey / Source.
+      // Because each right-half subdivision sums back to exactly one half, every
+      // field's left/right edges line up on the same two column boundaries.
+      const gap = 12.0;
+      final halfW = ((cw - gap) / 2).clamp(120.0, 4000.0).toDouble();
+      final dropW = ((halfW - gap * 2) / 3).clamp(64.0, 2000.0).toDouble(); // ⅓ of a half
+      final endW = ((halfW - gap) / 2).clamp(90.0, 2000.0).toDouble();      // ½ of a half
+      final leadW = halfW;         // AccessKeyID / SessionToken (left half)
+      final redisAuthW = halfW;    // Auth (left half)
+      final redimosTableW = halfW; // Table (left half)
+      final urlW = halfW;          // Url (left half)
+      final credRightW = halfW;    // SecretAccessKey / Source (right half)
       return Column(
         children: [
           // Scrollable field area — the pinned action bar below never moves.
@@ -1084,7 +1089,7 @@ class _ConfigEditorState extends State<ConfigEditor> {
               padding: const EdgeInsets.only(bottom: 10),
               child: Row(children: [
                 SizedBox(
-                  width: 240,
+                  width: leadW, // Key → left half (same column as Auth/Table/Url)
                   child: DropdownButtonFormField<String>(
                     initialValue:
                         _flagKeys.contains(_extraFlags[i].key) ? _extraFlags[i].key : null,
@@ -1098,7 +1103,9 @@ class _ConfigEditorState extends State<ConfigEditor> {
                 ),
                 const SizedBox(width: 12),
                 SizedBox(
-                  width: (cw - 302).clamp(120.0, 4000.0).toDouble(),
+                  // Value fills the right half, reserving 52px (4px gap + the
+                  // 48px remove button) so the row still totals the grid width.
+                  width: (halfW - 52).clamp(90.0, 4000.0).toDouble(),
                   child: _field(_flagVals[i], 'Value'),
                 ),
                 const SizedBox(width: 4),
