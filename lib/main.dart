@@ -1467,9 +1467,7 @@ class MonitorView extends StatelessWidget {
         ),
         _InfoTile(label: 'Uptime', value: running ? _fmtUptime(st!.uptimeSec) : '—'),
         _InfoTile(label: 'Restarts', value: '${st?.restarts ?? 0}'),
-        _InfoTile(
-            label: (st?.runMode ?? 'native') == 'docker' ? 'Container' : 'PID',
-            value: running ? '${st!.pid}' : '—'),
+        _InfoTile(label: 'Port', value: running ? '${st!.port}' : '—'),
         _InfoTile(
             label: 'Run mode',
             value: (st?.runMode ?? 'native') == 'docker' ? 'Docker' : 'Native'),
@@ -1560,10 +1558,11 @@ class MonitorView extends StatelessWidget {
                   : st.healthy
                       ? (st.ready ? 'Ready' : 'Healthy')
                       : 'Down'),
-          // … fixed / static values last.
-          _InfoTile(
-              label: (st?.runMode ?? 'native') == 'docker' ? 'Container' : 'PID',
-              value: running ? '${st!.pid}' : '—'),
+          // … fixed / static values last. Show the RESP Port rather than a
+          // PID/Container id: in docker run-mode the value was still the host
+          // PID (never the container id), so the "Container" label was wrong —
+          // and the port is the more useful thing to see here anyway.
+          _InfoTile(label: 'Port', value: running ? '${st!.port}' : '—'),
           _InfoTile(
               label: 'RunMode',
               value: (st?.runMode ?? 'native') == 'docker' ? 'Docker' : 'Native'),
@@ -1616,12 +1615,14 @@ class MonitorView extends StatelessWidget {
           _InfoTile(label: 'Uptime', value: up ? _fmtUptime(d.uptimeSec) : '—'),
           _InfoTile(label: 'Restarts', value: '${d.restarts}'),
           _InfoTile(label: 'Status', value: up ? 'Running' : d.status),
-          // … fixed config last. PID is second-to-last and RunMode last, so both
+          // … fixed config last. PID is second-to-last and Engine last, so both
           // line up with the redimos section's PID and RunMode tiles above.
+          // (DDB says "Engine" because the choice is a different backend product —
+          // dynamodb-local vs LocalStack — not just a native/docker run mode.)
           _InfoTile(label: 'Storage', value: d.config.storage == 'persist' ? 'Persisted' : 'In-mem'),
           _InfoTile(label: 'Port', value: '${d.config.port}'),
           _InfoTile(label: 'PID', value: up && d.pid > 0 ? '${d.pid}' : '—'),
-          _InfoTile(label: 'RunMode', value: engine),
+          _InfoTile(label: 'Engine', value: engine),
         ]),
       ],
     );
@@ -2035,7 +2036,7 @@ class _LocalDdbPanelState extends State<LocalDdbPanel> {
               initialValue: cfg.engine,
               isDense: true,
               decoration: const InputDecoration(
-                labelText: 'RunMode',
+                labelText: 'Engine',
                 isDense: true,
                 border: OutlineInputBorder(),
                 contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 10),
