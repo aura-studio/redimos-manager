@@ -1748,37 +1748,38 @@ String _ddbEngineLabel(String engine) => switch (engine) {
       _ => 'Java · local',
     };
 
-// Font size (capped at 17) at which [ref] fits [avail] px on one line. Two tiles
-// of equal width passing the same [ref] get the same size — used to keep the two
-// Engine tiles visually identical without wrapping or growing the tile height.
-double _fitValueFont(double avail, String ref, {double base = 17, double floor = 8}) {
-  // Leave a few px of slack so the text never ellipsizes right on the boundary.
-  final usable = avail - 8;
-  final tp = TextPainter(
-    text: TextSpan(text: ref, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w500)),
-    textDirection: TextDirection.ltr,
-    maxLines: 1,
-  )..layout();
-  final w = tp.width;
-  if (w <= 0 || w <= usable) return base;
-  return (base * usable / w).clamp(floor, base);
-}
-
 class _InfoTile extends StatelessWidget {
   final String label;
   final String value;
-  // When set, the value font shrinks (capped at 17) so this reference string
-  // fits one line; every tile passing the SAME reference renders at the SAME
-  // size, keeping the two Engine tiles equal without wrapping / taller tiles.
+  // When set, the value is scaled to fit one line via a FittedBox whose width is
+  // pinned to this reference string. Every tile of the same width passing the
+  // SAME reference scales by the same factor → identical font size, no wrapping,
+  // no truncation, no taller tile. Used to keep the two Engine tiles equal.
   final String? fitReference;
   const _InfoTile({required this.label, required this.value, this.fitReference});
 
   @override
   Widget build(BuildContext context) {
-    Widget valueText(double size) => Text(value,
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: TextStyle(fontSize: size, fontWeight: FontWeight.w500));
+    const valueStyle = TextStyle(fontSize: 17, fontWeight: FontWeight.w500);
+    Widget valueWidget;
+    if (fitReference == null) {
+      valueWidget = Text(value, maxLines: 1, overflow: TextOverflow.ellipsis, style: valueStyle);
+    } else {
+      // Stack an invisible copy of the (longer) reference under the value so the
+      // FittedBox always scales against the reference's width — both Engine tiles
+      // therefore shrink by the exact same factor.
+      valueWidget = FittedBox(
+        fit: BoxFit.scaleDown,
+        alignment: Alignment.centerLeft,
+        child: Stack(children: [
+          Opacity(
+            opacity: 0,
+            child: Text(fitReference!, maxLines: 1, softWrap: false, style: valueStyle),
+          ),
+          Text(value, maxLines: 1, softWrap: false, style: valueStyle),
+        ]),
+      );
+    }
     return Container(
       width: 132,
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
@@ -1789,10 +1790,7 @@ class _InfoTile extends StatelessWidget {
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text(label, style: TextStyle(fontSize: 11, color: _tileLabelColor(context))),
         const SizedBox(height: 4),
-        fitReference == null
-            ? valueText(17)
-            : LayoutBuilder(
-                builder: (_, c) => valueText(_fitValueFont(c.maxWidth, fitReference!))),
+        Align(alignment: Alignment.centerLeft, child: valueWidget),
       ]),
     );
   }
