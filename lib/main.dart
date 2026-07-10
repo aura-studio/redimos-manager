@@ -57,6 +57,13 @@ ThemeData _appTheme(Brightness b) => ThemeData(
       colorSchemeSeed: const Color(0xFF3B6EA5),
       brightness: b,
       fontFamily: 'monospace',
+      // One consistent weight/colour for every rule in the app (sidebar splits,
+      // tab bar, section separators) so no line looks bolder than another.
+      dividerTheme: DividerThemeData(
+        thickness: 1,
+        space: 1,
+        color: b == Brightness.dark ? const Color(0x33FFFFFF) : const Color(0x1F000000),
+      ),
     );
 
 class RedimosManagerApp extends StatelessWidget {
@@ -644,6 +651,9 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
             unselectedLabelColor: Theme.of(context).textTheme.bodySmall?.color,
             indicatorColor: Theme.of(context).colorScheme.primary,
             indicatorWeight: 2.5,
+            // Drop the tab bar's own M3 divider so it doesn't double up with the
+            // explicit Divider below — a single consistent rule instead.
+            dividerColor: Colors.transparent,
             tabs: [
               _tab(Icons.tune, 'Configure'),
               _tab(Icons.insights, 'Monitor'),
@@ -917,8 +927,9 @@ class _ConfigEditorState extends State<ConfigEditor> {
   Widget build(BuildContext context) {
     return LayoutBuilder(builder: (context, cons) {
       final w = cons.maxWidth.isFinite ? cons.maxWidth : 880.0;
-      // Fill the available width (no right gap) — only a min guard, no max cap.
-      final cw = w.clamp(300.0, 4000.0).toDouble();
+      // Cap the form width so fields don't stretch absurdly wide on a large
+      // window; left-aligned, leaving the extra space on the right.
+      final cw = w.clamp(300.0, 1000.0).toDouble();
       const dropW = 140.0; // one width for every inline dropdown (and Port)
       // Auth / Table / Url / AccessKeyID / SessionToken share one leading-field
       // width so every left-column field lines up on both edges; each row's
