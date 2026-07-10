@@ -430,10 +430,16 @@ func (m *manager) ddbStart() error {
 		in.launchArgs = args
 		in.launchEnv = os.Environ()
 		in.status = "preparing"
+		jarPath := filepath.Join(dir, "DynamoDBLocal.jar")
 		m.mu.Lock()
 		m.ddb = in
 		m.mu.Unlock()
 		go func() {
+			// A prior app session may have left an orphaned DynamoDBLocal bound to
+			// this port (a child survives an ungraceful app exit). Reap our own
+			// straggler first so the fresh child can bind instead of crash-looping
+			// on "address already in use".
+			reapStaleDdbJava(cfg.Port, jarPath)
 			if err := ensureDdbJar(in, dir); err != nil {
 				in.mu.Lock()
 				if !in.intendedStop {
@@ -461,6 +467,35 @@ func (m *manager) ddbStart() error {
 
 	default:
 		return fmt.Errorf("unknown engine %q", cfg.Engine)
+	}
+}
+
+// reapStaleDdbJava kills any process listening on `port` whose command line
+// references our managed `jarPath` — i.e. a DynamoDBLocal we launched in a prior
+// session that outlived an ungraceful app exit. It only ever kills processes
+// matching our own jar path, so it can't touch unrelated apps that happen to use
+// the same port. Best-effort: any failure is ignored (the caller falls back to
+// the normal spawn/supervisor path). No-op on platforms without lsof/ps.
+func reapStaleDdbJava(port int, jarPath string) {
+	if runtime.GOOS == "windows" {
+		return // no lsof; the port-in-use case is handled by the supervisor guard
+	}
+	out, err := exec.Command("lsof", "-nP", "-iTCP:"+strconv.Itoa(port), "-sTCP:LISTEN", "-t").Output()
+	if err != nil {
+		return
+	}
+	for _, line := range strings.Fields(string(out)) {
+		pid, perr := strconv.Atoi(line)
+		if perr != nil || pid <= 0 {
+			continue
+		}
+		cmd, cerr := exec.Command("ps", "-o", "command=", "-p", line).Output()
+		if cerr != nil || !strings.Contains(string(cmd), jarPath) {
+			continue // not ours — leave it alone
+		}
+		if proc, ferr := os.FindProcess(pid); ferr == nil {
+			_ = proc.Kill()
+		}
 	}
 }
 
@@ -557,6 +592,17 @@ func rm_ddb_stop() *C.char {
 	if err := mgr.ddbStop(); err != nil {
 		return errJSON(err)
 	}
+	return okJSON(nil)
+}
+
+// rm_shutdown terminates every managed child — redimos instances and the Local
+// DynamoDB backend — so nothing is left orphaned when the app quits. Called from
+// the Dart side on an exit request (Cmd-Q / window close).
+//
+//export rm_shutdown
+func rm_shutdown() *C.char {
+	mgr.stopAll()
+	_ = mgr.ddbStop()
 	return okJSON(nil)
 }
 

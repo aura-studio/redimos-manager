@@ -186,6 +186,8 @@ class _HomePageState extends State<HomePage> {
 
   LocalDdbInfo? _ddb; // Local DynamoDB snapshot, refreshed with the status poll
 
+  AppLifecycleListener? _lifecycle;
+
   @override
   void initState() {
     super.initState();
@@ -193,6 +195,14 @@ class _HomePageState extends State<HomePage> {
       _core = NativeCore();
       _reload();
       _poll = Timer.periodic(const Duration(milliseconds: 1500), (_) => _refresh());
+      // Kill every managed child before the app exits, so redimos / Local
+      // DynamoDB processes don't outlive the app and orphan-hold their ports.
+      _lifecycle = AppLifecycleListener(
+        onExitRequested: () async {
+          _core?.shutdown();
+          return AppExitResponse.exit;
+        },
+      );
     } catch (e) {
       _loadError = '$e';
     }
@@ -200,6 +210,7 @@ class _HomePageState extends State<HomePage> {
 
   @override
   void dispose() {
+    _lifecycle?.dispose();
     _poll?.cancel();
     super.dispose();
   }

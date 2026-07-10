@@ -19,7 +19,7 @@ typedef _FreeDartFn = void Function(Pointer<Utf8>);
 /// child processes) lives in Go; this just marshals JSON across the boundary.
 class NativeCore {
   late final DynamicLibrary _lib;
-  late final _StrDartFn _version, _load, _status, _stopAll;
+  late final _StrDartFn _version, _load, _status, _stopAll, _shutdown;
   late final _StrDartFn _ddbGet, _ddbStart, _ddbStop, _ddbLogs;
   late final _StrArgDartFn _saveConfig, _deleteConfig, _setSettings, _start, _stop, _logs;
   late final _StrArgDartFn _ddbSet;
@@ -31,6 +31,7 @@ class NativeCore {
     _load = _lib.lookupFunction<_StrNativeFn, _StrDartFn>('rm_load');
     _status = _lib.lookupFunction<_StrNativeFn, _StrDartFn>('rm_status');
     _stopAll = _lib.lookupFunction<_StrNativeFn, _StrDartFn>('rm_stop_all');
+    _shutdown = _lib.lookupFunction<_StrNativeFn, _StrDartFn>('rm_shutdown');
     _saveConfig = _lib.lookupFunction<_StrArgNativeFn, _StrArgDartFn>('rm_save_config');
     _deleteConfig = _lib.lookupFunction<_StrArgNativeFn, _StrArgDartFn>('rm_delete_config');
     _setSettings = _lib.lookupFunction<_StrArgNativeFn, _StrArgDartFn>('rm_set_settings');
@@ -121,6 +122,10 @@ class NativeCore {
   void start(String id) => _expectOk(_call1(_start, id));
   void stop(String id) => _expectOk(_call1(_stop, id));
   void stopAll() => _call0(_stopAll);
+
+  /// Terminate every managed child (redimos instances + Local DynamoDB). Call on
+  /// app exit so nothing is left orphaned holding a port.
+  void shutdown() => _call0(_shutdown);
 
   List<String> logs(String id) {
     final j = jsonDecode(_call1(_logs, id)) as Map<String, dynamic>;
