@@ -589,6 +589,87 @@ func (m *manager) sweepLabeledContainers(skip map[string]bool) {
 	}
 }
 
+// configUsesLocalDdb reports whether a config's endpoint points at the local
+// DynamoDB on ddbPort (localhost / 127.0.0.1).
+func configUsesLocalDdb(cfg Config, ddbPort int) bool {
+	e := cfg.Endpoint
+	return strings.Contains(e, fmt.Sprintf("localhost:%d", ddbPort)) ||
+		strings.Contains(e, fmt.Sprintf("127.0.0.1:%d", ddbPort))
+}
+
+// restartLocalDdbDependents restarts every running redimos instance that points
+// at the local DynamoDB, so a backend that just (re)started hands the proxies a
+// fresh connection instead of leaving them stuck on "backend error, retry
+// later". The Cmd console re-connects on its own once the proxy is back up.
+func (m *manager) restartLocalDdbDependents(ddbPort int) {
+	m.mu.Lock()
+	var ids []string
+	for _, cfg := range m.st.Configs {
+		in, ok := m.running[cfg.ID]
+		if !ok || !configUsesLocalDdb(cfg, ddbPort) {
+			continue
+		}
+		in.mu.Lock()
+		live := in.status == "running" || in.status == "restarting"
+		in.mu.Unlock()
+		if live {
+			ids = append(ids, cfg.ID)
+		}
+	}
+	m.mu.Unlock()
+	for _, id := range ids {
+		go m.restartConfig(id)
+	}
+}
+
+// restartConfig cleanly stops then re-starts a running config (used to force a
+// fresh backend connection after the Local DynamoDB restarts).
+func (m *manager) restartConfig(id string) {
+	m.mu.Lock()
+	in, ok := m.running[id]
+	m.mu.Unlock()
+	if ok {
+		in.appendLog("[local dynamodb restarted — reconnecting]")
+		in.terminate()
+		for i := 0; i < 50; i++ { // wait out the TERM→KILL grace so start() won't reject
+			in.mu.Lock()
+			s := in.status
+			in.mu.Unlock()
+			if s == "stopped" || s == "error" || s == "failed" {
+				break
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+	}
+	_ = m.start(id)
+}
+
+// afterDdbReady waits (bounded) for the Local DynamoDB to report running, then
+// runs fn(ddbPort). Used to restart dependents only once the backend can accept
+// connections.
+func (m *manager) afterDdbReady(ddbPort int, fn func(int)) {
+	for i := 0; i < 150; i++ { // up to ~30s
+		m.mu.Lock()
+		dd := m.ddb
+		m.mu.Unlock()
+		if dd == nil {
+			return
+		}
+		dd.mu.Lock()
+		s := dd.status
+		dd.mu.Unlock()
+		switch s {
+		case "running":
+			time.Sleep(1200 * time.Millisecond) // small grace for the port to accept
+			fn(ddbPort)
+			return
+		case "error", "failed", "stopped":
+			return
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+}
+
 func (m *manager) ddbStop() error {
 	m.mu.Lock()
 	in := m.ddb
@@ -676,6 +757,14 @@ func rm_ddb_start() *C.char {
 	if err := mgr.ddbStart(); err != nil {
 		return errJSON(err)
 	}
+	// User-initiated (re)start: once the backend is ready, restart the redimos
+	// instances that depend on it so they reconnect instead of being stuck on
+	// "backend error". (autoStartAll's boot restore calls ddbStart directly and
+	// deliberately skips this — nothing is running yet to reconnect.)
+	mgr.mu.Lock()
+	port := normalizeDdb(mgr.st.LocalDdb).Port
+	mgr.mu.Unlock()
+	go mgr.afterDdbReady(port, mgr.restartLocalDdbDependents)
 	return okJSON(nil)
 }
 

@@ -520,11 +520,11 @@ class _CmdConsoleState extends State<CmdConsole>
     );
   }
 
-  Color _color(_Kind k) => switch (k) {
-        _Kind.prompt => const Color(0xFF9FB6D0),
-        _Kind.reply => const Color(0xFFC8E1CB),
-        _Kind.error => const Color(0xFFFF8A80),
-        _Kind.info => const Color(0xFF7C8592),
+  Color _color(_Kind k, bool dark) => switch (k) {
+        _Kind.prompt => dark ? const Color(0xFF9FB6D0) : const Color(0xFF3A5A7D),
+        _Kind.reply => dark ? const Color(0xFFC8E1CB) : const Color(0xFF1F7A3D),
+        _Kind.error => dark ? const Color(0xFFFF8A80) : const Color(0xFFC62828),
+        _Kind.info => dark ? const Color(0xFF7C8592) : const Color(0xFF6B7280),
       };
 
   @override
@@ -542,8 +542,19 @@ class _CmdConsoleState extends State<CmdConsole>
     }
 
     final connected = _client?.connected ?? false;
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    // Terminal palette, theme-aware. Dark keeps the classic near-black console;
+    // light uses a soft off-white so the Cmd tab isn't a black hole in a light UI.
+    final termBg = dark ? const Color(0xFF0B0E13) : const Color(0xFFF7F8FA);
+    final inputBg = dark ? const Color(0xFF0E1116) : const Color(0xFFEDEFF3);
+    final inputText = dark ? Colors.white : const Color(0xFF1B1F24);
+    final hintColor = dark ? const Color(0xFF55606E) : const Color(0xFF98A0AC);
+    final promptColor = connected
+        ? (dark ? const Color(0xFF7FB2E6) : const Color(0xFF2F6FB3))
+        : Colors.grey;
+    const accent = Color(0xFF4F93D6);
     return Container(
-      color: Colors.black,
+      color: termBg,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -563,7 +574,7 @@ class _CmdConsoleState extends State<CmdConsole>
                       fontFamily: 'monospace',
                       fontSize: 12.5,
                       height: 1.35,
-                      color: _color(l.kind),
+                      color: _color(l.kind, dark),
                     ),
                   );
                 },
@@ -573,7 +584,7 @@ class _CmdConsoleState extends State<CmdConsole>
           const Divider(height: 1),
           // input row
           Container(
-            color: const Color(0xFF0E1116),
+            color: inputBg,
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.center,
@@ -583,7 +594,7 @@ class _CmdConsoleState extends State<CmdConsole>
                   style: TextStyle(
                     fontFamily: 'monospace',
                     fontSize: 12.5,
-                    color: connected ? const Color(0xFF7FB2E6) : Colors.grey,
+                    color: promptColor,
                   ),
                 ),
                 Expanded(
@@ -606,16 +617,16 @@ class _CmdConsoleState extends State<CmdConsole>
                       focusNode: _focus,
                       autofocus: true,
                       enabled: connected,
-                      style: const TextStyle(
-                          fontFamily: 'monospace', fontSize: 12.5, color: Colors.white),
-                      cursorColor: const Color(0xFF7FB2E6),
+                      style: TextStyle(
+                          fontFamily: 'monospace', fontSize: 12.5, color: inputText),
+                      cursorColor: accent,
                       decoration: InputDecoration(
                         isDense: true,
                         border: InputBorder.none,
                         hintText: connected
                             ? 'type a command — e.g. PING, SET k v, GET k'
                             : 'not connected',
-                        hintStyle: const TextStyle(color: Color(0xFF55606E), fontSize: 12.5),
+                        hintStyle: TextStyle(color: hintColor, fontSize: 12.5),
                       ),
                       onSubmitted: _submit,
                     ),
