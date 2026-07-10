@@ -55,6 +55,7 @@ func reapStalePort(port int, match string) {
 // single-instance lock.
 func (m *manager) reapStartupOrphans() {
 	matches := m.managedPathMatches()
+	live := m.livePids() // adopted children are parentless + tagged — never reap them
 	out, err := exec.Command("ps", "-axo", "pid=,ppid=,command=").Output()
 	if err != nil {
 		return
@@ -67,8 +68,8 @@ func (m *manager) reapStartupOrphans() {
 		}
 		pid, e1 := strconv.Atoi(fields[0])
 		ppid, e2 := strconv.Atoi(fields[1])
-		if e1 != nil || e2 != nil || ppid != 1 || pid == self {
-			continue // not parentless, or it's us
+		if e1 != nil || e2 != nil || ppid != 1 || pid == self || live[pid] {
+			continue // not parentless, us, or a child we manage (incl. adopted)
 		}
 		matched := false
 		for _, mstr := range matches {

@@ -373,6 +373,68 @@ func ensureDdbJar(in *instance, dir string) error {
 // Lifecycle
 // ---------------------------------------------------------------------------
 
+// buildDdbLaunch resolves the Local DynamoDB launch spec for cfg: binary,
+// arguments and (for docker engines) the container name. Shared by ddbStart
+// and the boot adoption path (which needs a valid spec for later supervised
+// restarts of an adopted child).
+func (m *manager) buildDdbLaunch(cfg LocalDdbConfig) (bin string, args []string, container string, err error) {
+	switch cfg.Engine {
+	case "docker", "localstack":
+		docker, ok := dockerBin()
+		if !ok {
+			return "", nil, "", fmt.Errorf("docker not available (install Docker Desktop, or pick the Java engine)")
+		}
+		// Session-tagged labels: the boot sweep finds leftover containers from
+		// dead sessions by label (host `ps` can't see containers at all).
+		label1, label2 := "redimos.manager=1", "redimos.manager.session="+m.sessionID
+		if cfg.Engine == "localstack" {
+			return docker, []string{"run", "--rm", "--name", lsContainerName,
+				"--label", label1, "--label", label2,
+				"-p", fmt.Sprintf("%d:4566", cfg.Port), "-e", "SERVICES=dynamodb",
+				localstackImage}, lsContainerName, nil
+		}
+		a := []string{"run", "--rm", "--name", ddbContainerName,
+			"--label", label1, "--label", label2,
+			"-p", fmt.Sprintf("%d:8000", cfg.Port)}
+		if cfg.Storage == "persist" {
+			// the image runs as a non-root user; a fresh named volume is
+			// root-owned, so run as root for the persisted mode
+			a = append(a, "-v", cfg.Volume+":/data", "-u", "root")
+		}
+		a = append(a, "amazon/dynamodb-local", "-jar", "DynamoDBLocal.jar")
+		if cfg.Storage == "persist" {
+			a = append(a, "-dbPath", "/data", "-sharedDb")
+		} else {
+			a = append(a, "-inMemory")
+		}
+		return docker, a, ddbContainerName, nil
+
+	case "java":
+		java, ok := javaBin()
+		if !ok {
+			return "", nil, "", fmt.Errorf("java not available (install a JRE, or pick a Docker engine)")
+		}
+		dir := m.ddbJavaDir()
+		// The leading -D is a cmdline sentinel: JVM system properties before -jar
+		// are invisible to the app but show up in `ps`, tagging the process as
+		// ours even if the registry is lost.
+		a := []string{"-Dredimos.manager.session=" + m.sessionID,
+			"-Djava.library.path=" + filepath.Join(dir, "DynamoDBLocal_lib"),
+			"-jar", filepath.Join(dir, "DynamoDBLocal.jar"),
+			"-port", strconv.Itoa(cfg.Port)}
+		if cfg.Storage == "persist" {
+			_ = os.MkdirAll(cfg.DataDir, 0o755)
+			a = append(a, "-dbPath", cfg.DataDir, "-sharedDb")
+		} else {
+			a = append(a, "-inMemory")
+		}
+		return java, a, "", nil
+
+	default:
+		return "", nil, "", fmt.Errorf("unknown engine %q", cfg.Engine)
+	}
+}
+
 func (m *manager) ddbStart() error {
 	m.mu.Lock()
 	if m.lockErr != nil {
@@ -392,45 +454,19 @@ func (m *manager) ddbStart() error {
 	}
 	m.mu.Unlock()
 
+	bin, args, container, err := m.buildDdbLaunch(cfg)
+	if err != nil {
+		return err
+	}
+
 	// detached: the Local DynamoDB is the one STATEFUL child (in-memory dev
 	// tables) — it deliberately survives a manager crash so the next session can
 	// adopt it instead of wiping the data (no job jail / no janitor kill).
-	in := &instance{port: cfg.Port, role: "ddb", autoRestart: true, detached: true}
-	switch cfg.Engine {
-	case "docker", "localstack":
-		docker, ok := dockerBin()
-		if !ok {
-			return fmt.Errorf("docker not available (install Docker Desktop, or pick the Java engine)")
-		}
-		in.bin = docker
-		// Session-tagged labels: the boot sweep finds leftover containers from
-		// dead sessions by label (host `ps` can't see containers at all).
-		label1, label2 := "redimos.manager=1", "redimos.manager.session="+m.sessionID
-		if cfg.Engine == "localstack" {
-			in.container = lsContainerName
-			in.launchArgs = []string{"run", "--rm", "--name", lsContainerName,
-				"--label", label1, "--label", label2,
-				"-p", fmt.Sprintf("%d:4566", cfg.Port), "-e", "SERVICES=dynamodb",
-				localstackImage}
-		} else {
-			in.container = ddbContainerName
-			args := []string{"run", "--rm", "--name", ddbContainerName,
-				"--label", label1, "--label", label2,
-				"-p", fmt.Sprintf("%d:8000", cfg.Port)}
-			if cfg.Storage == "persist" {
-				// the image runs as a non-root user; a fresh named volume is
-				// root-owned, so run as root for the persisted mode
-				args = append(args, "-v", cfg.Volume+":/data", "-u", "root")
-			}
-			args = append(args, "amazon/dynamodb-local", "-jar", "DynamoDBLocal.jar")
-			if cfg.Storage == "persist" {
-				args = append(args, "-dbPath", "/data", "-sharedDb")
-			} else {
-				args = append(args, "-inMemory")
-			}
-			in.launchArgs = args
-		}
-		in.launchEnv = os.Environ()
+	in := &instance{
+		port: cfg.Port, role: "ddb", autoRestart: true, detached: true,
+		bin: bin, launchArgs: args, launchEnv: os.Environ(), container: container,
+	}
+	if container != "" {
 		m.mu.Lock()
 		m.ddb = in
 		m.mu.Unlock()
@@ -442,68 +478,45 @@ func (m *manager) ddbStart() error {
 			return err
 		}
 		return nil
+	}
 
-	case "java":
-		java, ok := javaBin()
-		if !ok {
-			return fmt.Errorf("java not available (install a JRE, or pick a Docker engine)")
-		}
-		dir := m.ddbJavaDir()
-		in.bin = java
-		// The leading -D is a cmdline sentinel: JVM system properties before -jar
-		// are invisible to the app but show up in `ps`, tagging the process as
-		// ours even if the registry is lost.
-		args := []string{"-Dredimos.manager.session=" + m.sessionID,
-			"-Djava.library.path=" + filepath.Join(dir, "DynamoDBLocal_lib"),
-			"-jar", filepath.Join(dir, "DynamoDBLocal.jar"),
-			"-port", strconv.Itoa(cfg.Port)}
-		if cfg.Storage == "persist" {
-			_ = os.MkdirAll(cfg.DataDir, 0o755)
-			args = append(args, "-dbPath", cfg.DataDir, "-sharedDb")
-		} else {
-			args = append(args, "-inMemory")
-		}
-		in.launchArgs = args
-		in.launchEnv = os.Environ()
-		in.status = "preparing"
-		jarPath := filepath.Join(dir, "DynamoDBLocal.jar")
-		m.mu.Lock()
-		m.ddb = in
-		m.mu.Unlock()
-		go func() {
-			// A prior app session may have left an orphaned DynamoDBLocal bound to
-			// this port (a child survives an ungraceful app exit). Reap our own
-			// straggler first so the fresh child can bind instead of crash-looping
-			// on "address already in use".
-			reapStalePort(cfg.Port, jarPath)
-			if err := ensureDdbJar(in, dir); err != nil {
-				in.mu.Lock()
-				if !in.intendedStop {
-					in.status = "error"
-					in.exitMsg = err.Error()
-					in.appendLogLocked("[local-ddb: " + err.Error() + "]")
-				}
-				in.mu.Unlock()
-				return
-			}
+	// java engine: the jar may need downloading first.
+	dir := m.ddbJavaDir()
+	jarPath := filepath.Join(dir, "DynamoDBLocal.jar")
+	in.status = "preparing"
+	m.mu.Lock()
+	m.ddb = in
+	m.mu.Unlock()
+	go func() {
+		// A prior app session may have left an orphaned DynamoDBLocal bound to
+		// this port (a child survives an ungraceful app exit). Reap our own
+		// straggler first so the fresh child can bind instead of crash-looping
+		// on "address already in use".
+		reapStalePort(cfg.Port, jarPath)
+		if err := ensureDdbJar(in, dir); err != nil {
 			in.mu.Lock()
-			stopped := in.intendedStop
-			in.mu.Unlock()
-			if stopped {
-				return
-			}
-			if err := in.spawn(); err != nil {
-				in.mu.Lock()
+			if !in.intendedStop {
 				in.status = "error"
 				in.exitMsg = err.Error()
-				in.mu.Unlock()
+				in.appendLogLocked("[local-ddb: " + err.Error() + "]")
 			}
-		}()
-		return nil
-
-	default:
-		return fmt.Errorf("unknown engine %q", cfg.Engine)
-	}
+			in.mu.Unlock()
+			return
+		}
+		in.mu.Lock()
+		stopped := in.intendedStop
+		in.mu.Unlock()
+		if stopped {
+			return
+		}
+		if err := in.spawn(); err != nil {
+			in.mu.Lock()
+			in.status = "error"
+			in.exitMsg = err.Error()
+			in.mu.Unlock()
+		}
+	}()
+	return nil
 }
 
 // managedPathMatches returns the absolute paths that identify our managed
@@ -595,6 +608,7 @@ func rm_ddb_get() *C.char {
 			"cpuPercent": in.cpuPercent,
 			"memBytes":   in.memBytes,
 			"diskPerSec": in.diskPerSec,
+			"adopted":    in.adopted,
 			"uptimeSec":  0,
 		}
 		if in.status == "running" {

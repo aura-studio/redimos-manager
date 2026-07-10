@@ -314,6 +314,7 @@ func (m *manager) reapStartupOrphans() {
 			names[strings.ToLower(filepath.Base(mstr))] = true
 		}
 	}
+	live := m.livePids() // adopted children are parentless + tagged — never reap them
 	snap, err := syscall.CreateToolhelp32Snapshot(syscall.TH32CS_SNAPPROCESS, 0)
 	if err != nil {
 		return
@@ -324,8 +325,8 @@ func (m *manager) reapStartupOrphans() {
 	pe.Size = uint32(unsafe.Sizeof(pe))
 	for err = syscall.Process32First(snap, &pe); err == nil; err = syscall.Process32Next(snap, &pe) {
 		pid := int(pe.ProcessID)
-		if pe.ProcessID == 0 || pe.ProcessID == 4 || pe.ProcessID == self || pe.ParentProcessID == self {
-			continue // idle/system, us, or our own live children
+		if pe.ProcessID == 0 || pe.ProcessID == 4 || pe.ProcessID == self || pe.ParentProcessID == self || live[pid] {
+			continue // idle/system, us, or a child we manage (incl. adopted)
 		}
 		if !names[strings.ToLower(syscall.UTF16ToString(pe.ExeFile[:]))] {
 			continue

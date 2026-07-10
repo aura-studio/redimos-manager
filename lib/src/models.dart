@@ -182,6 +182,7 @@ class LocalDdbInfo {
   final double cpuPercent;
   final int memBytes;
   final double diskPerSec; // disk I/O bytes/sec (read+written)
+  final bool adopted; // inherited from a previous session (crash recovery)
   final bool dockerOk;
   final bool javaOk;
   final bool jarReady;
@@ -196,6 +197,7 @@ class LocalDdbInfo {
     required this.cpuPercent,
     required this.memBytes,
     required this.diskPerSec,
+    this.adopted = false,
     required this.dockerOk,
     required this.javaOk,
     required this.jarReady,
@@ -214,6 +216,7 @@ class LocalDdbInfo {
       cpuPercent: ((st['cpuPercent'] ?? 0) as num).toDouble(),
       memBytes: (st['memBytes'] ?? 0) as int,
       diskPerSec: ((st['diskPerSec'] ?? 0) as num).toDouble(),
+      adopted: (st['adopted'] ?? false) as bool,
       dockerOk: (det['docker'] ?? false) as bool,
       javaOk: (det['java'] ?? false) as bool,
       jarReady: (det['jarReady'] ?? false) as bool,
@@ -243,6 +246,7 @@ class InstanceStatus {
   final double opsPerSec; // command rate
   final double avgLatencyMs; // average command latency
   final int throttled; // cumulative DynamoDB throttles
+  final bool adopted; // inherited from a previous session (crash recovery)
 
   InstanceStatus({
     required this.id,
@@ -262,6 +266,7 @@ class InstanceStatus {
     this.opsPerSec = 0,
     this.avgLatencyMs = 0,
     this.throttled = 0,
+    this.adopted = false,
   });
 
   factory InstanceStatus.fromJson(Map<String, dynamic> j) => InstanceStatus(
@@ -282,6 +287,7 @@ class InstanceStatus {
         opsPerSec: ((j['opsPerSec'] ?? 0) as num).toDouble(),
         avgLatencyMs: ((j['avgLatencyMs'] ?? 0) as num).toDouble(),
         throttled: (j['throttled'] ?? 0) as int,
+        adopted: (j['adopted'] ?? false) as bool,
       );
 
   bool get isRunning => status == 'running';

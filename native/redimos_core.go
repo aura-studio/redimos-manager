@@ -124,6 +124,7 @@ type instance struct {
 	// tables are the user's dev data); everything else is lifetime-bound to the
 	// manager (Windows: job object kill-on-close; macOS: janitor).
 	detached bool
+	adopted  bool    // inherited from a previous session (no cmd handle; watcher-supervised)
 	job      uintptr // windows: KILL_ON_JOB_CLOSE job handle (0 = none / darwin)
 
 	// Supervisor state.
@@ -189,7 +190,12 @@ type manager struct {
 	lockErr   error    // non-nil when another instance already holds the lock
 }
 
-var mgr = newManager()
+// mgr is assigned in init() rather than a var initializer: the adoption path
+// (newManager → reconcileOnBoot → superviseExit → spawn) transitively refers
+// back to mgr, which a var initializer would reject as an init cycle.
+var mgr *manager
+
+func init() { mgr = newManager() }
 
 func newManager() *manager {
 	m := &manager{running: map[string]*instance{}, storePath: defaultStorePath(), sessionID: newID()}
@@ -200,18 +206,19 @@ func newManager() *manager {
 		m.lockErr = err
 	} else {
 		m.lockFile = f
-		// A fresh session inherits no live process handles, so any redimos /
-		// DynamoDBLocal still running from a previous session is an orphan we
-		// can't supervise and that would collide with a restart. Resolve them at
-		// boot: first the registry (exact identity), then the legacy heuristic
-		// sweep as backstop. Containers are swept async — docker probing can
-		// take seconds and this runs during dylib load.
-		m.reconcileOnBoot()
-		m.reapStartupOrphans()
-		go m.sweepLabeledContainers(nil)
 		// The SIGKILL-proof prevention layer (darwin): children registered with
 		// the janitor die within milliseconds of the manager, however it dies.
+		// Started first so boot adoption can register adopted containers.
 		startJanitor()
+		// A fresh session inherits no live process handles: anything still
+		// running from a previous session is either adopted (the stateful DDB /
+		// matching docker children) or an orphan we kill. Resolve at boot: first
+		// the registry (exact identity), then the legacy heuristic sweep as
+		// backstop. Containers are swept async — docker probing can take seconds
+		// and this runs during dylib load — sparing what adoption claimed.
+		adopted := m.reconcileOnBoot()
+		m.reapStartupOrphans()
+		go m.sweepLabeledContainers(adopted)
 	}
 	go m.samplerLoop()
 	go m.scraperLoop()
@@ -570,6 +577,7 @@ func (in *instance) spawn() error {
 	in.pid = cmd.Process.Pid
 	in.started = time.Now()
 	in.status = "running"
+	in.adopted = false // a (re)spawned child is fully ours again
 	in.prevBusy = 0
 	in.prevDisk = 0
 	in.prevSampleAt = time.Time{} // fresh pid → fresh CPU / disk baseline
@@ -737,6 +745,31 @@ func (in *instance) terminate() {
 	}
 }
 
+// livePids returns the pids of every child this session currently manages —
+// including freshly ADOPTED ones, which are not OS-children of this process
+// and would otherwise look exactly like reapable orphans to the heuristic
+// sweeps (parentless + our path + our sentinel).
+func (m *manager) livePids() map[int]bool {
+	m.mu.Lock()
+	ins := make([]*instance, 0, len(m.running)+1)
+	for _, in := range m.running {
+		ins = append(ins, in)
+	}
+	if m.ddb != nil {
+		ins = append(ins, m.ddb)
+	}
+	m.mu.Unlock()
+	out := map[int]bool{}
+	for _, in := range ins {
+		in.mu.Lock()
+		if in.pid > 0 {
+			out[in.pid] = true
+		}
+		in.mu.Unlock()
+	}
+	return out
+}
+
 func (m *manager) stopAll() {
 	m.mu.Lock()
 	ins := make([]*instance, 0, len(m.running))
@@ -769,6 +802,7 @@ type statusRow struct {
 	CPUPercent  float64 `json:"cpuPercent"`
 	MemBytes    int64   `json:"memBytes"`
 	RunMode     string  `json:"runMode"` // "native" | "docker"
+	Adopted     bool    `json:"adopted"` // inherited from a previous session
 
 	// redimos /metrics-derived fields (zero/false until the first scrape).
 	MetricsOK    bool    `json:"metricsOk"`    // scrape reached the endpoint
@@ -797,6 +831,7 @@ func (m *manager) statuses() []statusRow {
 			r.ExitMsg = in.exitMsg
 			r.Restarts = in.restarts
 			r.AutoRestart = in.autoRestart
+			r.Adopted = in.adopted
 			if in.container != "" {
 				r.RunMode = "docker"
 			}

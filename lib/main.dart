@@ -1351,8 +1351,13 @@ class MonitorView extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _sectionHeader(context, Icons.dns, 'REDIMOS',
-            running ? 'Running · :${st!.port}' : (st?.status ?? 'stopped')),
+        _sectionHeader(
+            context,
+            Icons.dns,
+            'REDIMOS',
+            running
+                ? 'Running · :${st!.port}${st.adopted ? ' · adopted' : ''}'
+                : (st?.status ?? 'stopped')),
         const SizedBox(height: 12),
         IntrinsicHeight(
           child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
@@ -1418,7 +1423,7 @@ class MonitorView extends StatelessWidget {
         const Divider(height: 1),
         const SizedBox(height: 14),
         _sectionHeader(context, Icons.storage, 'LOCAL DYNAMODB',
-            up ? 'Running · :${d.config.port}' : d.status),
+            up ? 'Running · :${d.config.port}${d.adopted ? ' · adopted' : ''}' : d.status),
         const SizedBox(height: 12),
         IntrinsicHeight(
           child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
