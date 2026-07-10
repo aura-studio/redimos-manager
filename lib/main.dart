@@ -1775,60 +1775,65 @@ class _LocalDdbPanelState extends State<LocalDdbPanel> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         mainAxisSize: MainAxisSize.min,
         children: [
-          InkWell(
-            onTap: () => setState(() => _expanded = !_expanded),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(children: [
-                  // Bottom-docked panel grows upward: up-chevron to expand, down to collapse.
-                  Icon(_expanded ? Icons.expand_more : Icons.expand_less,
-                      size: 18, color: Colors.grey),
-                  const SizedBox(width: 4),
-                  Container(
-                    width: 10,
-                    height: 10,
-                    decoration: BoxDecoration(color: dotColor, shape: BoxShape.circle),
-                  ),
-                  const SizedBox(width: 8),
-                  const Text('Local DynamoDB',
-                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
-                  const Spacer(),
-                  if (_expanded)
-                    IconButton(
-                      tooltip: 'Logs',
-                      visualDensity: VisualDensity.compact,
-                      icon: const Icon(Icons.terminal, size: 16),
-                      onPressed: _showLogs,
+          Builder(builder: (context) {
+            // Status figures; "Running" is implied by the green dot so it's dropped.
+            final statsText = active && status == 'running'
+                ? ':${cfg.port}'
+                    ' · ${info!.cpuPercent.toStringAsFixed(1)}%'
+                    ' · ${(info.memBytes / (1024 * 1024)).round()}MB'
+                    '${info.restarts > 0 ? " · ↻${info.restarts}" : ""}'
+                : pillText;
+            final stats = Text(statsText,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 11, color: Colors.grey));
+            // Bottom-docked panel grows upward: up-chevron to expand, down to collapse.
+            final head = <Widget>[
+              Icon(_expanded ? Icons.expand_more : Icons.expand_less, size: 18, color: Colors.grey),
+              const SizedBox(width: 4),
+              Container(
+                width: 10,
+                height: 10,
+                decoration: BoxDecoration(color: dotColor, shape: BoxShape.circle),
+              ),
+              const SizedBox(width: 8),
+              const Text('Local DynamoDB',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
+            ];
+            final button = _expanded
+                ? IconButton(
+                    tooltip: 'Logs',
+                    visualDensity: VisualDensity.compact,
+                    icon: const Icon(Icons.terminal, size: 16),
+                    onPressed: _showLogs,
+                  )
+                : IconButton(
+                    tooltip: active ? 'Stop' : 'Start',
+                    visualDensity: VisualDensity.compact,
+                    icon: Icon(active ? Icons.stop : Icons.play_arrow,
+                        size: 18, color: active ? Colors.redAccent : goGreen(context)),
+                    onPressed: () => _startStop(active),
+                  );
+            return InkWell(
+              onTap: () => setState(() => _expanded = !_expanded),
+              // Expanded: title row + stats on its own line below (room to spare).
+              // Collapsed: everything on one compact line, stats inline before the button.
+              child: _expanded
+                  ? Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(children: [...head, const Spacer(), button]),
+                        Padding(padding: const EdgeInsets.only(left: 30, bottom: 2), child: stats),
+                      ],
                     )
-                  else
-                    IconButton(
-                      tooltip: active ? 'Stop' : 'Start',
-                      visualDensity: VisualDensity.compact,
-                      icon: Icon(active ? Icons.stop : Icons.play_arrow,
-                          size: 18, color: active ? Colors.redAccent : goGreen(context)),
-                      onPressed: () => _startStop(active),
-                    ),
-                ]),
-                // Stats on their own line (indented under the title, full sidebar
-                // width) — like the config-row subtitle. "Running" is implied by
-                // the green dot, so it's dropped to keep the figures readable.
-                Padding(
-                  padding: const EdgeInsets.only(left: 30, bottom: 2),
-                  child: Text(
-                    active && status == 'running'
-                        ? ':${cfg.port}'
-                            ' · ${info!.cpuPercent.toStringAsFixed(1)}%'
-                            ' · ${(info.memBytes / (1024 * 1024)).round()}MB'
-                            '${info.restarts > 0 ? " · ↻${info.restarts}" : ""}'
-                        : pillText,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 11, color: Colors.grey),
-                  ),
-                ),
-              ],
-            ),
-          ),
+                  : Row(children: [
+                      ...head,
+                      const Spacer(),
+                      Flexible(child: stats),
+                      const SizedBox(width: 4),
+                      button,
+                    ]),
+            );
+          }),
           // Slide the body open/closed instead of snapping.
           AnimatedSize(
             duration: const Duration(milliseconds: 180),
