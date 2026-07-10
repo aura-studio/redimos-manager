@@ -1890,16 +1890,22 @@ class _LocalDdbPanelState extends State<LocalDdbPanel> {
               const Text('Local DynamoDB',
                   style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
             ];
+            // Tight icon button: zero padding + small hit box, so the one-line
+            // collapsed layout has as much room as possible for the figures.
             final button = _expanded
                 ? IconButton(
                     tooltip: 'Logs',
                     visualDensity: VisualDensity.compact,
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
                     icon: const Icon(Icons.terminal, size: 16),
                     onPressed: _showLogs,
                   )
                 : IconButton(
                     tooltip: active ? 'Stop' : 'Start',
                     visualDensity: VisualDensity.compact,
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
                     icon: Icon(active ? Icons.stop : Icons.play_arrow,
                         size: 18, color: active ? Colors.redAccent : goGreen(context)),
                     onPressed: () => _startStop(active),
@@ -1918,9 +1924,12 @@ class _LocalDdbPanelState extends State<LocalDdbPanel> {
                     )
                   : Row(children: [
                       ...head,
-                      const Spacer(),
-                      Flexible(child: stats),
-                      const SizedBox(width: 4),
+                      const SizedBox(width: 8),
+                      // Expanded (not Spacer + Flexible): the stats take all the
+                      // room left of the button instead of being squeezed to the
+                      // right edge, so the figures show in full.
+                      Expanded(child: stats),
+                      const SizedBox(width: 2),
                       button,
                     ]),
             );
