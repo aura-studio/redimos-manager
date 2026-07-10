@@ -16,8 +16,8 @@ void main() {
   runApp(const RedimosManagerApp());
 }
 
-/// App-wide light/dark selection, toggled from the app bar.
-final ValueNotifier<ThemeMode> appThemeMode = ValueNotifier(ThemeMode.dark);
+/// App-wide theme selection (Light / Dark / System), chosen from the app bar.
+final ValueNotifier<ThemeMode> appThemeMode = ValueNotifier(ThemeMode.system);
 
 // The theme choice is persisted next to the Go core's store, in ~/.redimos/theme.
 File? _themeFile() {
@@ -30,8 +30,11 @@ void _loadThemeMode() {
   try {
     final f = _themeFile();
     if (f != null && f.existsSync()) {
-      appThemeMode.value =
-          f.readAsStringSync().trim() == 'light' ? ThemeMode.light : ThemeMode.dark;
+      appThemeMode.value = switch (f.readAsStringSync().trim()) {
+        'light' => ThemeMode.light,
+        'dark' => ThemeMode.dark,
+        _ => ThemeMode.system,
+      };
     }
   } catch (_) {}
 }
@@ -41,7 +44,11 @@ void _saveThemeMode(ThemeMode m) {
     final f = _themeFile();
     if (f == null) return;
     f.parent.createSync(recursive: true);
-    f.writeAsStringSync(m == ThemeMode.light ? 'light' : 'dark');
+    f.writeAsStringSync(switch (m) {
+      ThemeMode.light => 'light',
+      ThemeMode.dark => 'dark',
+      ThemeMode.system => 'system',
+    });
   } catch (_) {}
 }
 
@@ -478,16 +485,22 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
           _Wordmark(),
         ]),
         actions: [
-          IconButton(
-            tooltip: appThemeMode.value == ThemeMode.dark ? 'Light theme' : 'Dark theme',
-            icon: Icon(appThemeMode.value == ThemeMode.dark
-                ? Icons.light_mode_outlined
-                : Icons.dark_mode_outlined),
-            onPressed: () {
-              appThemeMode.value =
-                  appThemeMode.value == ThemeMode.dark ? ThemeMode.light : ThemeMode.dark;
-              _saveThemeMode(appThemeMode.value);
+          PopupMenuButton<ThemeMode>(
+            tooltip: 'Theme',
+            icon: Icon(switch (appThemeMode.value) {
+              ThemeMode.light => Icons.light_mode_outlined,
+              ThemeMode.dark => Icons.dark_mode_outlined,
+              ThemeMode.system => Icons.brightness_auto_outlined,
+            }),
+            onSelected: (m) {
+              appThemeMode.value = m;
+              _saveThemeMode(m);
             },
+            itemBuilder: (_) => [
+              _themeMenuItem(ThemeMode.light, Icons.light_mode_outlined, 'Light'),
+              _themeMenuItem(ThemeMode.dark, Icons.dark_mode_outlined, 'Dark'),
+              _themeMenuItem(ThemeMode.system, Icons.brightness_auto_outlined, 'System'),
+            ],
           ),
           IconButton(
             tooltip: 'Stop all',
@@ -642,15 +655,13 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
               controller: _tabs,
               physics: const NeverScrollableScrollPhysics(),
               children: [
-                // configure
-                SingleChildScrollView(
-                  padding: const EdgeInsets.all(16),
-                  child: ConfigEditor(
-                    key: _editorKey,
-                    config: c,
-                    onSave: _save,
-                    onDelete: _delete,
-                  ),
+                // configure (ConfigEditor scrolls its own fields and pins the
+                // action bar at the bottom)
+                ConfigEditor(
+                  key: _editorKey,
+                  config: c,
+                  onSave: _save,
+                  onDelete: _delete,
                 ),
                 // monitor
                 MonitorView(
@@ -683,6 +694,21 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
             ),
           ),
         ],
+    );
+  }
+
+  PopupMenuItem<ThemeMode> _themeMenuItem(ThemeMode m, IconData icon, String label) {
+    final selected = appThemeMode.value == m;
+    final color = selected ? Theme.of(context).colorScheme.primary : null;
+    return PopupMenuItem<ThemeMode>(
+      value: m,
+      child: Row(children: [
+        Icon(icon, size: 18, color: color),
+        const SizedBox(width: 10),
+        Text(label, style: TextStyle(color: color, fontWeight: selected ? FontWeight.w600 : null)),
+        const Spacer(),
+        if (selected) Icon(Icons.check, size: 16, color: color),
+      ]),
     );
   }
 
@@ -903,8 +929,14 @@ class _ConfigEditorState extends State<ConfigEditor> {
       // The right credential field fills whatever is left after the leadW column.
       final credRightW = (cw - leadW - 12).clamp(120.0, 4000.0).toDouble();
       return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // Scrollable field area — the pinned action bar below never moves.
+          Expanded(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
           // ── 1 · Name ─────────────────────────────────────────
           _sectionHead('1', 'Name', topPad: 6),
           SizedBox(width: cw, child: _field(_name, 'Name')),
@@ -1056,39 +1088,50 @@ class _ConfigEditorState extends State<ConfigEditor> {
             ),
           ),
 
-          // Separate the config fields from the actions.
-          const SizedBox(height: 22),
+          const SizedBox(height: 16),
+                ],
+              ),
+            ),
+          ),
+          // Pinned action bar: locked to the bottom (never scrolls) and 48px tall
+          // so its top divider lines up with the Local DynamoDB panel's divider
+          // across the sidebar split.
           const Divider(height: 1),
-          const SizedBox(height: 18),
-          Row(children: [
-            FilledButton.icon(
-              icon: const Icon(Icons.save),
-              label: const Text('Save'),
-              onPressed: () => widget.onSave(_collect()),
+          SizedBox(
+            height: 48,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Row(children: [
+                FilledButton.icon(
+                  icon: const Icon(Icons.save),
+                  label: const Text('Save'),
+                  onPressed: () => widget.onSave(_collect()),
+                ),
+                const SizedBox(width: 12),
+                // Restore: discard unsaved edits, reverting fields to the saved config.
+                OutlinedButton.icon(
+                  icon: const Icon(Icons.restore),
+                  label: const Text('Restore'),
+                  onPressed: () {
+                    final wasDirty = isDirty;
+                    _resetControllers();
+                    if (wasDirty && mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Reverted unsaved changes')),
+                      );
+                    }
+                  },
+                ),
+                const Spacer(),
+                OutlinedButton.icon(
+                  icon: const Icon(Icons.delete_outline),
+                  label: const Text('Delete'),
+                  style: OutlinedButton.styleFrom(foregroundColor: Colors.redAccent),
+                  onPressed: _confirmDelete,
+                ),
+              ]),
             ),
-            const SizedBox(width: 12),
-            // Restore: discard unsaved edits, reverting fields to the saved config.
-            OutlinedButton.icon(
-              icon: const Icon(Icons.restore),
-              label: const Text('Restore'),
-              onPressed: () {
-                final wasDirty = isDirty;
-                _resetControllers();
-                if (wasDirty && mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Reverted unsaved changes')),
-                  );
-                }
-              },
-            ),
-            const Spacer(),
-            OutlinedButton.icon(
-              icon: const Icon(Icons.delete_outline),
-              label: const Text('Delete'),
-              style: OutlinedButton.styleFrom(foregroundColor: Colors.redAccent),
-              onPressed: _confirmDelete,
-            ),
-          ]),
+          ),
         ],
       );
     });

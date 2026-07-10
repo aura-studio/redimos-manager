@@ -331,6 +331,7 @@ class _CmdConsoleState extends State<CmdConsole>
   final List<String> _history = [];
   int _histIdx = -1;
   bool _connecting = false;
+  bool _everConnected = false; // distinguishes "Connecting…" from "Reconnecting…"
   int _db = 0;
   Timer? _reconnectTimer; // auto-reconnect while the instance is meant to be up
 
@@ -387,8 +388,10 @@ class _CmdConsoleState extends State<CmdConsole>
     final c = RedisConsoleClient(widget.host, widget.port, auth: widget.auth);
     c.onClosed = (e) {
       if (!mounted) return;
-      setState(() => _append('* disconnected: $e', _Kind.info));
-      _scheduleReconnect(); // instance restarted under us → reconnect when it's back
+      // The instance dropped (restarted / backend cycled). No noisy log line —
+      // the build swaps to a centered "Reconnecting…" spinner instead.
+      setState(() => _client = null);
+      _scheduleReconnect();
     };
     try {
       await c.connect();
@@ -399,33 +402,23 @@ class _CmdConsoleState extends State<CmdConsole>
       setState(() {
         _client = c;
         _connecting = false;
-        _append(
-            retry
-                ? '* reconnected to ${widget.host}:${widget.port}'
-                : '* connected to ${widget.host}:${widget.port}',
-            _Kind.info);
+        _everConnected = true;
       });
       _focus.requestFocus();
     } catch (e) {
       if (!mounted) return;
-      setState(() {
-        _connecting = false;
-        // Only report the first failure; retries stay quiet until they succeed.
-        if (!retry) {
-          _append('* could not connect to ${widget.host}:${widget.port} — $e',
-              _Kind.error);
-        }
-      });
-      _scheduleReconnect(); // keep trying while the instance is running
+      setState(() => _connecting = false);
+      _scheduleReconnect(); // keep trying (silently) while the instance is running
     }
   }
 
   void _disconnect({bool silent = false}) {
     _reconnectTimer?.cancel();
     _client?.close();
-    _client = null;
-    if (!silent && mounted) {
-      setState(() => _append('* disconnected', _Kind.info));
+    if (mounted) {
+      setState(() => _client = null);
+    } else {
+      _client = null;
     }
   }
 
@@ -546,6 +539,12 @@ class _CmdConsoleState extends State<CmdConsole>
     // Terminal palette, theme-aware. Dark keeps the classic near-black console;
     // light uses a soft off-white so the Cmd tab isn't a black hole in a light UI.
     final termBg = dark ? const Color(0xFF0B0E13) : const Color(0xFFF7F8FA);
+
+    // Not connected yet (initial connect or an in-progress reconnect): a centered
+    // spinner, and the console is not operable until it's back.
+    if (!connected) {
+      return Container(color: termBg, child: _loadingView());
+    }
     final inputBg = dark ? const Color(0xFF0E1116) : const Color(0xFFEDEFF3);
     final inputText = dark ? Colors.white : const Color(0xFF1B1F24);
     final hintColor = dark ? const Color(0xFF55606E) : const Color(0xFF98A0AC);
@@ -651,6 +650,29 @@ class _CmdConsoleState extends State<CmdConsole>
               ],
             ),
           ),
+        ],
+      ),
+    );
+  }
+
+  // Centered loading view shown while (re)connecting — mirrors _placeholder's
+  // layout but with a spinner. The console stays non-interactive until connected.
+  Widget _loadingView() {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const SizedBox(
+            width: 34,
+            height: 34,
+            child: CircularProgressIndicator(strokeWidth: 3),
+          ),
+          const SizedBox(height: 18),
+          Text(_everConnected ? 'Reconnecting…' : 'Connecting…',
+              style: const TextStyle(fontSize: 14)),
+          const SizedBox(height: 6),
+          Text('${widget.host}:${widget.port}',
+              style: const TextStyle(fontSize: 12, color: Colors.grey)),
         ],
       ),
     );
