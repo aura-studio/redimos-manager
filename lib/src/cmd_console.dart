@@ -331,7 +331,6 @@ class _CmdConsoleState extends State<CmdConsole>
   final List<String> _history = [];
   int _histIdx = -1;
   bool _connecting = false;
-  bool _busy = false;
   int _db = 0;
 
   @override
@@ -425,10 +424,18 @@ class _CmdConsoleState extends State<CmdConsole>
   String get _prompt =>
       '${widget.host}:${widget.port}${_db > 0 ? '[$_db]' : ''}> ';
 
+  void _refocus() {
+    // Keep typing after a command: return focus to the input on the next frame.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _focus.requestFocus();
+    });
+  }
+
   Future<void> _submit(String raw) async {
     final line = raw.trim();
     _input.clear();
     _histIdx = -1;
+    _refocus();
     if (line.isEmpty) return;
     _history.add(line);
 
@@ -436,6 +443,7 @@ class _CmdConsoleState extends State<CmdConsole>
     final lower = line.toLowerCase();
     if (lower == 'clear' || lower == 'cls') {
       setState(() => _out.clear());
+      _refocus();
       return;
     }
 
@@ -453,12 +461,10 @@ class _CmdConsoleState extends State<CmdConsole>
       return;
     }
 
-    setState(() => _busy = true);
     try {
       final reply = await client.command(args);
       if (!mounted) return;
       setState(() {
-        _busy = false;
         final isErr = reply is RespError;
         _append(formatReply(reply), isErr ? _Kind.error : _Kind.reply);
         // track SELECT so the prompt reflects the current DB
@@ -468,12 +474,13 @@ class _CmdConsoleState extends State<CmdConsole>
           _db = int.tryParse(args[1]) ?? _db;
         }
       });
+      _refocus();
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _busy = false;
         _append('(error) $e', _Kind.error);
       });
+      _refocus();
     }
   }
 
@@ -573,7 +580,7 @@ class _CmdConsoleState extends State<CmdConsole>
                       controller: _input,
                       focusNode: _focus,
                       autofocus: true,
-                      enabled: connected && !_busy,
+                      enabled: connected,
                       style: const TextStyle(
                           fontFamily: 'monospace', fontSize: 12.5, color: Colors.white),
                       cursorColor: const Color(0xFF7FB2E6),

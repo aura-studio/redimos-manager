@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
 
@@ -170,6 +171,8 @@ class _HomePageState extends State<HomePage> {
   Map<String, InstanceStatus> _status = {};
   String? _selectedId;
   Timer? _poll;
+  // Lets the parent inspect / save the editor form before leaving it.
+  final _editorKey = GlobalKey<_ConfigEditorState>();
 
   // Rolling CPU / memory history per config id, fed by the status poll and
   // drawn as sparklines in the monitor panel.
@@ -177,6 +180,9 @@ class _HomePageState extends State<HomePage> {
   final Map<String, List<double>> _cpuHist = {};
   final Map<String, List<double>> _memHist = {};
   final Map<String, List<double>> _opsHist = {}; // redimos ops/s (from /metrics)
+  // The Local DynamoDB child's own CPU / memory history (singleton).
+  final List<double> _ddbCpuHist = [];
+  final List<double> _ddbMemHist = [];
 
   LocalDdbInfo? _ddb; // Local DynamoDB snapshot, refreshed with the status poll
 
@@ -223,10 +229,27 @@ class _HomePageState extends State<HomePage> {
     try {
       ddb = _core!.ddbGet();
     } catch (_) {}
+    if (ddb != null && ddb.status == 'running') {
+      _ddbCpuHist.add(ddb.cpuPercent);
+      _ddbMemHist.add(ddb.memBytes / (1024 * 1024));
+      if (_ddbCpuHist.length > _histCap) _ddbCpuHist.removeAt(0);
+      if (_ddbMemHist.length > _histCap) _ddbMemHist.removeAt(0);
+    }
     setState(() {
       _status = st;
       if (ddb != null) _ddb = ddb;
     });
+  }
+
+  // A config is wired to the managed Local DynamoDB when its endpoint points at
+  // that engine's port on localhost.
+  bool _usesLocalDdb(RedimosConfig c) {
+    final ddb = _ddb;
+    if (ddb == null) return false;
+    final ep = c.endpoint.toLowerCase();
+    if (ep.isEmpty) return false;
+    final p = ddb.config.port;
+    return ep.contains('localhost:$p') || ep.contains('127.0.0.1:$p');
   }
 
   RedimosConfig? get _selected {
@@ -245,7 +268,34 @@ class _HomePageState extends State<HomePage> {
     ));
   }
 
-  void _newConfig() {
+  /// If the config editor has unsaved edits, prompt to save / discard / cancel.
+  /// Returns true when it is OK to proceed (saved or discarded), false to abort.
+  Future<bool> _confirmLeaveEditor() async {
+    final st = _editorKey.currentState;
+    if (st == null || !st.isDirty) return true;
+    if (!mounted) return true;
+    final choice = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Unsaved changes'),
+        content: const Text(
+            'This config has unsaved changes. Do you want to save them before continuing?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, 'cancel'), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(ctx, 'discard'), child: const Text("Don't save")),
+          FilledButton(onPressed: () => Navigator.pop(ctx, 'save'), child: const Text('Save')),
+        ],
+      ),
+    );
+    if (choice == 'save') {
+      await st.saveNow();
+      return true;
+    }
+    return choice == 'discard';
+  }
+
+  Future<void> _newConfig() async {
+    if (!await _confirmLeaveEditor()) return;
     final c = RedimosConfig(name: 'new-config', port: _nextFreePort());
     setState(() {
       _configs = [..._configs, c];
@@ -300,7 +350,7 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  void _startStop(RedimosConfig c) {
+  void _startStop(RedimosConfig c) async {
     if (c.id.startsWith('unsaved-')) {
       _toast('Save the config before starting it', error: true);
       return;
@@ -309,16 +359,23 @@ class _HomePageState extends State<HomePage> {
     // button stops it (Stop also cancels a pending auto-restart).
     final s = _status[c.id]?.status;
     final active = s == 'running' || s == 'restarting';
-    try {
-      if (active) {
+    if (active) {
+      try {
         _core!.stop(c.id);
-      } else {
-        setState(() => _selectedId = c.id);
-        _core!.start(c.id);
+        _refresh();
+      } catch (e) {
+        _toast('Stop failed: $e', error: true);
       }
+      return;
+    }
+    // Starting: the proxy runs the *saved* config, so offer to save unsaved edits first.
+    if (!await _confirmLeaveEditor()) return;
+    try {
+      setState(() => _selectedId = c.id);
+      _core!.start(c.id);
       _refresh();
     } catch (e) {
-      _toast('${active ? "Stop" : "Start"} failed: $e', error: true);
+      _toast('Start failed: $e', error: true);
     }
   }
 
@@ -414,33 +471,9 @@ class _HomePageState extends State<HomePage> {
           core: _core!,
           info: _ddb,
           onMutated: _refresh,
-          onNewLocalConfig: _newLocalConfig,
         ),
       ],
     );
-  }
-
-  /// One-click config pointed at the running Local DynamoDB: local endpoint,
-  /// auto-create the table, supervised.
-  void _newLocalConfig(int ddbPort) {
-    final c = RedimosConfig(
-      name: 'local-ddb',
-      version: 'v2',
-      port: _nextFreePort(),
-      table: 'redis-data',
-      endpoint: 'http://localhost:$ddbPort',
-      region: 'us-east-1',
-      autoCreateTable: true,
-      autoRestart: true,
-    );
-    try {
-      final id = _core!.saveConfig(c);
-      _reload();
-      setState(() => _selectedId = id);
-      _toast('Created "local-ddb" pointed at :$ddbPort');
-    } catch (e) {
-      _toast('Create failed: $e', error: true);
-    }
   }
 
   Widget _configTile(RedimosConfig c) {
@@ -469,7 +502,10 @@ class _HomePageState extends State<HomePage> {
               color: active ? Colors.redAccent : goGreen(context)),
           onPressed: () => _startStop(c),
         ),
-        onTap: () => setState(() => _selectedId = c.id),
+        onTap: () async {
+          if (c.id == _selectedId) return;
+          if (await _confirmLeaveEditor()) setState(() => _selectedId = c.id);
+        },
       ),
     );
   }
@@ -523,7 +559,7 @@ class _HomePageState extends State<HomePage> {
                 SingleChildScrollView(
                   padding: const EdgeInsets.all(16),
                   child: ConfigEditor(
-                    key: ValueKey(c.id),
+                    key: _editorKey,
                     config: c,
                     onSave: _save,
                     onDelete: _delete,
@@ -536,6 +572,9 @@ class _HomePageState extends State<HomePage> {
                   memHist: _memHist[c.id] ?? const [],
                   opsHist: _opsHist[c.id] ?? const [],
                   embedded: true,
+                  ddb: _usesLocalDdb(c) ? _ddb : null,
+                  ddbCpuHist: _ddbCpuHist,
+                  ddbMemHist: _ddbMemHist,
                 ),
                 // logs
                 LogsView(
@@ -656,6 +695,50 @@ class _ConfigEditorState extends State<ConfigEditor> {
     }
     super.dispose();
   }
+
+  @override
+  void didUpdateWidget(ConfigEditor old) {
+    super.didUpdateWidget(old);
+    // The parent reuses this editor (GlobalKey) across configs; when the
+    // underlying config changes, reload the form from it.
+    if (old.config.id != widget.config.id) _resetControllers();
+  }
+
+  void _resetControllers() {
+    final c = widget.config;
+    _name.text = c.name;
+    _port.text = c.port.toString();
+    _table.text = c.table;
+    _endpoint.text = c.endpoint;
+    _partitionID.text = c.partitionID;
+    _region.text = c.region;
+    _ak.text = c.accessKeyId;
+    _sk.text = c.secretKey;
+    _sessionToken.text = c.sessionToken;
+    _source.text = c.source;
+    _pass.text = c.requirepass;
+    for (final ctl in _flagVals) {
+      ctl.dispose();
+    }
+    _flagVals.clear();
+    setState(() {
+      _version = c.version;
+      _multiDb = c.multiDb;
+      _autoCreate = c.autoCreateTable;
+      _autoRestart = c.autoRestart;
+      _runMode = c.runMode.isEmpty ? 'native' : c.runMode;
+      _extraFlags = c.extraFlags.map((f) => FlagKV(key: f.key, value: f.value)).toList();
+      for (final f in _extraFlags) {
+        _flagVals.add(TextEditingController(text: f.value));
+      }
+    });
+  }
+
+  /// Whether the form differs from the saved config.
+  bool get isDirty =>
+      jsonEncode(_collect().toJson()) != jsonEncode(widget.config.toJson());
+
+  Future<void> saveNow() => widget.onSave(_collect());
 
   void _addFlag() => setState(() {
         _extraFlags.add(FlagKV());
@@ -1123,6 +1206,11 @@ class MonitorView extends StatelessWidget {
   final bool expanded;
   final VoidCallback? onToggle;
   final bool embedded; // headerless, always-shown tiles (for the tab layout)
+  // The managed Local DynamoDB, shown as its own section when this config points
+  // at it. null = the config isn't wired to the local engine.
+  final LocalDdbInfo? ddb;
+  final List<double> ddbCpuHist;
+  final List<double> ddbMemHist;
   const MonitorView({
     super.key,
     required this.status,
@@ -1132,6 +1220,9 @@ class MonitorView extends StatelessWidget {
     this.expanded = true,
     this.onToggle,
     this.embedded = false,
+    this.ddb,
+    this.ddbCpuHist = const [],
+    this.ddbMemHist = const [],
   });
 
   String _fmtUptime(int s) {
@@ -1219,15 +1310,9 @@ class MonitorView extends StatelessWidget {
         ),
         const SizedBox(height: 12),
         Wrap(spacing: 12, runSpacing: 12, children: [
+          // Dynamic metrics first …
           _InfoTile(label: 'Uptime', value: running ? _fmtUptime(st!.uptimeSec) : '—'),
           _InfoTile(label: 'Restarts', value: '${st?.restarts ?? 0}'),
-          _InfoTile(
-              label: (st?.runMode ?? 'native') == 'docker' ? 'Container' : 'PID',
-              value: running ? '${st!.pid}' : '—'),
-          _InfoTile(
-              label: 'RunMode',
-              value: (st?.runMode ?? 'native') == 'docker' ? 'Docker' : 'Native'),
-          _InfoTile(label: 'AutoRestart', value: (st?.autoRestart ?? false) ? 'On' : 'Off'),
           _InfoTile(
               label: 'Latency',
               value: running && st!.metricsOk ? '${st.avgLatencyMs.toStringAsFixed(2)} ms' : '—'),
@@ -1239,6 +1324,72 @@ class MonitorView extends StatelessWidget {
                   : st.healthy
                       ? (st.ready ? 'Ready' : 'Healthy')
                       : 'Down'),
+          // … fixed / static values last.
+          _InfoTile(
+              label: (st?.runMode ?? 'native') == 'docker' ? 'Container' : 'PID',
+              value: running ? '${st!.pid}' : '—'),
+          _InfoTile(
+              label: 'RunMode',
+              value: (st?.runMode ?? 'native') == 'docker' ? 'Docker' : 'Native'),
+        ]),
+        if (ddb != null) _ddbSection(context, ddb!),
+      ],
+    );
+  }
+
+  // A separated "Local DynamoDB" section — the backing engine's own metrics,
+  // kept distinct from the redimos instance metrics above.
+  Widget _ddbSection(BuildContext context, LocalDdbInfo d) {
+    final up = d.status == 'running';
+    final engine = switch (d.config.engine) {
+      'docker' => 'Docker',
+      'localstack' => 'LocalStack',
+      _ => 'Java',
+    };
+    final scheme = Theme.of(context).colorScheme;
+    Widget spark(String label, String value, List<double> data, Color color) =>
+        _SparkTile(label: label, value: value, data: data, color: color, width: null, sparkHeight: 44);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const SizedBox(height: 20),
+        const Divider(height: 1),
+        const SizedBox(height: 14),
+        Row(children: [
+          Icon(Icons.storage, size: 16, color: scheme.onSurfaceVariant),
+          const SizedBox(width: 8),
+          Text('LOCAL DYNAMODB',
+              style: TextStyle(
+                  fontSize: 12,
+                  letterSpacing: 1.3,
+                  fontWeight: FontWeight.w700,
+                  color: scheme.onSurfaceVariant)),
+          const Spacer(),
+          Text(up ? 'Running · :${d.config.port}' : d.status,
+              style: TextStyle(fontSize: 11, color: Theme.of(context).textTheme.bodySmall?.color)),
+        ]),
+        const SizedBox(height: 12),
+        IntrinsicHeight(
+          child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            Expanded(
+                child: spark('CPU', up ? '${d.cpuPercent.toStringAsFixed(1)} %' : '—',
+                    ddbCpuHist, const Color(0xFF7FB2E6))),
+            const SizedBox(width: 12),
+            Expanded(
+                child: spark('Memory', up ? '${(d.memBytes / (1024 * 1024)).round()} MB' : '—',
+                    ddbMemHist, const Color(0xFF57CF92))),
+          ]),
+        ),
+        const SizedBox(height: 12),
+        Wrap(spacing: 12, runSpacing: 12, children: [
+          // Dynamic first …
+          _InfoTile(label: 'Uptime', value: up ? _fmtUptime(d.uptimeSec) : '—'),
+          _InfoTile(label: 'Restarts', value: '${d.restarts}'),
+          _InfoTile(label: 'Status', value: up ? 'Running' : d.status),
+          // … fixed config last.
+          _InfoTile(label: 'Engine', value: engine),
+          _InfoTile(label: 'Storage', value: d.config.storage == 'persist' ? 'Persisted' : 'In-mem'),
+          _InfoTile(label: 'Port', value: '${d.config.port}'),
         ]),
       ],
     );
@@ -1411,13 +1562,11 @@ class LocalDdbPanel extends StatefulWidget {
   final NativeCore core;
   final LocalDdbInfo? info;
   final VoidCallback onMutated;
-  final void Function(int ddbPort) onNewLocalConfig;
   const LocalDdbPanel({
     super.key,
     required this.core,
     required this.info,
     required this.onMutated,
-    required this.onNewLocalConfig,
   });
 
   @override
@@ -1567,7 +1716,8 @@ class _LocalDdbPanelState extends State<LocalDdbPanel> {
           InkWell(
             onTap: () => setState(() => _expanded = !_expanded),
             child: Row(children: [
-              Icon(_expanded ? Icons.expand_less : Icons.expand_more,
+              // Bottom-docked panel grows upward: up-chevron to expand, down to collapse.
+              Icon(_expanded ? Icons.expand_more : Icons.expand_less,
                   size: 18, color: Colors.grey),
               const SizedBox(width: 4),
               Container(
@@ -1720,12 +1870,6 @@ class _LocalDdbPanelState extends State<LocalDdbPanel> {
                   Clipboard.setData(
                       ClipboardData(text: 'http://localhost:${cfg.port}'));
                 },
-              ),
-              IconButton(
-                tooltip: 'New config pointed at this endpoint',
-                visualDensity: VisualDensity.compact,
-                icon: const Icon(Icons.add_link, size: 18),
-                onPressed: () => widget.onNewLocalConfig(cfg.port),
               ),
             ],
           ]),
