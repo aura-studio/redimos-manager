@@ -392,7 +392,7 @@ func (m *manager) ddbStart() error {
 	}
 	m.mu.Unlock()
 
-	in := &instance{port: cfg.Port, autoRestart: true}
+	in := &instance{port: cfg.Port, role: "ddb", autoRestart: true}
 	switch cfg.Engine {
 	case "docker", "localstack":
 		docker, ok := dockerBin()
@@ -447,7 +447,11 @@ func (m *manager) ddbStart() error {
 		}
 		dir := m.ddbJavaDir()
 		in.bin = java
-		args := []string{"-Djava.library.path=" + filepath.Join(dir, "DynamoDBLocal_lib"),
+		// The leading -D is a cmdline sentinel: JVM system properties before -jar
+		// are invisible to the app but show up in `ps`, tagging the process as
+		// ours even if the registry is lost.
+		args := []string{"-Dredimos.manager.session=" + m.sessionID,
+			"-Djava.library.path=" + filepath.Join(dir, "DynamoDBLocal_lib"),
 			"-jar", filepath.Join(dir, "DynamoDBLocal.jar"),
 			"-port", strconv.Itoa(cfg.Port)}
 		if cfg.Storage == "persist" {
@@ -532,23 +536,25 @@ func reapStalePort(port int, match string) {
 	}
 }
 
-// reapStartupOrphans cleans up children left behind by a previous app session
-// that ended ungracefully (SIGKILL / crash / power loss), where our redimos or
-// DynamoDBLocal processes were reparented to launchd (PPID 1) and keep holding
-// their ports. Run once at startup.
+// reapStartupOrphans is the LEGACY heuristic backstop behind reconcileOnBoot:
+// it catches our orphans when the registry was lost or predates them. A
+// candidate must clear three independent bars before it is killed:
 //
-// It targets *only* true orphans — processes whose PPID is 1 — that also match
-// one of our own managed paths (an install-specific absolute path, so unrelated
-// software on the same port is safe). Because a second, concurrently-running app
-// instance's children have that instance as their parent (PPID != 1), they are
-// never touched: this reaps yesterday's leftovers, not a live sibling's work.
+//   1. PPID == 1 — on macOS this only proves "launchd child" (every GUI app
+//      qualifies), so it merely scopes the scan to processes with no live
+//      parent;
+//   2. its command line references one of our managed absolute paths;
+//   3. its ENVIRONMENT carries the REDIMOS_MANAGER_SESSION sentinel that
+//      spawn() injects — which a user's own copy of the same binary (nohup'd
+//      from a closed terminal, or a `tail -f` on a path under ours) never has.
 //
-// This is the durable "restart compatibility" story: the per-port reapStalePort
-// at start() self-heals a single port on demand, rm_shutdown prevents new
-// orphans on a clean quit, and this sweep mops up whatever slipped past both.
+// Bar 3 is what kills the false-positive class the audit demonstrated; orphans
+// from builds too old to set the sentinel are healed lazily by reapStalePort at
+// the next Start of their port instead. Runs once at boot, under the
+// single-instance lock.
 func (m *manager) reapStartupOrphans() {
 	if runtime.GOOS == "windows" {
-		return // relies on ps/PPID semantics; the supervisor guard covers Windows
+		return // registry reconcile covers Windows; no ps/PPID semantics there
 	}
 	m.mu.Lock()
 	var matches []string
@@ -574,7 +580,7 @@ func (m *manager) reapStartupOrphans() {
 		pid, e1 := strconv.Atoi(fields[0])
 		ppid, e2 := strconv.Atoi(fields[1])
 		if e1 != nil || e2 != nil || ppid != 1 || pid == self {
-			continue // not an orphan, or it's us
+			continue // not parentless, or it's us
 		}
 		matched := false
 		for _, mstr := range matches {
@@ -586,10 +592,19 @@ func (m *manager) reapStartupOrphans() {
 		if !matched {
 			continue // not one of our managed binaries
 		}
-		if proc, ferr := os.FindProcess(pid); ferr == nil {
-			_ = proc.Kill()
+		if !hasManagerEnvMarker(pid) {
+			continue // same path but not spawned by us — leave it alone
 		}
+		killChildTree(pid)
 	}
+}
+
+// hasManagerEnvMarker reports whether pid's environment (the exec-time
+// snapshot, readable for same-user processes) carries the sentinel spawn()
+// injects into every child.
+func hasManagerEnvMarker(pid int) bool {
+	out, err := exec.Command("ps", "-E", "-ww", "-o", "command=", "-p", strconv.Itoa(pid)).Output()
+	return err == nil && strings.Contains(string(out), "REDIMOS_MANAGER_SESSION=")
 }
 
 // sweepLabeledContainers removes containers left behind by previous sessions.

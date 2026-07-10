@@ -107,6 +107,7 @@ type instance struct {
 	cmd     *exec.Cmd
 	pid     int
 	port    int
+	role    string // registry key: "config:<id>" | "ddb"
 	started time.Time
 	status  string // "running" | "restarting" | "stopped" | "error" | "failed"
 	exitMsg string
@@ -194,9 +195,11 @@ func newManager() *manager {
 		m.lockFile = f
 		// A fresh session inherits no live process handles, so any redimos /
 		// DynamoDBLocal still running from a previous session is an orphan we
-		// can't supervise and that would collide with a restart. Sweep them once
-		// at boot. Containers are swept async — docker probing can take seconds
-		// and this runs during dylib load.
+		// can't supervise and that would collide with a restart. Resolve them at
+		// boot: first the registry (exact identity), then the legacy heuristic
+		// sweep as backstop. Containers are swept async — docker probing can
+		// take seconds and this runs during dylib load.
+		m.reconcileOnBoot()
 		m.reapStartupOrphans()
 		go m.sweepLabeledContainers(nil)
 	}
@@ -410,6 +413,7 @@ func (m *manager) start(id string) error {
 	// A fresh user-initiated start: new instance with restart counters reset.
 	in := &instance{
 		port:        cfg.Port,
+		role:        "config:" + cfg.ID,
 		bin:         bin,
 		launchArgs:  args,
 		launchEnv:   env,
@@ -530,7 +534,10 @@ func (in *instance) spawn() error {
 		_ = exec.Command(in.bin, "rm", "-f", in.container).Run()
 	}
 	cmd := exec.Command(in.bin, in.launchArgs...)
-	cmd.Env = in.launchEnv
+	// Sentinel env marker: identifies the child as ours to `ps -E`-style
+	// inspection even when the registry is lost (docker CLI children carry it
+	// too, though the container itself is identified by label instead).
+	cmd.Env = append(append([]string{}, in.launchEnv...), "REDIMOS_MANAGER_SESSION="+mgr.sessionID)
 	preSpawn(cmd) // per-OS: own process group (darwin) / job containment (windows)
 	stdout, _ := cmd.StdoutPipe()
 	stderr, _ := cmd.StderrPipe()
@@ -565,7 +572,17 @@ func (in *instance) spawn() error {
 	in.opsPerSec, in.avgLatencyMs, in.throttled = 0, 0, 0
 	in.prevMtxAt = time.Time{}
 	in.appendLogLocked(fmt.Sprintf("$ %s %s", in.bin, strings.Join(in.launchArgs, " ")))
+	role, cont, port, bin := in.role, in.container, in.port, in.bin
 	in.mu.Unlock()
+
+	// Record the child in the persisted registry with its exact identity so the
+	// next session's boot reconciler can tell it apart from strangers.
+	if start, comm, ok := procIdentity(cmd.Process.Pid); ok {
+		regUpsert(childRec{
+			Role: role, PID: cmd.Process.Pid, StartUnixMicro: start, Comm: comm,
+			Port: port, Container: cont, Bin: bin, Session: mgr.sessionID,
+		})
+	}
 
 	go pump(stdout, in)
 	go pump(stderr, in)
@@ -581,7 +598,9 @@ func (in *instance) superviseExit(werr error) {
 	if in.intendedStop {
 		in.status = "stopped"
 		in.appendLogLocked("[stopped]")
+		role := in.role
 		in.mu.Unlock()
+		regRemove(role) // terminal: nothing left to reconcile at next boot
 		return
 	}
 	if werr != nil {
@@ -593,7 +612,9 @@ func (in *instance) superviseExit(werr error) {
 	}
 	if !in.autoRestart {
 		in.status = "error"
+		role := in.role
 		in.mu.Unlock()
+		regRemove(role)
 		return
 	}
 	now := time.Now()
@@ -605,7 +626,9 @@ func (in *instance) superviseExit(werr error) {
 	if in.failCount >= crashLoopMax {
 		in.status = "failed"
 		in.appendLogLocked(fmt.Sprintf("[supervisor: gave up after %d exits within %s]", in.failCount, crashLoopWindow))
+		role := in.role
 		in.mu.Unlock()
+		regRemove(role)
 		return
 	}
 	backoff := restartBackoff[min(in.failCount-1, len(restartBackoff)-1)]
@@ -671,11 +694,16 @@ func (in *instance) terminate() {
 	pid := in.pid
 	cont := in.container
 	bin := in.bin
+	role := in.role
 	running := in.status == "running"
-	if in.status == "restarting" || in.status == "preparing" {
+	settled := in.status == "restarting" || in.status == "preparing"
+	if settled {
 		in.status = "stopped" // no live process right now
 	}
 	in.mu.Unlock()
+	if settled {
+		regRemove(role) // no exit event will fire for a child that isn't running
+	}
 	if cont != "" {
 		// Removing the container makes the foreground docker CLI exit on its own.
 		_ = exec.Command(bin, "rm", "-f", cont).Run()
