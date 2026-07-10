@@ -1,5 +1,14 @@
 # 孤儿进程处理方案调研(2026-07-10)
 
+> **实施状态(2026-07-10 全部落地)**:P0-P4 五阶段全部实现并合入,再经 22-agent 对抗审查工作流逐条修复(commit 链 8f672ea→121d36b)。
+> - **P0**(8f672ea):Setpgid/killpg 树杀 + docker session label 清扫 + 单实例 flock + 退出/退避竞态修补。
+> - **P1**(9b38b2d):children registry(pid+start-µs+comm 精确身份)+ boot 对账 + 三重哨兵(env/-D/label),legacy 路径子串 sweep 加哨兵闸。
+> - **P2**(8f2e5f9):Windows Job Object KILL_ON_JOB_CLOSE + 端口 reap + 三段法孤儿判定(仅交叉编译验证,附真机冒烟清单于 §P2)。
+> - **P3**(c9faa82):macOS lifeline janitor(stdin EOF 触发,实测 kill -9 后 ~1s 收割)。
+> - **P4**(7fe6de2):DDB/docker 收养(kqueue/docker-wait watcher 顶替 cmd.Wait)+ adopted 徽标;native redimos 保持杀。
+> - **审查修复**(121d36b):mgr nil 竞态、docker-wait 误判杀活容器、Windows 空表越界 panic、start-during-restarting 幽灵、janitor 重生风暴、TOCTOU、fd 泄漏、job 句柄泄漏等 16 处;新增 scripts/build-macos.sh。
+> - 构建:darwin dylib + mingw windows/amd64 c-shared 全绿;E2E R1-R5(start/stop/shutdown 净、SIGKILL 收割、数据保全收养、start 门禁)全绿;⚠️Windows 全部为交叉编译验证,未真机跑。
+>
 > 调研方式:6 路并行调研(macOS 机制 / Windows 机制 / 监督器案例 / 收养式设计 / 现状审计 / 进程标识技术)+ 16 条关键事实断言逐条对抗验证(文档考证 + 本机实验)。共 22 个 agent,全部实验在本机(macOS 15.7.3 / Darwin 24.6, go1.26, Docker 29.6)用一次性夹具完成。
 >
 > 结论先行:**当前三层方案(优雅退出 rm_shutdown / 按端口 reapStalePort / 启动 PPID==1+路径子串清扫)方向正确但地基弱**——识别靠「路径子串」既会误杀也会漏杀,docker 容器完全在盲区,Windows 两层清扫是 no-op。正解是把「识别」升级为**精确身份注册表**,把「预防」升级为**每平台生命周期绑定**(Windows Job Object / macOS lifeline 管道),并对唯一有状态的子进程(Local DDB)考虑**收养**而非杀。
