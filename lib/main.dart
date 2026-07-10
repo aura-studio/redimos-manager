@@ -1537,12 +1537,12 @@ class MonitorView extends StatelessWidget {
           _InfoTile(label: 'Uptime', value: up ? _fmtUptime(d.uptimeSec) : '—'),
           _InfoTile(label: 'Restarts', value: '${d.restarts}'),
           _InfoTile(label: 'Status', value: up ? 'Running' : d.status),
-          // … fixed config, with PID kept second-to-last so it lines up with the
-          // redimos section's PID tile above.
-          _InfoTile(label: 'Engine', value: engine),
+          // … fixed config last. PID is second-to-last and RunMode last, so both
+          // line up with the redimos section's PID and RunMode tiles above.
           _InfoTile(label: 'Storage', value: d.config.storage == 'persist' ? 'Persisted' : 'In-mem'),
-          _InfoTile(label: 'PID', value: up && d.pid > 0 ? '${d.pid}' : '—'),
           _InfoTile(label: 'Port', value: '${d.config.port}'),
+          _InfoTile(label: 'PID', value: up && d.pid > 0 ? '${d.pid}' : '—'),
+          _InfoTile(label: 'RunMode', value: engine),
         ]),
       ],
     );
@@ -1951,7 +1951,7 @@ class _LocalDdbPanelState extends State<LocalDdbPanel> {
               initialValue: cfg.engine,
               isDense: true,
               decoration: const InputDecoration(
-                labelText: 'Engine',
+                labelText: 'RunMode',
                 isDense: true,
                 border: OutlineInputBorder(),
                 contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 10),
