@@ -549,9 +549,9 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     return Column(
       children: [
         Padding(
-          // vertical 4 + 40px button = 48, matching the tab bar so this divider
-          // lines up with the tab bar's divider across the split.
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          // 8 + 40px button + 8 = 56, matching the tab bar's rendered height so
+          // this divider lines up with the tab bar's divider across the split.
+          padding: const EdgeInsets.all(8),
           child: FilledButton.icon(
             onPressed: _newConfig,
             icon: const Icon(Icons.add),
