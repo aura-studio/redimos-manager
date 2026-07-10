@@ -120,10 +120,11 @@ type instance struct {
 
 	// Supervisor state.
 	autoRestart  bool
-	intendedStop bool      // set by user Stop; suppresses auto-restart
-	restarts     int       // successful supervised restarts so far
-	failCount    int       // failures within the current crash-loop window
-	failWindow   time.Time // start of the current crash-loop window
+	intendedStop bool        // set by user Stop; suppresses auto-restart
+	restarts     int         // successful supervised restarts so far
+	failCount    int         // failures within the current crash-loop window
+	failWindow   time.Time   // start of the current crash-loop window
+	restartTimer *time.Timer // pending backoff timer; cancelled by terminate()
 
 	// Monitoring (filled by the sampler loop).
 	cpuPercent   float64       // % of all cores, Task-Manager style
@@ -174,17 +175,31 @@ type manager struct {
 	running   map[string]*instance
 	storePath string
 	ddb       *instance // the Local DynamoDB child (nil until first start)
+
+	sessionID string   // one id per manager run; tags children (env / -D / docker label)
+	lockFile  *os.File // machine-wide single-instance lock, held for the process lifetime
+	lockErr   error    // non-nil when another instance already holds the lock
 }
 
 var mgr = newManager()
 
 func newManager() *manager {
-	m := &manager{running: map[string]*instance{}, storePath: defaultStorePath()}
+	m := &manager{running: map[string]*instance{}, storePath: defaultStorePath(), sessionID: newID()}
 	m.load()
-	// A fresh session inherits no live process handles, so any redimos /
-	// DynamoDBLocal still running from a previous session is an orphan we can't
-	// supervise and that would collide with a restart. Sweep them once at boot.
-	m.reapStartupOrphans()
+	if f, err := acquireInstanceLock(); err != nil {
+		// A sibling instance is live. Its children are healthy and supervised —
+		// no sweeps, no starts; rm_load surfaces the error to the UI.
+		m.lockErr = err
+	} else {
+		m.lockFile = f
+		// A fresh session inherits no live process handles, so any redimos /
+		// DynamoDBLocal still running from a previous session is an orphan we
+		// can't supervise and that would collide with a restart. Sweep them once
+		// at boot. Containers are swept async — docker probing can take seconds
+		// and this runs during dylib load.
+		m.reapStartupOrphans()
+		go m.sweepLabeledContainers(nil)
+	}
 	go m.samplerLoop()
 	go m.scraperLoop()
 	return m
@@ -377,6 +392,9 @@ func (m *manager) start(id string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	if m.lockErr != nil {
+		return m.lockErr // a sibling instance owns the children; don't fight it
+	}
 	if in, ok := m.running[id]; ok && in.status == "running" {
 		return fmt.Errorf("already running (pid %d)", in.pid)
 	}
@@ -487,6 +505,10 @@ func (m *manager) buildDockerLaunch(cfg *Config) (string, []string, []string, st
 
 	run := []string{
 		"run", "--rm", "--name", cname,
+		// Session-tagged labels: the boot sweep finds leftover containers from
+		// dead sessions by label (host `ps` can't see containers at all).
+		"--label", "redimos.manager=1",
+		"--label", "redimos.manager.session=" + m.sessionID,
 		"--add-host", "host.docker.internal:host-gateway",
 		"-p", fmt.Sprintf("%d:%d", cfg.Port, cfg.Port),
 		"-p", "127.0.0.1::9121",
@@ -509,12 +531,24 @@ func (in *instance) spawn() error {
 	}
 	cmd := exec.Command(in.bin, in.launchArgs...)
 	cmd.Env = in.launchEnv
+	preSpawn(cmd) // per-OS: own process group (darwin) / job containment (windows)
 	stdout, _ := cmd.StdoutPipe()
 	stderr, _ := cmd.StderrPipe()
 	if err := cmd.Start(); err != nil {
 		return err
 	}
+	postSpawn(in, cmd)
 	in.mu.Lock()
+	if in.intendedStop {
+		// terminate() interleaved between doRestart's intendedStop check and our
+		// Start: the user asked for a stop, so put the fresh child straight down
+		// instead of letting it outlive the request (or the app).
+		in.status = "stopped"
+		in.mu.Unlock()
+		killChildTree(cmd.Process.Pid)
+		go func() { _ = cmd.Wait() }() // reap; no supervision for a child we just killed
+		return nil
+	}
 	in.cmd = cmd
 	in.pid = cmd.Process.Pid
 	in.started = time.Now()
@@ -577,8 +611,8 @@ func (in *instance) superviseExit(werr error) {
 	backoff := restartBackoff[min(in.failCount-1, len(restartBackoff)-1)]
 	in.status = "restarting"
 	in.appendLogLocked(fmt.Sprintf("[supervisor: restart #%d in %s]", in.restarts+1, backoff))
+	in.restartTimer = time.AfterFunc(backoff, in.doRestart) // terminate() cancels this
 	in.mu.Unlock()
-	time.AfterFunc(backoff, in.doRestart)
 }
 
 // doRestart is invoked by the backoff timer to bring the child back up.
@@ -623,14 +657,21 @@ func (m *manager) stop(id string) error {
 }
 
 // terminate stops a child for good: marks the stop as intended (suppressing the
-// supervisor), removes the container for containerised children, and kills the
-// process. Safe to call in any state.
+// supervisor), cancels any pending backoff restart, removes the container for
+// containerised children, and gracefully kills the process tree (TERM → grace →
+// KILL on the child's own process group). Safe to call in any state.
 func (in *instance) terminate() {
 	in.mu.Lock()
 	in.intendedStop = true
+	if in.restartTimer != nil {
+		in.restartTimer.Stop()
+		in.restartTimer = nil
+	}
 	proc := in.cmd
+	pid := in.pid
 	cont := in.container
 	bin := in.bin
+	running := in.status == "running"
 	if in.status == "restarting" || in.status == "preparing" {
 		in.status = "stopped" // no live process right now
 	}
@@ -638,21 +679,36 @@ func (in *instance) terminate() {
 	if cont != "" {
 		// Removing the container makes the foreground docker CLI exit on its own.
 		_ = exec.Command(bin, "rm", "-f", cont).Run()
-	} else if proc != nil && proc.Process != nil {
-		_ = proc.Process.Kill()
+	} else if running {
+		// Signal by pid only while the child is actually alive: our cmd.Wait
+		// goroutine (or the adoption watcher) hasn't reaped it, so the pid can't
+		// have been recycled.
+		if proc != nil && proc.Process != nil {
+			killChildTree(proc.Process.Pid)
+		} else if pid > 0 {
+			killChildTree(pid) // adopted child: no cmd handle, only a pid
+		}
 	}
 }
 
 func (m *manager) stopAll() {
 	m.mu.Lock()
-	ids := make([]string, 0, len(m.running))
-	for id := range m.running {
-		ids = append(ids, id)
+	ins := make([]*instance, 0, len(m.running))
+	for _, in := range m.running {
+		ins = append(ins, in)
 	}
 	m.mu.Unlock()
-	for _, id := range ids {
-		_ = m.stop(id)
+	// Parallel: each terminate may spend the TERM→KILL grace period; app quit
+	// shouldn't pay it once per child.
+	var wg sync.WaitGroup
+	for _, in := range ins {
+		wg.Add(1)
+		go func(in *instance) {
+			defer wg.Done()
+			in.terminate()
+		}(in)
 	}
+	wg.Wait()
 }
 
 type statusRow struct {
@@ -760,7 +816,15 @@ func rm_free(p *C.char) { C.free(unsafe.Pointer(p)) }
 func rm_load() *C.char {
 	mgr.mu.Lock()
 	defer mgr.mu.Unlock()
-	return cjson(mgr.st)
+	out := map[string]any{
+		"configs":  mgr.st.Configs,
+		"settings": mgr.st.Settings,
+		"localDdb": mgr.st.LocalDdb,
+	}
+	if mgr.lockErr != nil {
+		out["lockError"] = mgr.lockErr.Error()
+	}
+	return cjson(out)
 }
 
 //export rm_save_config

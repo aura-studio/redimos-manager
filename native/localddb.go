@@ -375,6 +375,11 @@ func ensureDdbJar(in *instance, dir string) error {
 
 func (m *manager) ddbStart() error {
 	m.mu.Lock()
+	if m.lockErr != nil {
+		err := m.lockErr
+		m.mu.Unlock()
+		return err // a sibling instance owns the children; don't fight it
+	}
 	cfg := normalizeDdb(m.st.LocalDdb)
 	if m.ddb != nil {
 		m.ddb.mu.Lock()
@@ -395,14 +400,19 @@ func (m *manager) ddbStart() error {
 			return fmt.Errorf("docker not available (install Docker Desktop, or pick the Java engine)")
 		}
 		in.bin = docker
+		// Session-tagged labels: the boot sweep finds leftover containers from
+		// dead sessions by label (host `ps` can't see containers at all).
+		label1, label2 := "redimos.manager=1", "redimos.manager.session="+m.sessionID
 		if cfg.Engine == "localstack" {
 			in.container = lsContainerName
 			in.launchArgs = []string{"run", "--rm", "--name", lsContainerName,
+				"--label", label1, "--label", label2,
 				"-p", fmt.Sprintf("%d:4566", cfg.Port), "-e", "SERVICES=dynamodb",
 				localstackImage}
 		} else {
 			in.container = ddbContainerName
 			args := []string{"run", "--rm", "--name", ddbContainerName,
+				"--label", label1, "--label", label2,
 				"-p", fmt.Sprintf("%d:8000", cfg.Port)}
 			if cfg.Storage == "persist" {
 				// the image runs as a non-root user; a fresh named volume is
@@ -582,6 +592,41 @@ func (m *manager) reapStartupOrphans() {
 	}
 }
 
+// sweepLabeledContainers removes containers left behind by previous sessions.
+// Every container we spawn carries redimos.manager labels with the spawning
+// session's id; anything carrying the manager label but a FOREIGN session id is
+// a leftover (the docker CLI child died with its manager, the container kept
+// running under dockerd — invisible to the host-`ps` sweep). The current
+// session's own containers are never touched, and `skip` lets the boot
+// reconciler protect containers it chose to adopt. Caller must hold the
+// single-instance lock, so no live sibling can own any of these.
+func (m *manager) sweepLabeledContainers(skip map[string]bool) {
+	docker, ok := dockerBin()
+	if !ok {
+		return
+	}
+	out, err := exec.Command(docker, "ps", "-aq", "--filter", "label=redimos.manager").Output()
+	if err != nil {
+		return
+	}
+	for _, cid := range strings.Fields(string(out)) {
+		insp, err := exec.Command(docker, "inspect", "-f",
+			`{{index .Config.Labels "redimos.manager.session"}}|{{.Name}}`, cid).Output()
+		if err != nil {
+			continue
+		}
+		parts := strings.SplitN(strings.TrimSpace(string(insp)), "|", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		sess, name := parts[0], strings.TrimPrefix(parts[1], "/")
+		if sess == m.sessionID || skip[name] {
+			continue
+		}
+		_ = exec.Command(docker, "rm", "-f", cid).Run()
+	}
+}
+
 func (m *manager) ddbStop() error {
 	m.mu.Lock()
 	in := m.ddb
@@ -685,8 +730,13 @@ func rm_ddb_stop() *C.char {
 //
 //export rm_shutdown
 func rm_shutdown() *C.char {
-	mgr.stopAll()
-	_ = mgr.ddbStop()
+	// Parallel: each terminate may spend the TERM→KILL grace; the quitting app
+	// should pay it once, not once per child.
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() { defer wg.Done(); mgr.stopAll() }()
+	go func() { defer wg.Done(); _ = mgr.ddbStop() }()
+	wg.Wait()
 	return okJSON(nil)
 }
 

@@ -90,6 +90,10 @@ class NativeCore {
 
   ({List<RedimosConfig> configs, Settings settings}) load() {
     final j = jsonDecode(_call0(_load)) as Map<String, dynamic>;
+    // The core refuses to manage children when another app instance already
+    // holds the single-instance lock; surface that instead of a broken UI.
+    final lockError = j['lockError'];
+    if (lockError != null) throw StateError(lockError.toString());
     final configs = ((j['configs'] as List?) ?? [])
         .map((e) => RedimosConfig.fromJson(e as Map<String, dynamic>))
         .toList();
