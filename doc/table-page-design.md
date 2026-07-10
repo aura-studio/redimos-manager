@@ -19,10 +19,13 @@ v1 **只读**(查询/浏览,不做 Create/Edit/Delete——防误伤;编辑留 v
 
 ### 2. 「Scan or query items」折叠面板
 - **Scan | Query** 两个 segmented radio 大卡片(选中态蓝边+深底)。
-- `Select a table or index` 下拉:`Table - <name>` / 各 LSI/GSI
-  (redimos 表恒有 LSI `idx`:pk + skN,KEYS_ONLY)。
-- `Select attribute projection` 下拉:All attributes / Projected attributes
-  (v1 可省:恒 All)。
+- `Select a table or index` 下拉(实测展开):顶部**搜索框** + 分组列表
+  `Table → <name>` / `Index → idx`(redimos 表恒有 LSI `idx`:pk + skN,
+  KEYS_ONLY)。v1:项目极少,省搜索框,保留分组。
+- `Select attribute projection` 下拉(实测展开):**All attributes /
+  Specific attributes** 两项;选 Specific 出现「Specific attributes to
+  project」= 属性名输入 + `Add attribute` 按钮(可加多个,ProjectionExpression)。
+  v1 两项都做。
 - **Query 模式追加**:
   - `Partition key` 区:Attribute(只读显示键名 pk)+ Value 输入框;
   - `Sort key - optional` 区:Attribute(只读 sk/skN)+ 条件下拉 + 值输入
@@ -31,10 +34,14 @@ v1 **只读**(查询/浏览,不做 Create/Edit/Delete——防误伤;编辑留 v
     Greater than or equal to / Greater than / Between / Begins with`
     (Between 时出现第二个值输入框)。
 - **Filters - optional** 折叠区(Scan/Query 都有):每条过滤器 2×2 网格:
-  `Attribute name`(输入)`Condition`(下拉)/ `Type`(String/Number/Binary/
-  Boolean/Null 下拉)`Value`(输入),右下 `Remove`;底部 `Add filter`。
-  Filter 条件集比 sort key 多 `Not equal to / Exists / Not exists / Contains /
-  Not contains` 等(v1 先做 = ≠ begins_with contains exists/not exists)。
+  `Attribute name`(输入)`Condition`(下拉)/ `Type`(下拉,实测 5 项:
+  **String / Number / Binary / Boolean / Null**)`Value`(输入),右下
+  `Remove`;底部 `Add filter`。
+  Condition 下拉**实测 12 项全集**:`Equal to / Not equal to / Less than or
+  equal to / Less than / Greater than or equal to / Greater than / Between /
+  Exists / Not exists / Contains / Not contains / Begins with`。
+  (Exists/Not exists 时无 Value 框;Between 双值框;Boolean 值为 true/false
+  下拉;Null 类型无值框。)v1 **12 项全做**(FilterExpression 全支持)。
 - 底部:**Run**(橙色主按钮)+ `Reset` 文字按钮。
 
 ### 3. 结果横幅(Run 后)
@@ -49,8 +56,10 @@ Efficiency: 100% · RCUs consumed: 2`,右侧 ×。失败时红条显示错误。
 - 时间戳:`Scan started on July 10, 2026, 20:46:08`;
 - 右侧:分页 `< 1 >` + 齿轮(Preferences);
 - **网格**:首列复选框(v1 可省)| 键列在前(`pk (Binary) ▾`,列头带类型
-  斜体标注)| 其余属性自动发现补列;Binary 值显示 base64,pk 列渲染为
-  链接(进条目页;v1 改为点行弹 JSON 查看)。空值格显示空白。
+  斜体标注 + **▾ 客户端排序箭头**,对当前页排序,v1 做)| 其余属性自动
+  发现补列;Binary 值显示 base64,pk 列渲染为链接(进条目页;v1 改为点行
+  弹 JSON 查看)。空值格显示空白。**单元格悬停**出现内联小图标(实测):
+  ⧉ 复制值 + ✏️ 快速编辑(v1 只读:保留 ⧉ 复制,裁 ✏️)。
 - **分页语义**:DynamoDB 风格——用 LastEvaluatedKey 逐页取,页码只增不可
   跳(`<` 回缓存页,`>` 取下一页)。
 
@@ -100,6 +109,45 @@ rm_table_page(reqJSON)      -> {items:[{attr:{type,repr}}], cols:[...], lastKey,
      tooltip 给 base64)+ 点行弹 JSON Dialog;
   4. Preferences Dialog:page size 单选 + 列开关。
 - 状态:每配置独立(keyed by config id);切配置重置。
+
+## 覆盖矩阵(控制台 UI 细节 → v1 处置,逐项)
+
+| # | 控制台细节(全部实测核实) | v1 处置 |
+|---|---|---|
+| 1 | 左侧表选择侧栏(tag 过滤/搜索/收藏星/分页/齿轮) | **N/A**:Table 页绑定当前配置的表,无需选表 |
+| 2 | 页头表名 | ✅ 同样(取配置 Table 字段) |
+| 3 | Autopreview 开关 | ✅ 等价:进页自动跑一次 Scan(无需开关) |
+| 4 | View table details 按钮 | **裁**:表详情已由 Configure/Monitor 覆盖 |
+| 5 | 面包屑 / Info 帮助链接 | **N/A**(标签页上下文) |
+| 6 | Scan \| Query segmented 卡片 | ✅ 同样(SegmentedButton) |
+| 7 | 表/索引下拉(搜索框+Table/Index 分组) | ✅ 同样(分组保留;搜索框省——只有 2 项) |
+| 8 | 投影下拉 All / Specific attributes(+Add attribute) | ✅ 同样(两项都做,ProjectionExpression) |
+| 9 | Query:Partition key(键名只读+Value) | ✅ 同样 |
+| 10 | Query:Sort key 条件 7 操作符 + Between 双值 + Sort descending | ✅ 同样(7 项全做) |
+| 11 | Filters:Attribute/Condition/Type/Value + Remove + Add filter | ✅ 同样 |
+| 12 | Filter Condition 12 项全集 | ✅ 同样(12 项全做) |
+| 13 | Filter Type 5 项(S/N/B/BOOL/NULL) | ✅ 同样 |
+| 14 | Run(橙主按钮)+ Reset | ✅ 同样 |
+| 15 | 结果横幅(returned/scanned/Efficiency/RCU + ×) | ✅ 同样(RCU 本地拿不到时省略该段) |
+| 16 | 结果标题 `Table: <name> - Items returned (N)` + 时间戳 | ✅ 同样 |
+| 17 | 刷新圆钮 | ✅ 同样 |
+| 18 | Actions ▾(Export CSV / Delete items / Duplicate) | **裁**(写操作);Export CSV 只读,列入 v1.1 候选 |
+| 19 | Create item 按钮 | **裁**(v1 只读) |
+| 20 | 分页 `< 1 >`(LastEvaluatedKey 逐页) | ✅ 同样 |
+| 21 | 齿轮 Preferences:Page size 6 档 + 列开关 + Select/Deselect all | ✅ 同样 |
+| 22 | 网格:键列前置、列头类型标注、属性自动发现、空格空白 | ✅ 同样 |
+| 23 | 列头 ▾ 客户端排序 | ✅ 同样(当前页排序) |
+| 24 | 单元格悬停 ⧉ 复制 / ✏️ 编辑 | ✅ ⧉ 复制保留;✏️ 裁(只读) |
+| 25 | 首列复选框(批量选择,服务于删除/复制) | **裁**(服务于写操作) |
+| 26 | 列宽拖拽调整 | **裁**(Flutter DataTable 无原生支持;自动列宽) |
+| 27 | pk 值为链接进条目页 | ✅ 等价:点行弹条目 Dialog |
+| 28 | 条目页 Form \| JSON view 双态 | ⚠️ v1 只做 JSON 态(只读;Form 态属编辑,v2) |
+| 29 | JSON 态:View DynamoDB JSON 开关(带类型/普通 JSON) | ✅ 同样(Dialog 内开关) |
+| 30 | JSON 态:Copy 按钮 + 行号/高亮/状态条 | ✅ Copy + 等宽可选中;行号/高亮简化(只读无需纠错) |
+| 31 | Binary 值显示 base64 | ✅ **增强**:明文优先(可打印 UTF-8),tooltip/切换给 base64——redimos 表刚需 |
+
+裁剪项全部集中在**写操作**(18/19/24✏️/25/28-Form)与**平台限制**(26)两类;
+其余 UI 细节 v1 全部对齐或等价。
 
 ## 验证清单
 
