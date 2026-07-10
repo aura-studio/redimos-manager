@@ -582,10 +582,12 @@ class _CmdConsoleState extends State<CmdConsole>
             ),
           ),
           const Divider(height: 1),
-          // input row
+          // input row — fixed height so its top divider lines up with the
+          // Local DynamoDB panel's divider across the sidebar split (both 48px).
           Container(
             color: inputBg,
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            height: 48,
+            padding: const EdgeInsets.symmetric(horizontal: 12),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
@@ -641,6 +643,8 @@ class _CmdConsoleState extends State<CmdConsole>
                   IconButton(
                     tooltip: 'Clear',
                     visualDensity: VisualDensity.compact,
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
                     icon: const Icon(Icons.clear_all, size: 18),
                     onPressed: () => setState(() => _out.clear()),
                   ),

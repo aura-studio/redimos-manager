@@ -1922,16 +1922,21 @@ class _LocalDdbPanelState extends State<LocalDdbPanel> {
                         Padding(padding: const EdgeInsets.only(left: 30, bottom: 2), child: stats),
                       ],
                     )
-                  : Row(children: [
-                      ...head,
-                      const SizedBox(width: 8),
-                      // Expanded (not Spacer + Flexible): the stats take all the
-                      // room left of the button instead of being squeezed to the
-                      // right edge, so the figures show in full.
-                      Expanded(child: stats),
-                      const SizedBox(width: 2),
-                      button,
-                    ]),
+                  // Fixed 30px row → panel total 8+30+10 = 48px, matching the Cmd
+                  // input row so the two top dividers line up across the split.
+                  : SizedBox(
+                      height: 30,
+                      child: Row(children: [
+                        ...head,
+                        const SizedBox(width: 8),
+                        // Expanded (not Spacer + Flexible): the stats take all the
+                        // room left of the button instead of being squeezed to the
+                        // right edge, so the figures show in full.
+                        Expanded(child: stats),
+                        const SizedBox(width: 2),
+                        button,
+                      ]),
+                    ),
             );
           }),
           // Slide the body open/closed instead of snapping.
