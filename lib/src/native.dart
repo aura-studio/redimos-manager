@@ -22,7 +22,7 @@ class NativeCore {
   late final _StrDartFn _version, _load, _status, _stopAll, _shutdown;
   late final _StrDartFn _ddbGet, _ddbStart, _ddbStop, _ddbLogs;
   late final _StrArgDartFn _saveConfig, _deleteConfig, _setSettings, _start, _stop, _logs;
-  late final _StrArgDartFn _ddbSet, _inspectTable, _tableMeta, _tablePage;
+  late final _StrArgDartFn _ddbSet, _inspectTable, _tableMeta, _tablePage, _partiql;
   late final _FreeDartFn _free;
 
   NativeCore() {
@@ -46,6 +46,7 @@ class NativeCore {
     _inspectTable = _lib.lookupFunction<_StrArgNativeFn, _StrArgDartFn>('rm_inspect_table');
     _tableMeta = _lib.lookupFunction<_StrArgNativeFn, _StrArgDartFn>('rm_table_meta');
     _tablePage = _lib.lookupFunction<_StrArgNativeFn, _StrArgDartFn>('rm_table_page');
+    _partiql = _lib.lookupFunction<_StrArgNativeFn, _StrArgDartFn>('rm_partiql');
     _free = _lib.lookupFunction<_FreeNativeFn, _FreeDartFn>('rm_free');
   }
 
@@ -158,6 +159,16 @@ class NativeCore {
           jsonDecode(_call1(_tablePage, jsonEncode(req))) as Map<String, dynamic>);
     } catch (e) {
       return TablePage(ok: false, error: e.toString());
+    }
+  }
+
+  /// PartiQL tab: execute one statement. Never throws — returns ok:false.
+  PartiqlResult partiql(Map<String, dynamic> req) {
+    try {
+      return PartiqlResult.fromJson(
+          jsonDecode(_call1(_partiql, jsonEncode(req))) as Map<String, dynamic>);
+    } catch (e) {
+      return PartiqlResult(ok: false, error: e.toString());
     }
   }
 

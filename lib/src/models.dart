@@ -429,3 +429,35 @@ class TablePage {
   bool get hasNext => lastKey != null;
   double get efficiency => scanned == 0 ? 1.0 : returned / scanned;
 }
+
+/// Result of one PartiQL ExecuteStatement call (the "PartiQL" tab).
+class PartiqlResult {
+  final bool ok;
+  final String? error;
+  final List<String> cols;
+  final List<TableItem> rows;
+  final int returned;
+  final int timeMs;
+  final String? nextToken; // null = no more pages
+  PartiqlResult({
+    required this.ok,
+    this.error,
+    this.cols = const [],
+    this.rows = const [],
+    this.returned = 0,
+    this.timeMs = 0,
+    this.nextToken,
+  });
+  factory PartiqlResult.fromJson(Map<String, dynamic> j) => PartiqlResult(
+        ok: (j['ok'] ?? false) as bool,
+        error: j['error'] as String?,
+        cols: ((j['cols'] as List?) ?? []).map((e) => e.toString()).toList(),
+        rows: ((j['rows'] as List?) ?? [])
+            .map((e) => TableItem.fromJson(e as Map<String, dynamic>))
+            .toList(),
+        returned: (j['returned'] ?? 0) as int,
+        timeMs: (j['timeMs'] ?? 0) as int,
+        nextToken: j['nextToken'] as String?,
+      );
+  bool get hasNext => nextToken != null && nextToken!.isNotEmpty;
+}

@@ -1156,6 +1156,18 @@ func rm_table_page(in *C.char) *C.char {
 	return cjson(tablePage(&req))
 }
 
+// rm_partiql executes one PartiQL statement (ExecuteStatement) for the PartiQL
+// tab. Input is a partiqlReq JSON; output has rows/cols/nextToken or an error.
+//
+//export rm_partiql
+func rm_partiql(in *C.char) *C.char {
+	var req partiqlReq
+	if err := json.Unmarshal([]byte(C.GoString(in)), &req); err != nil {
+		return errJSON(err)
+	}
+	return cjson(partiqlExec(&req))
+}
+
 //export rm_status
 func rm_status() *C.char { return cjson(mgr.statuses()) }
 
