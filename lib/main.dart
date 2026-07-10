@@ -1578,10 +1578,12 @@ class MonitorView extends StatelessWidget {
   // kept distinct from the redimos instance metrics above.
   Widget _ddbSection(BuildContext context, LocalDdbInfo d) {
     final up = d.status == 'running';
+    // "runtime · product" — mirrors the config dropdown labels so the tile says
+    // both how it runs and which backend (e.g. "Docker · LocalStack").
     final engine = switch (d.config.engine) {
-      'docker' => 'Docker',
-      'localstack' => 'LocalStack',
-      _ => 'Java',
+      'docker' => 'Docker · dynamodb-local',
+      'localstack' => 'Docker · LocalStack',
+      _ => 'Java · local',
     };
     // Same sparkHeight (48) as the redimos dashboard so every chart box across
     // both sections is an identical size.
@@ -1623,7 +1625,9 @@ class MonitorView extends StatelessWidget {
           // placeholder ('—') that keeps the columns aligned.
           const _InfoTile(label: 'Latency', value: '—'),
           _InfoTile(label: 'Status', value: up ? 'Running' : d.status),
-          _InfoTile(label: 'Storage', value: d.config.storage == 'persist' ? 'Persisted' : 'In-mem'),
+          // Health (col 5) lines up with the redimos Health tile. DDB exposes no
+          // health endpoint, so this is derived from the running state.
+          _InfoTile(label: 'Health', value: up ? 'Ready' : 'Down'),
           // Port + Engine last, aligning with the redimos section's Port + Engine
           // tiles above. (DDB says "Engine" because the choice is a different
           // backend product — dynamodb-local vs LocalStack — not just a run mode.)
@@ -1750,7 +1754,16 @@ class _InfoTile extends StatelessWidget {
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text(label, style: TextStyle(fontSize: 11, color: _tileLabelColor(context))),
         const SizedBox(height: 4),
-        Text(value, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w500)),
+        // Shrink long values (e.g. "Docker · LocalStack") to one line so every
+        // tile keeps the same height and the grid rows stay aligned.
+        Align(
+          alignment: Alignment.centerLeft,
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(value, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w500)),
+          ),
+        ),
       ]),
     );
   }
