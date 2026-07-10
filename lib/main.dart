@@ -1495,7 +1495,7 @@ class MonitorView extends StatelessWidget {
   }
 
   // A section eyebrow: icon + label on the left, a status string on the right.
-  Widget _sectionHeader(BuildContext context, IconData icon, String label, String status) {
+  Widget _sectionHeader(BuildContext context, IconData icon, String label) {
     final scheme = Theme.of(context).colorScheme;
     return Row(children: [
       Icon(icon, size: 16, color: scheme.onSurfaceVariant),
@@ -1506,8 +1506,6 @@ class MonitorView extends StatelessWidget {
               letterSpacing: 1.3,
               fontWeight: FontWeight.w700,
               color: scheme.onSurfaceVariant)),
-      const Spacer(),
-      Text(status, style: TextStyle(fontSize: 11, color: Theme.of(context).textTheme.bodySmall?.color)),
     ]);
   }
 
@@ -1532,13 +1530,7 @@ class MonitorView extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _sectionHeader(
-            context,
-            Icons.dns,
-            'REDIMOS',
-            running
-                ? 'Running · :${st!.port}${st.adopted ? ' · adopted' : ''}'
-                : (st?.status ?? 'stopped')),
+        _sectionHeader(context, Icons.dns, 'REDIMOS'),
         const SizedBox(height: 12),
         IntrinsicHeight(
           child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
@@ -1608,8 +1600,7 @@ class MonitorView extends StatelessWidget {
         const SizedBox(height: 20),
         const Divider(height: 1),
         const SizedBox(height: 14),
-        _sectionHeader(context, Icons.storage, 'LOCAL DYNAMODB',
-            up ? 'Running · :${d.config.port}${d.adopted ? ' · adopted' : ''}' : d.status),
+        _sectionHeader(context, Icons.storage, 'LOCAL DYNAMODB'),
         const SizedBox(height: 12),
         IntrinsicHeight(
           child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
