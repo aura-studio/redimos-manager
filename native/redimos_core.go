@@ -87,6 +87,11 @@ type store struct {
 	Configs  []Config       `json:"configs"`
 	Settings Settings       `json:"settings"`
 	LocalDdb LocalDdbConfig `json:"localDdb"`
+	// Session restore: the "desired running" set, updated live on start/stop, so
+	// the next launch relaunches exactly what was running last time (survives a
+	// clean quit AND a crash). See autoStartAll.
+	AutoStart    []string `json:"autoStart"`    // config IDs to relaunch on boot
+	DdbAutoStart bool     `json:"ddbAutoStart"` // relaunch Local DynamoDB on boot
 }
 
 // ---------------------------------------------------------------------------
@@ -225,6 +230,9 @@ func newManager() *manager {
 		adopted := m.reconcileOnBoot()
 		m.reapStartupOrphans()
 		go m.sweepLabeledContainers(adopted)
+		// Session restore: relaunch whatever was running last time but didn't
+		// survive as an adopted child. Async so it never blocks dylib load.
+		go m.autoStartAll()
 	}
 	go m.samplerLoop()
 	go m.scraperLoop()
@@ -467,6 +475,7 @@ func (m *manager) start(id string) error {
 		in.mu.Unlock()
 		return fmt.Errorf("start failed: %w", err)
 	}
+	m.setConfigAutoStartLocked(id, true) // remember for next-launch restore (holds m.mu)
 	return nil
 }
 
@@ -734,6 +743,9 @@ func (m *manager) stop(id string) error {
 	if !ok {
 		return fmt.Errorf("not running")
 	}
+	// NB: the restore-set is NOT cleared here — stop() is also the shutdown path
+	// (stopAll → stop), and a clean quit must keep what was running so it can be
+	// restored. Only a USER stop (rm_stop / rm_ddb_stop) clears the flag.
 	in.terminate()
 	return nil
 }
@@ -786,6 +798,65 @@ func (in *instance) terminate() {
 func identityMatches(pid int, startMicro int64) bool {
 	s, _, ok := procIdentity(pid)
 	return ok && s == startMicro
+}
+
+// setConfigAutoStartLocked adds/removes a config from the persisted restore set.
+// Caller holds m.mu.
+func (m *manager) setConfigAutoStartLocked(id string, on bool) {
+	next := make([]string, 0, len(m.st.AutoStart)+1)
+	for _, x := range m.st.AutoStart {
+		if x != id {
+			next = append(next, x)
+		}
+	}
+	if on {
+		next = append(next, id)
+	}
+	m.st.AutoStart = next
+	_ = m.persist()
+}
+
+// rememberConfigAutoStart is setConfigAutoStartLocked for callers not holding m.mu.
+func (m *manager) rememberConfigAutoStart(id string, on bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.setConfigAutoStartLocked(id, on)
+}
+
+// rememberDdbAutoStart records whether Local DynamoDB should relaunch on boot.
+func (m *manager) rememberDdbAutoStart(on bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.st.DdbAutoStart != on {
+		m.st.DdbAutoStart = on
+		_ = m.persist()
+	}
+}
+
+// autoStartAll restores last session's running set: relaunch every config (and
+// the Local DynamoDB) that was running at the previous shutdown/crash but isn't
+// already live this boot (reconcile may have adopted survivors). Runs once at
+// boot in a goroutine — the DDB is started first so redimos configs pointing at
+// it come up against a live backend (the supervisor retries either way).
+func (m *manager) autoStartAll() {
+	m.mu.Lock()
+	ddbWant := m.st.DdbAutoStart
+	ddbLive := m.ddb != nil
+	ids := append([]string{}, m.st.AutoStart...)
+	m.mu.Unlock()
+
+	if ddbWant && !ddbLive {
+		_ = m.ddbStart()
+	}
+	for _, id := range ids {
+		m.mu.Lock()
+		_, live := m.running[id]
+		m.mu.Unlock()
+		if live {
+			continue // adopted or already running
+		}
+		_ = m.start(id) // start()'s own guards no-op anything already up
+	}
 }
 
 // livePids returns the pids of every child this session currently manages —
@@ -998,6 +1069,7 @@ func rm_delete_config(in *C.char) *C.char {
 		mgr.st.Configs = append(mgr.st.Configs[:idx], mgr.st.Configs[idx+1:]...)
 	}
 	delete(mgr.running, id)
+	mgr.setConfigAutoStartLocked(id, false) // don't try to restore a deleted config (also persists)
 	err := mgr.persist()
 	mgr.mu.Unlock()
 	if err != nil {
@@ -1032,7 +1104,9 @@ func rm_start(in *C.char) *C.char {
 
 //export rm_stop
 func rm_stop(in *C.char) *C.char {
-	if err := mgr.stop(C.GoString(in)); err != nil {
+	id := C.GoString(in)
+	mgr.rememberConfigAutoStart(id, false) // USER stop → drop from next-launch restore
+	if err := mgr.stop(id); err != nil {
 		return errJSON(err)
 	}
 	return okJSON(nil)

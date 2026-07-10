@@ -491,6 +491,7 @@ func (m *manager) ddbStart() error {
 	if err := m.publishDdb(in); err != nil {
 		return err
 	}
+	m.rememberDdbAutoStart(true) // remember for next-launch restore
 	if container != "" {
 		if err := in.spawn(); err != nil {
 			in.mu.Lock()
@@ -680,6 +681,7 @@ func rm_ddb_start() *C.char {
 
 //export rm_ddb_stop
 func rm_ddb_stop() *C.char {
+	mgr.rememberDdbAutoStart(false) // USER stop → don't restore Local DynamoDB next launch
 	if err := mgr.ddbStop(); err != nil {
 		return errJSON(err)
 	}
