@@ -555,18 +555,21 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   Widget _configList() {
     return Column(
       children: [
-        Padding(
-          // 8 + 40px button + 8 = 56, matching the tab bar's rendered height so
-          // this divider lines up with the tab bar's divider across the split.
-          padding: const EdgeInsets.all(8),
-          child: FilledButton.icon(
-            onPressed: _newConfig,
-            icon: const Icon(Icons.add),
-            label: const Text('New config'),
-            style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(40)),
+        // Fixed 56px header — same explicit height as the tab bar (also 56), so
+        // the bold rule below lines up with the tab bar's rule across the split.
+        SizedBox(
+          height: 56,
+          child: Padding(
+            padding: const EdgeInsets.all(8),
+            child: FilledButton.icon(
+              onPressed: _newConfig,
+              icon: const Icon(Icons.add),
+              label: const Text('New config'),
+              style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(40)),
+            ),
           ),
         ),
-        const Divider(height: 1),
+        Divider(height: 3, thickness: 3, color: _thickRuleColor(context)),
         Expanded(
           child: _configs.isEmpty
               ? const Center(child: Text('No configs yet'))
@@ -644,24 +647,30 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          TabBar(
-            controller: _tabs,
-            // Four equal-width tabs sharing the full width.
-            labelColor: Theme.of(context).colorScheme.primary,
-            unselectedLabelColor: Theme.of(context).textTheme.bodySmall?.color,
-            indicatorColor: Theme.of(context).colorScheme.primary,
-            indicatorWeight: 2.5,
-            // Drop the tab bar's own M3 divider so it doesn't double up with the
-            // explicit Divider below — a single consistent rule instead.
-            dividerColor: Colors.transparent,
-            tabs: [
-              _tab(Icons.tune, 'Configure'),
-              _tab(Icons.insights, 'Monitor'),
-              _tab(Icons.terminal, 'Logs'),
-              _tab(Icons.chevron_right, 'Cmd'),
-            ],
+          // Fixed 56px — same explicit height as the sidebar's "New config"
+          // header, so the bold rule below lines up across the split.
+          SizedBox(
+            height: 56,
+            child: TabBar(
+              controller: _tabs,
+              // Four equal-width tabs sharing the full width.
+              labelColor: Theme.of(context).colorScheme.primary,
+              unselectedLabelColor: Theme.of(context).textTheme.bodySmall?.color,
+              indicatorColor: Theme.of(context).colorScheme.primary,
+              indicatorWeight: 2.5,
+              // Drop the tab bar's own M3 divider so it doesn't double up with the
+              // explicit Divider below — a single consistent rule instead.
+              dividerColor: Colors.transparent,
+              tabs: [
+                _tab(Icons.tune, 'Configure'),
+                _tab(Icons.insights, 'Monitor'),
+                _tab(Icons.terminal, 'Logs'),
+                _tab(Icons.chevron_right, 'Cmd'),
+              ],
+            ),
           ),
-          const Divider(height: 1),
+          // Bold top rule — same thickness as the sidebar's, aligned across the split.
+          Divider(height: 3, thickness: 3, color: _thickRuleColor(context)),
           Expanded(
             child: TabBarView(
               controller: _tabs,
@@ -708,6 +717,13 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
         ],
     );
   }
+
+  // Colour for the bold top rule (below New config / the tab bar) — a touch
+  // stronger than the hairline dividers so the thick line reads as deliberate.
+  Color _thickRuleColor(BuildContext context) =>
+      Theme.of(context).brightness == Brightness.dark
+          ? const Color(0x4DFFFFFF)
+          : const Color(0x26000000);
 
   PopupMenuItem<ThemeMode> _themeMenuItem(ThemeMode m, IconData icon, String label) {
     final selected = appThemeMode.value == m;
