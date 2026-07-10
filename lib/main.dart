@@ -1511,6 +1511,19 @@ class MonitorView extends StatelessWidget {
     ]);
   }
 
+  // Lay out a fixed set of info tiles as equal-width columns that fill the whole
+  // pane (every tile the same size, the row stretching edge-to-edge) in both the
+  // initial window and full screen — instead of fixed-width tiles clustered on
+  // the left. 12px gutters between tiles.
+  Widget _tileRow(List<Widget> tiles) {
+    final children = <Widget>[];
+    for (var i = 0; i < tiles.length; i++) {
+      if (i > 0) children.add(const SizedBox(width: 12));
+      children.add(Expanded(child: tiles[i]));
+    }
+    return Row(crossAxisAlignment: CrossAxisAlignment.start, children: children);
+  }
+
   // Dashboard layout for the tab: a section header, three sparkline cards across
   // the top, the smaller info tiles in a grid below.
   Widget _dashboard(BuildContext context, InstanceStatus? st, bool running) {
@@ -1543,7 +1556,7 @@ class MonitorView extends StatelessWidget {
           ]),
         ),
         const SizedBox(height: 12),
-        Wrap(spacing: 12, runSpacing: 12, children: [
+        _tileRow([
           // Dynamic metrics first …
           _InfoTile(label: 'Uptime', value: running ? _fmtUptime(st!.uptimeSec) : '—'),
           _InfoTile(label: 'Restarts', value: '${st?.restarts ?? 0}'),
@@ -1614,7 +1627,7 @@ class MonitorView extends StatelessWidget {
           ]),
         ),
         const SizedBox(height: 12),
-        Wrap(spacing: 12, runSpacing: 12, children: [
+        _tileRow([
           // Dynamic first … These 7 tiles mirror the redimos section's 7 so the
           // two rows align column-for-column: Uptime · Restarts · Latency · (a
           // section-specific pair) · Port · Engine.
