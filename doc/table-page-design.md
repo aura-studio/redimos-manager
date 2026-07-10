@@ -40,8 +40,12 @@ v1 **只读**(查询/浏览,不做 Create/Edit/Delete——防误伤;编辑留 v
   Condition 下拉**实测 12 项全集**:`Equal to / Not equal to / Less than or
   equal to / Less than / Greater than or equal to / Greater than / Between /
   Exists / Not exists / Contains / Not contains / Begins with`。
-  (Exists/Not exists 时无 Value 框;Between 双值框;Boolean 值为 true/false
-  下拉;Null 类型无值框。)v1 **12 项全做**(FilterExpression 全支持)。
+  **值控件形态(实测,修正早期推断)**:Exists/Not exists 时 Type 与 Value
+  **禁用灰显示 "Not required"**(控件保留,非消失);Boolean 与 Null 类型的
+  Value **仍是普通文本输入框**(没有 true/false 下拉);Between 双值框。
+  **Attribute name 是自动补全框**:聚焦即弹键属性建议(pk/sk/skN)。
+  多条 filter **纵向堆叠**,隐式 AND(无连接词标签)。
+  v1 **12 项全做**(FilterExpression 全支持)。
 - 底部:**Run**(橙色主按钮)+ `Reset` 文字按钮。
 
 ### 3. 结果横幅(Run 后)
@@ -124,6 +128,45 @@ rm_table_page(reqJSON)      -> {items:[{attr:{type,repr}}], cols:[...], lastKey,
 
 > 结论:控制台的弹窗全部服务于**写操作**(除 Preferences),v1 只读版需要
 > 的弹窗仅两个:Preferences + 条目 JSON Dialog,均已在方案内。
+
+## 状态机边界(逻辑图遍历补拍,2026-07-10 第三轮)
+
+以「完全逻辑图」方法遍历所有状态转移,新实测 15 项(含 3 处推断纠错):
+
+1. **面板折叠态**:`▶ Scan or query items` + 副文案 `Expand to query or scan
+   items.`,结果区上移。
+2. **索引选中态**(三处联动):投影下拉变 **3 项**(多出 Projected
+   attributes);Query 的排序键自动切成 **skN**(键名与类型随索引走);
+   结果标题变体 **`Index: idx (<table>) - Items returned (N)`**。
+3. **稀疏索引语义**:LSI idx 只索引带 skN 的条目——对本表扫描 0 条是真实
+   结果(returned:0 scanned:0),不是 bug。
+4. **KEYS_ONLY 投影列**:索引结果网格展示表键+索引键(pk 列重复出现)。
+5. **Between**:双值框上下排列,中间夹 `and` 标签。
+6. **校验错误态**:空 pk 点 Run → 输入框红边 + 内联红字
+   `⊗ The partition key filter cannot be empty.` + 自动滚到出错字段。
+7. **空结果态**:网格中央 `No items`(粗)+ `No items to display.` +
+   居中 Create item 按钮(v1 换成"调整条件"暗提示)。
+8. **Reset 语义**:清 Filters 与查询条件,**保留** Scan|Query 选择与
+   表/索引选择;不自动重跑(URL 参数实证)。
+9. **分页语义**:`< 1 … >`(省略号=总页数未知);点 `>` 页码累积成
+   `< 1 2 … >`;**标题 (N) 是累计取回数**(20)而非当前页数;末页=
+   LastEvaluatedKey 为空。
+10. **Stopped 横幅**(第二种横幅形态):中途返回列表时黄色警示条
+    `⚠ Stopped · Items returned/scanned/Efficiency/RCU` + **`Retrieve next
+    page` 按钮**(横幅承载继续取页入口)。
+11. **列头排序**:点击后实心 ▲(另一列保持空心 ▽),对**已累计取回的全部
+    数据**客户端重排,并跳回第 1 页。
+12. **长值截断**:单元格超宽显示省略号(悬停 ⧉ 可复制全值)。
+13. **View DynamoDB JSON toggle 的解释 popover**(点击必弹):`Converts JSON
+    into DynamoDB JSON. Note that some complicated data types such as set
+    types and scalar types cannot be rendered in normal JSON. In those cases,
+    you will not be able to switch this mode off.` —— **实证:Binary 条目
+    切不回普通 JSON**(redimos v2 表恒为 DynamoDB JSON 形态)。
+    → 我们的 Dialog:Binary 属性在"普通 JSON"态用 base64 字符串表达并加
+    注释,比控制台的"直接禁止"更可用。
+14. **⧉ 复制**:静默写剪贴板,无 toast(v1 增强:SnackBar "Copied")。
+15. **Attribute name 自动补全**(归入 Filters 节,此处存证):聚焦弹
+    pk/sk/skN 键属性建议列表。
 
 ## 覆盖矩阵(控制台 UI 细节 → v1 处置,逐项)
 
