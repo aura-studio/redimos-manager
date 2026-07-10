@@ -164,7 +164,7 @@ class HomePage extends StatefulWidget {
   State<HomePage> createState() => _HomePageState();
 }
 
-class _HomePageState extends State<HomePage> {
+class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin {
   NativeCore? _core;
   String? _loadError;
 
@@ -174,6 +174,9 @@ class _HomePageState extends State<HomePage> {
   Timer? _poll;
   // Lets the parent inspect / save the editor form before leaving it.
   final _editorKey = GlobalKey<_ConfigEditorState>();
+  // Right-pane tabs (Configure / Monitor / Logs / Cmd) — owned here so the
+  // table-mismatch flow can jump back to Configure.
+  late final TabController _tabs = TabController(length: 4, vsync: this);
 
   // Rolling CPU / memory history per config id, fed by the status poll and
   // drawn as sparklines in the monitor panel.
@@ -212,6 +215,7 @@ class _HomePageState extends State<HomePage> {
 
   @override
   void dispose() {
+    _tabs.dispose();
     _lifecycle?.dispose();
     _poll?.cancel();
     super.dispose();
@@ -385,12 +389,80 @@ class _HomePageState extends State<HomePage> {
     }
     // Starting: the proxy runs the *saved* config, so offer to save unsaved edits first.
     if (!await _confirmLeaveEditor()) return;
+    // Pre-flight: if the target table already holds data written under a
+    // different version / MultiDB, warn before we crash-loop on a schema clash.
+    final saved = _configs.firstWhere((x) => x.id == c.id, orElse: () => c);
+    final inspect = _core!.inspectTable(saved);
+    if (inspect.mismatch && mounted) {
+      await _showTableMismatch(saved, inspect);
+      return; // let the user resolve it, then Start again
+    }
     try {
       setState(() => _selectedId = c.id);
       _core!.start(c.id);
       _refresh();
     } catch (e) {
       _toast('Start failed: $e', error: true);
+    }
+  }
+
+  // Suggest a fresh table name for the mismatched config: strip a trailing
+  // -v1/-v2 then append the config's own version, so a v1 config gets a distinct
+  // v1 table rather than reusing the incompatible one.
+  String _suggestTableName(RedimosConfig c) {
+    var base = c.table;
+    for (final s in ['-v1', '-v2']) {
+      if (base.endsWith(s)) base = base.substring(0, base.length - s.length);
+    }
+    var name = '$base-${c.version}';
+    if (name == c.table) name = '${c.table}-new';
+    return name;
+  }
+
+  Future<void> _showTableMismatch(RedimosConfig c, TableInspect ins) async {
+    final choice = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Table format mismatch'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(ins.detail),
+            const SizedBox(height: 12),
+            const Text(
+              'Starting anyway would fail or corrupt the data. Choose how to fix it:',
+              style: TextStyle(fontSize: 12.5),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, 'cancel'), child: const Text('Cancel')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, 'rename'),
+              child: const Text('Change table name')),
+          FilledButton(
+              onPressed: () => Navigator.pop(ctx, 'recommend'),
+              child: const Text('Use recommended config')),
+        ],
+      ),
+    );
+    if (choice == null || choice == 'cancel') return;
+    // Jump to the Configure tab, then edit the fields once the editor is mounted
+    // (a short delay lets the tab animation settle so the editor state exists).
+    setState(() => _selectedId = c.id);
+    _tabs.animateTo(0);
+    await Future<void>.delayed(const Duration(milliseconds: 350));
+    final st = _editorKey.currentState;
+    if (st == null || !mounted) return;
+    if (choice == 'rename') {
+      st.applyTableName(_suggestTableName(c));
+      _toast('Table renamed — Save, then Start again');
+    } else if (choice == 'recommend') {
+      st.applyRecommended(
+          ins.tableVersion.isEmpty ? null : ins.tableVersion,
+          ins.tableMultiDbKnown ? ins.tableMultiDb : null);
+      _toast('Config updated to match the data — Save, then Start again');
     }
   }
 
@@ -547,12 +619,11 @@ class _HomePageState extends State<HomePage> {
     // configure / monitor / logs / cmd as switchable tabs. The controller sits
     // above the per-config content so the chosen tab is kept when you switch
     // between configs in the sidebar.
-    return DefaultTabController(
-      length: 4,
-      child: Column(
+    return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           TabBar(
+            controller: _tabs,
             // Four equal-width tabs sharing the full width.
             labelColor: Theme.of(context).colorScheme.primary,
             unselectedLabelColor: Theme.of(context).textTheme.bodySmall?.color,
@@ -568,6 +639,7 @@ class _HomePageState extends State<HomePage> {
           const Divider(height: 1),
           Expanded(
             child: TabBarView(
+              controller: _tabs,
               physics: const NeverScrollableScrollPhysics(),
               children: [
                 // configure
@@ -611,7 +683,6 @@ class _HomePageState extends State<HomePage> {
             ),
           ),
         ],
-      ),
     );
   }
 
@@ -653,6 +724,24 @@ class _ConfigEditorState extends State<ConfigEditor> {
   late final TextEditingController _pass;
   late String _version;
   late bool _multiDb;
+  final _tableFocus = FocusNode();
+
+  // Applied by the table-mismatch dialog (from the parent). Both leave the form
+  // dirty so the user reviews and Saves before starting.
+  void applyTableName(String name) {
+    setState(() {
+      _table.text = name;
+      _table.selection = TextSelection.collapsed(offset: name.length);
+    });
+    _tableFocus.requestFocus();
+  }
+
+  void applyRecommended(String? version, bool? multiDb) {
+    setState(() {
+      if (version != null && version.isNotEmpty) _version = version;
+      if (multiDb != null) _multiDb = multiDb;
+    });
+  }
   late bool _autoCreate;
   late bool _autoRestart;
   late String _runMode;
@@ -709,6 +798,7 @@ class _ConfigEditorState extends State<ConfigEditor> {
     for (final ctl in _flagVals) {
       ctl.dispose();
     }
+    _tableFocus.dispose();
     super.dispose();
   }
 
@@ -858,7 +948,7 @@ class _ConfigEditorState extends State<ConfigEditor> {
           // ── 3 · Redimos (proxy line + behaviour + backing table) ──
           _sectionHead('3', 'Redimos'),
           Row(children: [
-            SizedBox(width: redimosTableW, child: _field(_table, 'Table')),
+            SizedBox(width: redimosTableW, child: _field(_table, 'Table', focusNode: _tableFocus)),
             const SizedBox(width: 12),
             SizedBox(
               width: dropW,
@@ -1071,9 +1161,10 @@ class _ConfigEditorState extends State<ConfigEditor> {
       );
 
   Widget _field(TextEditingController c, String label,
-      {bool number = false, bool obscure = false}) {
+      {bool number = false, bool obscure = false, FocusNode? focusNode}) {
     return TextField(
       controller: c,
+      focusNode: focusNode,
       obscureText: obscure,
       keyboardType: number ? TextInputType.number : null,
       style: const TextStyle(fontSize: 13),

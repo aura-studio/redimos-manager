@@ -22,7 +22,7 @@ class NativeCore {
   late final _StrDartFn _version, _load, _status, _stopAll, _shutdown;
   late final _StrDartFn _ddbGet, _ddbStart, _ddbStop, _ddbLogs;
   late final _StrArgDartFn _saveConfig, _deleteConfig, _setSettings, _start, _stop, _logs;
-  late final _StrArgDartFn _ddbSet;
+  late final _StrArgDartFn _ddbSet, _inspectTable;
   late final _FreeDartFn _free;
 
   NativeCore() {
@@ -43,6 +43,7 @@ class NativeCore {
     _ddbStop = _lib.lookupFunction<_StrNativeFn, _StrDartFn>('rm_ddb_stop');
     _ddbLogs = _lib.lookupFunction<_StrNativeFn, _StrDartFn>('rm_ddb_logs');
     _ddbSet = _lib.lookupFunction<_StrArgNativeFn, _StrArgDartFn>('rm_ddb_set');
+    _inspectTable = _lib.lookupFunction<_StrArgNativeFn, _StrArgDartFn>('rm_inspect_table');
     _free = _lib.lookupFunction<_FreeNativeFn, _FreeDartFn>('rm_free');
   }
 
@@ -125,6 +126,18 @@ class NativeCore {
       _expectOk(_call1(_setSettings, jsonEncode(s.toJson())));
   void start(String id) => _expectOk(_call1(_start, id));
   void stop(String id) => _expectOk(_call1(_stop, id));
+
+  /// Inspect the DynamoDB table a config points at for a version/MultiDB
+  /// mismatch with existing data. Never throws — returns an unchecked result
+  /// on any failure.
+  TableInspect inspectTable(RedimosConfig c) {
+    try {
+      return TableInspect.fromJson(
+          jsonDecode(_call1(_inspectTable, jsonEncode(c.toJson()))) as Map<String, dynamic>);
+    } catch (_) {
+      return TableInspect();
+    }
+  }
   void stopAll() => _call0(_stopAll);
 
   /// Terminate every managed child (redimos instances + Local DynamoDB). Call on

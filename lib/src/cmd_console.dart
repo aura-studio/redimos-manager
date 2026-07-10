@@ -332,6 +332,7 @@ class _CmdConsoleState extends State<CmdConsole>
   int _histIdx = -1;
   bool _connecting = false;
   int _db = 0;
+  Timer? _reconnectTimer; // auto-reconnect while the instance is meant to be up
 
   @override
   void initState() {
@@ -357,6 +358,7 @@ class _CmdConsoleState extends State<CmdConsole>
 
   @override
   void dispose() {
+    _reconnectTimer?.cancel();
     _client?.close();
     _input.dispose();
     _scroll.dispose();
@@ -364,7 +366,20 @@ class _CmdConsoleState extends State<CmdConsole>
     super.dispose();
   }
 
-  Future<void> _connect() async {
+  // Auto-reconnect: when the socket drops (e.g. the instance restarted) but the
+  // config is still meant to be running, keep retrying every second until the
+  // proxy is back up. Cancelled when the instance is stopped or the widget dies.
+  void _scheduleReconnect() {
+    _reconnectTimer?.cancel();
+    if (!mounted || !widget.running) return;
+    _reconnectTimer = Timer(const Duration(seconds: 1), () {
+      if (mounted && widget.running && !(_client?.connected ?? false)) {
+        _connect(retry: true);
+      }
+    });
+  }
+
+  Future<void> _connect({bool retry = false}) async {
     if (_connecting || (_client?.connected ?? false)) return;
     setState(() {
       _connecting = true;
@@ -373,6 +388,7 @@ class _CmdConsoleState extends State<CmdConsole>
     c.onClosed = (e) {
       if (!mounted) return;
       setState(() => _append('* disconnected: $e', _Kind.info));
+      _scheduleReconnect(); // instance restarted under us → reconnect when it's back
     };
     try {
       await c.connect();
@@ -383,20 +399,29 @@ class _CmdConsoleState extends State<CmdConsole>
       setState(() {
         _client = c;
         _connecting = false;
-        _append('* connected to ${widget.host}:${widget.port}', _Kind.info);
+        _append(
+            retry
+                ? '* reconnected to ${widget.host}:${widget.port}'
+                : '* connected to ${widget.host}:${widget.port}',
+            _Kind.info);
       });
       _focus.requestFocus();
     } catch (e) {
       if (!mounted) return;
       setState(() {
         _connecting = false;
-        _append('* could not connect to ${widget.host}:${widget.port} — $e',
-            _Kind.error);
+        // Only report the first failure; retries stay quiet until they succeed.
+        if (!retry) {
+          _append('* could not connect to ${widget.host}:${widget.port} — $e',
+              _Kind.error);
+        }
       });
+      _scheduleReconnect(); // keep trying while the instance is running
     }
   }
 
   void _disconnect({bool silent = false}) {
+    _reconnectTimer?.cancel();
     _client?.close();
     _client = null;
     if (!silent && mounted) {

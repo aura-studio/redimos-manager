@@ -102,6 +102,35 @@ class RedimosConfig {
   RedimosConfig copy() => RedimosConfig.fromJson(toJson());
 }
 
+/// Result of inspecting a config's DynamoDB table before start: whether the
+/// data already there disagrees with the config's version / MultiDB.
+class TableInspect {
+  final bool checked; // false = couldn't tell (no data / creds / table)
+  final String tableVersion; // "v1" | "v2" inferred from key type
+  final bool tableMultiDb;
+  final bool tableMultiDbKnown;
+  final bool mismatch;
+  final String detail; // English, one line
+
+  TableInspect({
+    this.checked = false,
+    this.tableVersion = '',
+    this.tableMultiDb = false,
+    this.tableMultiDbKnown = false,
+    this.mismatch = false,
+    this.detail = '',
+  });
+
+  factory TableInspect.fromJson(Map<String, dynamic> j) => TableInspect(
+        checked: (j['checked'] ?? false) as bool,
+        tableVersion: (j['tableVersion'] ?? '') as String,
+        tableMultiDb: (j['tableMultiDb'] ?? false) as bool,
+        tableMultiDbKnown: (j['tableMultiDbKnown'] ?? false) as bool,
+        mismatch: (j['mismatch'] ?? false) as bool,
+        detail: (j['detail'] ?? '') as String,
+      );
+}
+
 class Settings {
   String redimosV1Path;
   String redimosV2Path;

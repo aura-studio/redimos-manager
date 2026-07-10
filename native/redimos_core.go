@@ -1118,6 +1118,20 @@ func rm_stop_all() *C.char {
 	return okJSON(nil)
 }
 
+// rm_inspect_table peeks at the DynamoDB table a config points at and reports
+// whether the data already there disagrees with the config's Version / MultiDB.
+// Input is a full config JSON; output is a tableInspect JSON. Best-effort —
+// returns Checked=false (never an error) when it can't tell.
+//
+//export rm_inspect_table
+func rm_inspect_table(in *C.char) *C.char {
+	var cfg Config
+	if err := json.Unmarshal([]byte(C.GoString(in)), &cfg); err != nil {
+		return cjson(tableInspect{})
+	}
+	return cjson(checkTableCompat(&cfg))
+}
+
 //export rm_status
 func rm_status() *C.char { return cjson(mgr.statuses()) }
 
