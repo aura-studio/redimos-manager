@@ -560,12 +560,16 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
         SizedBox(
           height: 50,
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 8),
+            // Keep the outer box 50px so the rule below stays aligned with the
+            // tab bar's rule, but inset the button asymmetrically (a little on
+            // top, more below) so it shrinks slightly and a small gap opens
+            // beneath it before the config list.
+            padding: const EdgeInsets.fromLTRB(8, 3, 8, 9),
             child: FilledButton.icon(
               onPressed: _newConfig,
               icon: const Icon(Icons.add),
               label: const Text('New config'),
-              style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(40)),
+              style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(38)),
             ),
           ),
         ),
