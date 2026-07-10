@@ -110,6 +110,21 @@ rm_table_page(reqJSON)      -> {items:[{attr:{type,repr}}], cols:[...], lastKey,
   4. Preferences Dialog:page size 单选 + 列开关。
 - 状态:每配置独立(keyed by config id);切配置重置。
 
+## 弹窗/浮层全集(逐个实操核实)
+
+| 弹窗 | 实测细节 | v1 处置 |
+|---|---|---|
+| Preferences(齿轮) | Page size 6 档单选 + 每列开关 + Select all/Deselect all + Cancel/Save changes(橙) | ✅ 同样 |
+| Actions ▾ 菜单 | 5 项:`Edit item / Duplicate item / Delete items / Download selected items to CSV`(需选中,未选中禁用灰)+ `Download results to CSV`(常可用);选中 N 条时结果标题变 `(N/20)`,表头复选框半选态 | 裁(写操作);Download results to CSV 只读,v1.1 候选 |
+| Delete item(s) 确认弹窗 | 标题 `Delete item` + ×;正文 `Delete 1 item from the <table> table? This action cannot be reversed.` + 警示插画;`Cancel` / `Delete`(橙) | 裁(写操作) |
+| 单元格 ✏️ 快速编辑 | **键属性**(pk/sk)点 ✏️ 弹提示浮层:`Edit Sort key — You can't edit Sort key inline. To edit it in the item editor, choose Edit.` + Cancel/Edit(橙);部分列(如 t)悬停只有 ⧉ 无 ✏️ | 裁(写操作);⧉ 复制保留 |
+| Create item 页 | Form 态:pk/sk 预填行(`Empty value` 占位,类型列 Binary);JSON 态:预填键骨架 `{"pk":{"B":""},"sk":{"B":""}}`;底部 Cancel / Create item(橙) | 裁(写操作) |
+| Add new attribute ▾ | 类型 10 项:`String / Number / Boolean / Binary / Null / String set / Number set / Binary set / List / Map` | 裁(写操作,v2 编辑用) |
+| 条目页 Form\|JSON 双态 + View DynamoDB JSON + Copy | (前文已述) | JSON 态进 v1(只读 Dialog) |
+
+> 结论:控制台的弹窗全部服务于**写操作**(除 Preferences),v1 只读版需要
+> 的弹窗仅两个:Preferences + 条目 JSON Dialog,均已在方案内。
+
 ## 覆盖矩阵(控制台 UI 细节 → v1 处置,逐项)
 
 | # | 控制台细节(全部实测核实) | v1 处置 |
