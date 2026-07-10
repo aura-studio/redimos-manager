@@ -970,13 +970,28 @@ class _ConfigEditorState extends State<ConfigEditor> {
           const SizedBox(height: 22),
           const Divider(height: 1),
           const SizedBox(height: 18),
-          Row(mainAxisSize: MainAxisSize.min, children: [
+          Row(children: [
             FilledButton.icon(
               icon: const Icon(Icons.save),
               label: const Text('Save'),
               onPressed: () => widget.onSave(_collect()),
             ),
             const SizedBox(width: 12),
+            // Restore: discard unsaved edits, reverting fields to the saved config.
+            OutlinedButton.icon(
+              icon: const Icon(Icons.restore),
+              label: const Text('Restore'),
+              onPressed: () {
+                final wasDirty = isDirty;
+                _resetControllers();
+                if (wasDirty && mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Reverted unsaved changes')),
+                  );
+                }
+              },
+            ),
+            const Spacer(),
             OutlinedButton.icon(
               icon: const Icon(Icons.delete_outline),
               label: const Text('Delete'),

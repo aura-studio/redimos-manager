@@ -181,6 +181,10 @@ var mgr = newManager()
 func newManager() *manager {
 	m := &manager{running: map[string]*instance{}, storePath: defaultStorePath()}
 	m.load()
+	// A fresh session inherits no live process handles, so any redimos /
+	// DynamoDBLocal still running from a previous session is an orphan we can't
+	// supervise and that would collide with a restart. Sweep them once at boot.
+	m.reapStartupOrphans()
 	go m.samplerLoop()
 	go m.scraperLoop()
 	return m

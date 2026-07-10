@@ -522,6 +522,66 @@ func reapStalePort(port int, match string) {
 	}
 }
 
+// reapStartupOrphans cleans up children left behind by a previous app session
+// that ended ungracefully (SIGKILL / crash / power loss), where our redimos or
+// DynamoDBLocal processes were reparented to launchd (PPID 1) and keep holding
+// their ports. Run once at startup.
+//
+// It targets *only* true orphans — processes whose PPID is 1 — that also match
+// one of our own managed paths (an install-specific absolute path, so unrelated
+// software on the same port is safe). Because a second, concurrently-running app
+// instance's children have that instance as their parent (PPID != 1), they are
+// never touched: this reaps yesterday's leftovers, not a live sibling's work.
+//
+// This is the durable "restart compatibility" story: the per-port reapStalePort
+// at start() self-heals a single port on demand, rm_shutdown prevents new
+// orphans on a clean quit, and this sweep mops up whatever slipped past both.
+func (m *manager) reapStartupOrphans() {
+	if runtime.GOOS == "windows" {
+		return // relies on ps/PPID semantics; the supervisor guard covers Windows
+	}
+	m.mu.Lock()
+	var matches []string
+	if p := strings.TrimSpace(m.st.Settings.RedimosV1Path); p != "" {
+		matches = append(matches, p)
+	}
+	if p := strings.TrimSpace(m.st.Settings.RedimosV2Path); p != "" {
+		matches = append(matches, p)
+	}
+	m.mu.Unlock()
+	matches = append(matches, filepath.Join(m.ddbJavaDir(), "DynamoDBLocal.jar"))
+
+	out, err := exec.Command("ps", "-axo", "pid=,ppid=,command=").Output()
+	if err != nil {
+		return
+	}
+	self := os.Getpid()
+	for _, line := range strings.Split(string(out), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 3 {
+			continue
+		}
+		pid, e1 := strconv.Atoi(fields[0])
+		ppid, e2 := strconv.Atoi(fields[1])
+		if e1 != nil || e2 != nil || ppid != 1 || pid == self {
+			continue // not an orphan, or it's us
+		}
+		matched := false
+		for _, mstr := range matches {
+			if strings.Contains(line, mstr) {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			continue // not one of our managed binaries
+		}
+		if proc, ferr := os.FindProcess(pid); ferr == nil {
+			_ = proc.Kill()
+		}
+	}
+}
+
 func (m *manager) ddbStop() error {
 	m.mu.Lock()
 	in := m.ddb
