@@ -10,6 +10,7 @@ import 'package:flutter/services.dart';
 import 'src/cmd_console.dart';
 import 'src/models.dart';
 import 'src/native.dart';
+import 'src/table_page.dart';
 
 void main() {
   _loadThemeMode();
@@ -190,7 +191,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   final _editorKey = GlobalKey<_ConfigEditorState>();
   // Right-pane tabs (Configure / Monitor / Logs / Cmd) — owned here so the
   // table-mismatch flow can jump back to Configure.
-  late final TabController _tabs = TabController(length: 4, vsync: this);
+  late final TabController _tabs = TabController(length: 5, vsync: this);
 
   // Rolling CPU / memory history per config id, fed by the status poll and
   // drawn as sparklines in the monitor panel.
@@ -669,6 +670,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                 _tab(Icons.insights, 'Monitor'),
                 _tab(Icons.terminal, 'Logs'),
                 _tab(Icons.chevron_right, 'Cmd'),
+                _tab(Icons.table_chart, 'Table'),
               ],
             ),
           ),
@@ -710,6 +712,13 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                   host: '127.0.0.1',
                   port: c.port,
                   auth: c.requirepass.isEmpty ? null : c.requirepass,
+                  running: st?.isRunning ?? false,
+                ),
+                // table — read-only DynamoDB item browser (Explore-items style)
+                TablePageView(
+                  key: ValueKey('table-${c.id}'),
+                  core: _core!,
+                  config: c,
                   running: st?.isRunning ?? false,
                 ),
               ],

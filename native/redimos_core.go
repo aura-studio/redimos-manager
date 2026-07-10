@@ -1132,6 +1132,30 @@ func rm_inspect_table(in *C.char) *C.char {
 	return cjson(checkTableCompat(&cfg))
 }
 
+// rm_table_meta returns the selectable Scan/Query targets (base table + indexes)
+// with their pk/sk attribute name and type. Input is a full config JSON.
+//
+//export rm_table_meta
+func rm_table_meta(in *C.char) *C.char {
+	var cfg Config
+	if err := json.Unmarshal([]byte(C.GoString(in)), &cfg); err != nil {
+		return errJSON(err)
+	}
+	return cjson(tableMeta(&cfg))
+}
+
+// rm_table_page runs one Scan or Query page for the Table browser. Input is a
+// tablePageReq JSON (config + op + filters + pagination); output is the page.
+//
+//export rm_table_page
+func rm_table_page(in *C.char) *C.char {
+	var req tablePageReq
+	if err := json.Unmarshal([]byte(C.GoString(in)), &req); err != nil {
+		return errJSON(err)
+	}
+	return cjson(tablePage(&req))
+}
+
 //export rm_status
 func rm_status() *C.char { return cjson(mgr.statuses()) }
 

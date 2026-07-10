@@ -22,7 +22,7 @@ class NativeCore {
   late final _StrDartFn _version, _load, _status, _stopAll, _shutdown;
   late final _StrDartFn _ddbGet, _ddbStart, _ddbStop, _ddbLogs;
   late final _StrArgDartFn _saveConfig, _deleteConfig, _setSettings, _start, _stop, _logs;
-  late final _StrArgDartFn _ddbSet, _inspectTable;
+  late final _StrArgDartFn _ddbSet, _inspectTable, _tableMeta, _tablePage;
   late final _FreeDartFn _free;
 
   NativeCore() {
@@ -44,6 +44,8 @@ class NativeCore {
     _ddbLogs = _lib.lookupFunction<_StrNativeFn, _StrDartFn>('rm_ddb_logs');
     _ddbSet = _lib.lookupFunction<_StrArgNativeFn, _StrArgDartFn>('rm_ddb_set');
     _inspectTable = _lib.lookupFunction<_StrArgNativeFn, _StrArgDartFn>('rm_inspect_table');
+    _tableMeta = _lib.lookupFunction<_StrArgNativeFn, _StrArgDartFn>('rm_table_meta');
+    _tablePage = _lib.lookupFunction<_StrArgNativeFn, _StrArgDartFn>('rm_table_page');
     _free = _lib.lookupFunction<_FreeNativeFn, _FreeDartFn>('rm_free');
   }
 
@@ -138,6 +140,27 @@ class NativeCore {
       return TableInspect();
     }
   }
+  /// Table browser: the selectable Scan/Query targets (base table + indexes).
+  TableMeta tableMeta(RedimosConfig c) {
+    try {
+      return TableMeta.fromJson(
+          jsonDecode(_call1(_tableMeta, jsonEncode(c.toJson()))) as Map<String, dynamic>);
+    } catch (e) {
+      return TableMeta(ok: false, error: e.toString());
+    }
+  }
+
+  /// Table browser: run one Scan/Query page. [req] is the tablePageReq map
+  /// (config + op + filters + pagination). Never throws — returns ok:false.
+  TablePage tablePage(Map<String, dynamic> req) {
+    try {
+      return TablePage.fromJson(
+          jsonDecode(_call1(_tablePage, jsonEncode(req))) as Map<String, dynamic>);
+    } catch (e) {
+      return TablePage(ok: false, error: e.toString());
+    }
+  }
+
   void stopAll() => _call0(_stopAll);
 
   /// Terminate every managed child (redimos instances + Local DynamoDB). Call on

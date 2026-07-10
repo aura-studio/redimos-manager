@@ -321,3 +321,111 @@ class InstanceStatus {
 
   bool get isRunning => status == 'running';
 }
+
+// ---------------------------------------------------------------------------
+// Table browser (the "Table" tab — read-only DynamoDB explore, redimos-flavour)
+// ---------------------------------------------------------------------------
+
+/// A key attribute reference: its name and DynamoDB scalar type (S | N | B).
+class TableKeyRef {
+  final String name;
+  final String type;
+  TableKeyRef({required this.name, required this.type});
+  factory TableKeyRef.fromJson(Map<String, dynamic> j) =>
+      TableKeyRef(name: (j['name'] ?? '') as String, type: (j['type'] ?? '') as String);
+}
+
+/// A selectable Scan/Query target: the base table or one of its indexes.
+class TableTarget {
+  final String name;
+  final String kind; // "table" | "LSI" | "GSI"
+  final TableKeyRef pk;
+  final TableKeyRef? sk;
+  TableTarget({required this.name, required this.kind, required this.pk, this.sk});
+  factory TableTarget.fromJson(Map<String, dynamic> j) => TableTarget(
+        name: (j['name'] ?? '') as String,
+        kind: (j['kind'] ?? 'table') as String,
+        pk: TableKeyRef.fromJson((j['pk'] as Map<String, dynamic>?) ?? {}),
+        sk: j['sk'] == null ? null : TableKeyRef.fromJson(j['sk'] as Map<String, dynamic>),
+      );
+  bool get isTable => kind == 'table';
+}
+
+class TableMeta {
+  final bool ok;
+  final String? error;
+  final String table;
+  final List<TableTarget> targets;
+  TableMeta({required this.ok, this.error, this.table = '', this.targets = const []});
+  factory TableMeta.fromJson(Map<String, dynamic> j) => TableMeta(
+        ok: (j['ok'] ?? false) as bool,
+        error: j['error'] as String?,
+        table: (j['table'] ?? '') as String,
+        targets: ((j['targets'] as List?) ?? [])
+            .map((e) => TableTarget.fromJson(e as Map<String, dynamic>))
+            .toList(),
+      );
+}
+
+/// One displayed cell value. For Binary, [repr] is the decoded UTF-8 when
+/// [printable]; [b64] always holds the base64 form.
+class AttrCell {
+  final String type; // S|N|B|BOOL|NULL|SS|NS|BS|L|M|?
+  final String repr;
+  final String? b64;
+  final bool printable;
+  AttrCell({required this.type, required this.repr, this.b64, this.printable = true});
+  factory AttrCell.fromJson(Map<String, dynamic> j) => AttrCell(
+        type: (j['t'] ?? '?') as String,
+        repr: (j['repr'] ?? '') as String,
+        b64: j['b64'] as String?,
+        printable: (j['printable'] ?? true) as bool,
+      );
+  bool get isBinary => type == 'B';
+}
+
+class TableItem {
+  final Map<String, AttrCell> cells;
+  final String ddbJson;
+  TableItem({required this.cells, required this.ddbJson});
+  factory TableItem.fromJson(Map<String, dynamic> j) => TableItem(
+        cells: ((j['cells'] as Map<String, dynamic>?) ?? {})
+            .map((k, v) => MapEntry(k, AttrCell.fromJson(v as Map<String, dynamic>))),
+        ddbJson: (j['ddbJson'] ?? '') as String,
+      );
+}
+
+class TablePage {
+  final bool ok;
+  final String? error;
+  final List<String> cols;
+  final List<TableItem> rows;
+  final int returned;
+  final int scanned;
+  final int timeMs;
+  final Map<String, dynamic>? lastKey; // opaque LastEvaluatedKey; null = last page
+  TablePage({
+    required this.ok,
+    this.error,
+    this.cols = const [],
+    this.rows = const [],
+    this.returned = 0,
+    this.scanned = 0,
+    this.timeMs = 0,
+    this.lastKey,
+  });
+  factory TablePage.fromJson(Map<String, dynamic> j) => TablePage(
+        ok: (j['ok'] ?? false) as bool,
+        error: j['error'] as String?,
+        cols: ((j['cols'] as List?) ?? []).map((e) => e.toString()).toList(),
+        rows: ((j['rows'] as List?) ?? [])
+            .map((e) => TableItem.fromJson(e as Map<String, dynamic>))
+            .toList(),
+        returned: (j['returned'] ?? 0) as int,
+        scanned: (j['scanned'] ?? 0) as int,
+        timeMs: (j['timeMs'] ?? 0) as int,
+        lastKey: j['lastKey'] as Map<String, dynamic>?,
+      );
+  bool get hasNext => lastKey != null;
+  double get efficiency => scanned == 0 ? 1.0 : returned / scanned;
+}
