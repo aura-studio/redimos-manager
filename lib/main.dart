@@ -1393,6 +1393,7 @@ class MonitorView extends StatelessWidget {
           // Dynamic first …
           _InfoTile(label: 'Uptime', value: up ? _fmtUptime(d.uptimeSec) : '—'),
           _InfoTile(label: 'Restarts', value: '${d.restarts}'),
+          _InfoTile(label: 'PID', value: up && d.pid > 0 ? '${d.pid}' : '—'),
           _InfoTile(label: 'Status', value: up ? 'Running' : d.status),
           // … fixed config last.
           _InfoTile(label: 'Engine', value: engine),
