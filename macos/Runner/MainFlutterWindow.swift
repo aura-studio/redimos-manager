@@ -18,9 +18,14 @@ class MainFlutterWindow: NSWindow {
     }
     self.minSize = NSSize(width: 900, height: 600)
     self.center()
-    // Appear on whatever Space is currently displayed (avoids the window
-    // opening on a background Space where it stays occluded/unrendered).
-    self.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+    // Enable native full screen: the green (zoom) traffic-light button takes the
+    // window full screen (⌥-click still does classic zoom). .fullScreenPrimary
+    // is what lets a window BE the full-screen space — the previous
+    // .fullScreenAuxiliary only allowed floating over someone else's full screen,
+    // which is why the button did nothing. Keep .resizable so zoom/full screen
+    // are offered at all.
+    self.styleMask.insert(.resizable)
+    self.collectionBehavior = [.fullScreenPrimary]
 
     RegisterGeneratedPlugins(registry: flutterViewController)
     super.awakeFromNib()

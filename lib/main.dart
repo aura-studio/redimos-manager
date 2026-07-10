@@ -555,21 +555,16 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   Widget _configList() {
     return Column(
       children: [
-        // Fixed 56px header — same explicit height as the tab bar (also 56), so
-        // the bold rule below lines up with the tab bar's rule across the split.
-        SizedBox(
-          height: 56,
-          child: Padding(
-            padding: const EdgeInsets.all(8),
-            child: FilledButton.icon(
-              onPressed: _newConfig,
-              icon: const Icon(Icons.add),
-              label: const Text('New config'),
-              style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(40)),
-            ),
+        Padding(
+          padding: const EdgeInsets.all(8),
+          child: FilledButton.icon(
+            onPressed: _newConfig,
+            icon: const Icon(Icons.add),
+            label: const Text('New config'),
+            style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(40)),
           ),
         ),
-        Divider(height: 3, thickness: 3, color: _thickRuleColor(context)),
+        const Divider(height: 1), // thin sidebar rule
         Expanded(
           child: _configs.isEmpty
               ? const Center(child: Text('No configs yet'))
@@ -647,42 +642,38 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // Fixed 56px — same explicit height as the sidebar's "New config"
-          // header, so the bold rule below lines up across the split.
-          SizedBox(
-            height: 56,
-            child: TabBar(
-              controller: _tabs,
-              // Four equal-width tabs sharing the full width.
-              labelColor: Theme.of(context).colorScheme.primary,
-              unselectedLabelColor: Theme.of(context).textTheme.bodySmall?.color,
-              indicatorColor: Theme.of(context).colorScheme.primary,
-              indicatorWeight: 2.5,
-              // Drop the tab bar's own M3 divider so it doesn't double up with the
-              // explicit Divider below — a single consistent rule instead.
-              dividerColor: Colors.transparent,
-              tabs: [
-                _tab(Icons.tune, 'Configure'),
-                _tab(Icons.insights, 'Monitor'),
-                _tab(Icons.terminal, 'Logs'),
-                _tab(Icons.chevron_right, 'Cmd'),
-              ],
-            ),
+          TabBar(
+            controller: _tabs,
+            // Four equal-width tabs sharing the full width.
+            labelColor: Theme.of(context).colorScheme.primary,
+            unselectedLabelColor: Theme.of(context).textTheme.bodySmall?.color,
+            indicatorColor: Theme.of(context).colorScheme.primary,
+            indicatorWeight: 2.5,
+            // Drop the tab bar's own M3 divider so it doesn't double up with the
+            // explicit bold rule below.
+            dividerColor: Colors.transparent,
+            tabs: [
+              _tab(Icons.tune, 'Configure'),
+              _tab(Icons.insights, 'Monitor'),
+              _tab(Icons.terminal, 'Logs'),
+              _tab(Icons.chevron_right, 'Cmd'),
+            ],
           ),
-          // Bold top rule — same thickness as the sidebar's, aligned across the split.
-          Divider(height: 3, thickness: 3, color: _thickRuleColor(context)),
+          const Divider(height: 1), // thin rule under the tabs
           Expanded(
             child: TabBarView(
               controller: _tabs,
               physics: const NeverScrollableScrollPhysics(),
               children: [
-                // configure (ConfigEditor scrolls its own fields and pins the
-                // action bar at the bottom)
-                ConfigEditor(
-                  key: _editorKey,
-                  config: c,
-                  onSave: _save,
-                  onDelete: _delete,
+                // configure
+                SingleChildScrollView(
+                  padding: const EdgeInsets.all(16),
+                  child: ConfigEditor(
+                    key: _editorKey,
+                    config: c,
+                    onSave: _save,
+                    onDelete: _delete,
+                  ),
                 ),
                 // monitor
                 MonitorView(
@@ -718,13 +709,6 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     );
   }
 
-  // Colour for the bold top rule (below New config / the tab bar) — a touch
-  // stronger than the hairline dividers so the thick line reads as deliberate.
-  Color _thickRuleColor(BuildContext context) =>
-      Theme.of(context).brightness == Brightness.dark
-          ? const Color(0x4DFFFFFF)
-          : const Color(0x26000000);
-
   PopupMenuItem<ThemeMode> _themeMenuItem(ThemeMode m, IconData icon, String label) {
     final selected = appThemeMode.value == m;
     final color = selected ? Theme.of(context).colorScheme.primary : null;
@@ -741,9 +725,8 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   }
 
   Widget _tab(IconData icon, String label) => Tab(
-        // 48px so the tab bar's bottom divider lines up with the sidebar's
-        // "New config" divider across the split.
-        height: 48,
+        // Compact so the bold rule sits tight under the tab labels.
+        height: 40,
         child: Row(mainAxisSize: MainAxisSize.min, children: [
           Icon(icon, size: 16),
           const SizedBox(width: 7),
@@ -944,8 +927,10 @@ class _ConfigEditorState extends State<ConfigEditor> {
     return LayoutBuilder(builder: (context, cons) {
       final w = cons.maxWidth.isFinite ? cons.maxWidth : 880.0;
       // Cap the form width so fields don't stretch absurdly wide on a large
-      // window; left-aligned, leaving the extra space on the right.
-      final cw = w.clamp(300.0, 1000.0).toDouble();
+      // Responsive: the form takes ~55% of the pane (so it grows a bit in full
+      // screen and stays compact at the initial size), left-aligned, clamped to
+      // a sane range that keeps each row's field + 3 controls readable.
+      final cw = (w * 0.55).clamp(700.0, 960.0).toDouble();
       const dropW = 140.0; // one width for every inline dropdown (and Port)
       // Auth / Table / Url / AccessKeyID / SessionToken share one leading-field
       // width so every left-column field lines up on both edges; each row's
@@ -960,14 +945,8 @@ class _ConfigEditorState extends State<ConfigEditor> {
       // The right credential field fills whatever is left after the leadW column.
       final credRightW = (cw - leadW - 12).clamp(120.0, 4000.0).toDouble();
       return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Scrollable field area — the pinned action bar below never moves.
-          Expanded(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
           // ── 1 · Name ─────────────────────────────────────────
           _sectionHead('1', 'Name', topPad: 6),
           SizedBox(width: cw, child: _field(_name, 'Name')),
@@ -1119,50 +1098,39 @@ class _ConfigEditorState extends State<ConfigEditor> {
             ),
           ),
 
-          const SizedBox(height: 16),
-                ],
-              ),
-            ),
-          ),
-          // Pinned action bar: locked to the bottom (never scrolls) and 48px tall
-          // so its top divider lines up with the Local DynamoDB panel's divider
-          // across the sidebar split.
+          // Actions scroll with the form (not pinned).
+          const SizedBox(height: 22),
           const Divider(height: 1),
-          SizedBox(
-            height: 48,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Row(children: [
-                FilledButton.icon(
-                  icon: const Icon(Icons.save),
-                  label: const Text('Save'),
-                  onPressed: () => widget.onSave(_collect()),
-                ),
-                const SizedBox(width: 12),
-                // Restore: discard unsaved edits, reverting fields to the saved config.
-                OutlinedButton.icon(
-                  icon: const Icon(Icons.restore),
-                  label: const Text('Restore'),
-                  onPressed: () {
-                    final wasDirty = isDirty;
-                    _resetControllers();
-                    if (wasDirty && mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Reverted unsaved changes')),
-                      );
-                    }
-                  },
-                ),
-                const Spacer(),
-                OutlinedButton.icon(
-                  icon: const Icon(Icons.delete_outline),
-                  label: const Text('Delete'),
-                  style: OutlinedButton.styleFrom(foregroundColor: Colors.redAccent),
-                  onPressed: _confirmDelete,
-                ),
-              ]),
+          const SizedBox(height: 18),
+          Row(children: [
+            FilledButton.icon(
+              icon: const Icon(Icons.save),
+              label: const Text('Save'),
+              onPressed: () => widget.onSave(_collect()),
             ),
-          ),
+            const SizedBox(width: 12),
+            // Restore: discard unsaved edits, reverting fields to the saved config.
+            OutlinedButton.icon(
+              icon: const Icon(Icons.restore),
+              label: const Text('Restore'),
+              onPressed: () {
+                final wasDirty = isDirty;
+                _resetControllers();
+                if (wasDirty && mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Reverted unsaved changes')),
+                  );
+                }
+              },
+            ),
+            const Spacer(),
+            OutlinedButton.icon(
+              icon: const Icon(Icons.delete_outline),
+              label: const Text('Delete'),
+              style: OutlinedButton.styleFrom(foregroundColor: Colors.redAccent),
+              onPressed: _confirmDelete,
+            ),
+          ]),
         ],
       );
     });
