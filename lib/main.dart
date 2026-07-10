@@ -1572,6 +1572,9 @@ class MonitorView extends StatelessWidget {
           _InfoTile(label: 'Port', value: running ? '${st!.port}' : '—'),
           _InfoTile(
               label: 'Engine',
+              // Fit to the DDB engine label (the longer of the two) so this tile
+              // and the DDB Engine tile render at the same size.
+              fitReference: ddb != null ? _ddbEngineLabel(ddb!.config.engine) : null,
               value: (st?.runMode ?? 'native') == 'docker' ? 'Docker' : 'Native'),
         ]),
         if (ddb != null) _ddbSection(context, ddb!),
@@ -1585,11 +1588,7 @@ class MonitorView extends StatelessWidget {
     final up = d.status == 'running';
     // "runtime · product" — mirrors the config dropdown labels so the tile says
     // both how it runs and which backend (e.g. "Docker · LocalStack").
-    final engine = switch (d.config.engine) {
-      'docker' => 'Docker · dynamodb-local',
-      'localstack' => 'Docker · LocalStack',
-      _ => 'Java · local',
-    };
+    final engine = _ddbEngineLabel(d.config.engine);
     // Same sparkHeight (48) as the redimos dashboard so every chart box across
     // both sections is an identical size.
     Widget spark(String label, String value, List<double> data, Color color) =>
@@ -1636,7 +1635,7 @@ class MonitorView extends StatelessWidget {
           // tiles above. (DDB says "Engine" because the choice is a different
           // backend product — dynamodb-local vs LocalStack — not just a run mode.)
           _InfoTile(label: 'Port', value: '${d.config.port}'),
-          _InfoTile(label: 'Engine', value: engine),
+          _InfoTile(label: 'Engine', fitReference: engine, value: engine),
         ]),
       ],
     );
@@ -1741,13 +1740,45 @@ class _SparkTile extends StatelessWidget {
   }
 }
 
+// DDB Engine tile label: "runtime · product". Shared so the redimos Engine tile
+// can fit itself to the same reference and render at the same size.
+String _ddbEngineLabel(String engine) => switch (engine) {
+      'docker' => 'Docker · dynamodb-local',
+      'localstack' => 'Docker · LocalStack',
+      _ => 'Java · local',
+    };
+
+// Font size (capped at 17) at which [ref] fits [avail] px on one line. Two tiles
+// of equal width passing the same [ref] get the same size — used to keep the two
+// Engine tiles visually identical without wrapping or growing the tile height.
+double _fitValueFont(double avail, String ref, {double base = 17, double floor = 8}) {
+  // Leave a few px of slack so the text never ellipsizes right on the boundary.
+  final usable = avail - 8;
+  final tp = TextPainter(
+    text: TextSpan(text: ref, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w500)),
+    textDirection: TextDirection.ltr,
+    maxLines: 1,
+  )..layout();
+  final w = tp.width;
+  if (w <= 0 || w <= usable) return base;
+  return (base * usable / w).clamp(floor, base);
+}
+
 class _InfoTile extends StatelessWidget {
   final String label;
   final String value;
-  const _InfoTile({required this.label, required this.value});
+  // When set, the value font shrinks (capped at 17) so this reference string
+  // fits one line; every tile passing the SAME reference renders at the SAME
+  // size, keeping the two Engine tiles equal without wrapping / taller tiles.
+  final String? fitReference;
+  const _InfoTile({required this.label, required this.value, this.fitReference});
 
   @override
   Widget build(BuildContext context) {
+    Widget valueText(double size) => Text(value,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(fontSize: size, fontWeight: FontWeight.w500));
     return Container(
       width: 132,
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
@@ -1758,16 +1789,10 @@ class _InfoTile extends StatelessWidget {
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text(label, style: TextStyle(fontSize: 11, color: _tileLabelColor(context))),
         const SizedBox(height: 4),
-        // Shrink long values (e.g. "Docker · LocalStack") to one line so every
-        // tile keeps the same height and the grid rows stay aligned.
-        Align(
-          alignment: Alignment.centerLeft,
-          child: FittedBox(
-            fit: BoxFit.scaleDown,
-            alignment: Alignment.centerLeft,
-            child: Text(value, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w500)),
-          ),
-        ),
+        fitReference == null
+            ? valueText(17)
+            : LayoutBuilder(
+                builder: (_, c) => valueText(_fitValueFont(c.maxWidth, fitReference!))),
       ]),
     );
   }
