@@ -1285,14 +1285,34 @@ class MonitorView extends StatelessWidget {
     );
   }
 
-  // Dashboard layout for the tab: three sparkline cards fill the width across
-  // the top, the smaller info tiles sit in a grid below.
+  // A section eyebrow: icon + label on the left, a status string on the right.
+  Widget _sectionHeader(BuildContext context, IconData icon, String label, String status) {
+    final scheme = Theme.of(context).colorScheme;
+    return Row(children: [
+      Icon(icon, size: 16, color: scheme.onSurfaceVariant),
+      const SizedBox(width: 8),
+      Text(label,
+          style: TextStyle(
+              fontSize: 12,
+              letterSpacing: 1.3,
+              fontWeight: FontWeight.w700,
+              color: scheme.onSurfaceVariant)),
+      const Spacer(),
+      Text(status, style: TextStyle(fontSize: 11, color: Theme.of(context).textTheme.bodySmall?.color)),
+    ]);
+  }
+
+  // Dashboard layout for the tab: a section header, three sparkline cards across
+  // the top, the smaller info tiles in a grid below.
   Widget _dashboard(BuildContext context, InstanceStatus? st, bool running) {
     Widget spark(String label, String value, List<double> data, Color color) =>
         _SparkTile(label: label, value: value, data: data, color: color, width: null, sparkHeight: 48);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        _sectionHeader(context, Icons.dns, 'REDIMOS',
+            running ? 'Running · :${st!.port}' : (st?.status ?? 'stopped')),
+        const SizedBox(height: 12),
         IntrinsicHeight(
           child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
             Expanded(
@@ -1346,7 +1366,6 @@ class MonitorView extends StatelessWidget {
       'localstack' => 'LocalStack',
       _ => 'Java',
     };
-    final scheme = Theme.of(context).colorScheme;
     Widget spark(String label, String value, List<double> data, Color color) =>
         _SparkTile(label: label, value: value, data: data, color: color, width: null, sparkHeight: 44);
     return Column(
@@ -1355,19 +1374,8 @@ class MonitorView extends StatelessWidget {
         const SizedBox(height: 20),
         const Divider(height: 1),
         const SizedBox(height: 14),
-        Row(children: [
-          Icon(Icons.storage, size: 16, color: scheme.onSurfaceVariant),
-          const SizedBox(width: 8),
-          Text('LOCAL DYNAMODB',
-              style: TextStyle(
-                  fontSize: 12,
-                  letterSpacing: 1.3,
-                  fontWeight: FontWeight.w700,
-                  color: scheme.onSurfaceVariant)),
-          const Spacer(),
-          Text(up ? 'Running · :${d.config.port}' : d.status,
-              style: TextStyle(fontSize: 11, color: Theme.of(context).textTheme.bodySmall?.color)),
-        ]),
+        _sectionHeader(context, Icons.storage, 'LOCAL DYNAMODB',
+            up ? 'Running · :${d.config.port}' : d.status),
         const SizedBox(height: 12),
         IntrinsicHeight(
           child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
