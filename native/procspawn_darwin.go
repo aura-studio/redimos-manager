@@ -50,6 +50,10 @@ func killChildTree(pid int) {
 	_ = syscall.Kill(target, syscall.SIGKILL)
 }
 
+// killInstanceTree is terminate()'s kill; on darwin the child's own process
+// group is the tree handle, no per-instance state needed.
+func killInstanceTree(in *instance, pid int) { killChildTree(pid) }
+
 // killPid force-kills one specific pid whose identity the caller has already
 // verified (registry / cmdline match).
 func killPid(pid int) {

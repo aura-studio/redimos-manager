@@ -392,7 +392,10 @@ func (m *manager) ddbStart() error {
 	}
 	m.mu.Unlock()
 
-	in := &instance{port: cfg.Port, role: "ddb", autoRestart: true}
+	// detached: the Local DynamoDB is the one STATEFUL child (in-memory dev
+	// tables) — it deliberately survives a manager crash so the next session can
+	// adopt it instead of wiping the data (no job jail / no janitor kill).
+	in := &instance{port: cfg.Port, role: "ddb", autoRestart: true, detached: true}
 	switch cfg.Engine {
 	case "docker", "localstack":
 		docker, ok := dockerBin()
@@ -503,59 +506,10 @@ func (m *manager) ddbStart() error {
 	}
 }
 
-// reapStalePort kills any process listening on `port` whose command line
-// references `match` — i.e. one of our own children (a redimos binary or the
-// DynamoDBLocal jar) launched in a prior session that outlived an ungraceful app
-// exit and is still holding the port. Matching on our own path means it can't
-// touch unrelated apps that happen to use the same port (e.g. a real Redis on
-// 6379). Best-effort: any failure is ignored (the caller falls back to the
-// normal spawn/supervisor path). No-op on platforms without lsof/ps.
-func reapStalePort(port int, match string) {
-	if runtime.GOOS == "windows" {
-		return // no lsof; the port-in-use case is handled by the supervisor guard
-	}
-	if match == "" {
-		return
-	}
-	out, err := exec.Command("lsof", "-nP", "-iTCP:"+strconv.Itoa(port), "-sTCP:LISTEN", "-t").Output()
-	if err != nil {
-		return
-	}
-	for _, line := range strings.Fields(string(out)) {
-		pid, perr := strconv.Atoi(line)
-		if perr != nil || pid <= 0 {
-			continue
-		}
-		cmd, cerr := exec.Command("ps", "-o", "command=", "-p", line).Output()
-		if cerr != nil || !strings.Contains(string(cmd), match) {
-			continue // not ours — leave it alone
-		}
-		if proc, ferr := os.FindProcess(pid); ferr == nil {
-			_ = proc.Kill()
-		}
-	}
-}
-
-// reapStartupOrphans is the LEGACY heuristic backstop behind reconcileOnBoot:
-// it catches our orphans when the registry was lost or predates them. A
-// candidate must clear three independent bars before it is killed:
-//
-//   1. PPID == 1 — on macOS this only proves "launchd child" (every GUI app
-//      qualifies), so it merely scopes the scan to processes with no live
-//      parent;
-//   2. its command line references one of our managed absolute paths;
-//   3. its ENVIRONMENT carries the REDIMOS_MANAGER_SESSION sentinel that
-//      spawn() injects — which a user's own copy of the same binary (nohup'd
-//      from a closed terminal, or a `tail -f` on a path under ours) never has.
-//
-// Bar 3 is what kills the false-positive class the audit demonstrated; orphans
-// from builds too old to set the sentinel are healed lazily by reapStalePort at
-// the next Start of their port instead. Runs once at boot, under the
-// single-instance lock.
-func (m *manager) reapStartupOrphans() {
-	if runtime.GOOS == "windows" {
-		return // registry reconcile covers Windows; no ps/PPID semantics there
-	}
+// managedPathMatches returns the absolute paths that identify our managed
+// binaries (the two redimos binaries from Settings + the DynamoDBLocal jar),
+// used by the per-OS reapers to recognize candidates.
+func (m *manager) managedPathMatches() []string {
 	m.mu.Lock()
 	var matches []string
 	if p := strings.TrimSpace(m.st.Settings.RedimosV1Path); p != "" {
@@ -565,46 +519,7 @@ func (m *manager) reapStartupOrphans() {
 		matches = append(matches, p)
 	}
 	m.mu.Unlock()
-	matches = append(matches, filepath.Join(m.ddbJavaDir(), "DynamoDBLocal.jar"))
-
-	out, err := exec.Command("ps", "-axo", "pid=,ppid=,command=").Output()
-	if err != nil {
-		return
-	}
-	self := os.Getpid()
-	for _, line := range strings.Split(string(out), "\n") {
-		fields := strings.Fields(line)
-		if len(fields) < 3 {
-			continue
-		}
-		pid, e1 := strconv.Atoi(fields[0])
-		ppid, e2 := strconv.Atoi(fields[1])
-		if e1 != nil || e2 != nil || ppid != 1 || pid == self {
-			continue // not parentless, or it's us
-		}
-		matched := false
-		for _, mstr := range matches {
-			if strings.Contains(line, mstr) {
-				matched = true
-				break
-			}
-		}
-		if !matched {
-			continue // not one of our managed binaries
-		}
-		if !hasManagerEnvMarker(pid) {
-			continue // same path but not spawned by us — leave it alone
-		}
-		killChildTree(pid)
-	}
-}
-
-// hasManagerEnvMarker reports whether pid's environment (the exec-time
-// snapshot, readable for same-user processes) carries the sentinel spawn()
-// injects into every child.
-func hasManagerEnvMarker(pid int) bool {
-	out, err := exec.Command("ps", "-E", "-ww", "-o", "command=", "-p", strconv.Itoa(pid)).Output()
-	return err == nil && strings.Contains(string(out), "REDIMOS_MANAGER_SESSION=")
+	return append(matches, filepath.Join(m.ddbJavaDir(), "DynamoDBLocal.jar"))
 }
 
 // sweepLabeledContainers removes containers left behind by previous sessions.

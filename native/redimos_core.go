@@ -119,6 +119,13 @@ type instance struct {
 	launchEnv  []string
 	container  string // docker container name when the child runs containerised ("" = plain process)
 
+	// Lifetime policy. A detached child deliberately SURVIVES manager death so
+	// the next session can adopt it (the stateful Local DynamoDB — its in-memory
+	// tables are the user's dev data); everything else is lifetime-bound to the
+	// manager (Windows: job object kill-on-close; macOS: janitor).
+	detached bool
+	job      uintptr // windows: KILL_ON_JOB_CLOSE job handle (0 = none / darwin)
+
 	// Supervisor state.
 	autoRestart  bool
 	intendedStop bool        // set by user Stop; suppresses auto-restart
@@ -712,9 +719,9 @@ func (in *instance) terminate() {
 		// goroutine (or the adoption watcher) hasn't reaped it, so the pid can't
 		// have been recycled.
 		if proc != nil && proc.Process != nil {
-			killChildTree(proc.Process.Pid)
+			killInstanceTree(in, proc.Process.Pid)
 		} else if pid > 0 {
-			killChildTree(pid) // adopted child: no cmd handle, only a pid
+			killInstanceTree(in, pid) // adopted child: no cmd handle, only a pid
 		}
 	}
 }
