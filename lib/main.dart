@@ -1550,7 +1550,9 @@ class MonitorView extends StatelessWidget {
           _InfoTile(
               label: 'Latency',
               value: running && st!.metricsOk ? '${st.avgLatencyMs.toStringAsFixed(2)} ms' : '—'),
-          _InfoTile(label: 'Throttled', value: running && st!.metricsOk ? '${st.throttled}' : '—'),
+          // Status (col 4) mirrors the DDB section's Status tile so the two rows
+          // align on this column too.
+          _InfoTile(label: 'Status', value: running ? 'Running' : (st?.status ?? 'stopped')),
           _InfoTile(
               label: 'Health',
               value: !running || !st!.metricsOk
