@@ -1794,7 +1794,9 @@ class _LocalDdbPanelState extends State<LocalDdbPanel> {
               Text(
                 active && status == 'running'
                     ? '$pillText · :${cfg.port}'
-                        '${info!.restarts > 0 ? " · ↻${info.restarts}" : ""}'
+                        ' · ${info!.cpuPercent.toStringAsFixed(1)}%'
+                        ' · ${(info.memBytes / (1024 * 1024)).round()}MB'
+                        '${info.restarts > 0 ? " · ↻${info.restarts}" : ""}'
                     : pillText,
                 style: const TextStyle(fontSize: 11, color: Colors.grey),
               ),
