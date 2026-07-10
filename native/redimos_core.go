@@ -209,6 +209,9 @@ func newManager() *manager {
 		m.reconcileOnBoot()
 		m.reapStartupOrphans()
 		go m.sweepLabeledContainers(nil)
+		// The SIGKILL-proof prevention layer (darwin): children registered with
+		// the janitor die within milliseconds of the manager, however it dies.
+		startJanitor()
 	}
 	go m.samplerLoop()
 	go m.scraperLoop()
@@ -579,7 +582,7 @@ func (in *instance) spawn() error {
 	in.opsPerSec, in.avgLatencyMs, in.throttled = 0, 0, 0
 	in.prevMtxAt = time.Time{}
 	in.appendLogLocked(fmt.Sprintf("$ %s %s", in.bin, strings.Join(in.launchArgs, " ")))
-	role, cont, port, bin := in.role, in.container, in.port, in.bin
+	role, cont, port, bin, detached := in.role, in.container, in.port, in.bin, in.detached
 	in.mu.Unlock()
 
 	// Record the child in the persisted registry with its exact identity so the
@@ -590,6 +593,8 @@ func (in *instance) spawn() error {
 			Port: port, Container: cont, Bin: bin, Session: mgr.sessionID,
 		})
 	}
+	// Lifetime binding (darwin): the janitor kills this child when we die.
+	janitorRegister(detached, cmd.Process.Pid, bin, cont)
 
 	go pump(stdout, in)
 	go pump(stderr, in)
@@ -605,9 +610,10 @@ func (in *instance) superviseExit(werr error) {
 	if in.intendedStop {
 		in.status = "stopped"
 		in.appendLogLocked("[stopped]")
-		role := in.role
+		role, pid, cont := in.role, in.pid, in.container
 		in.mu.Unlock()
 		regRemove(role) // terminal: nothing left to reconcile at next boot
+		janitorUnregister(pid, cont)
 		return
 	}
 	if werr != nil {
@@ -619,9 +625,10 @@ func (in *instance) superviseExit(werr error) {
 	}
 	if !in.autoRestart {
 		in.status = "error"
-		role := in.role
+		role, pid, cont := in.role, in.pid, in.container
 		in.mu.Unlock()
 		regRemove(role)
+		janitorUnregister(pid, cont)
 		return
 	}
 	now := time.Now()
@@ -633,16 +640,19 @@ func (in *instance) superviseExit(werr error) {
 	if in.failCount >= crashLoopMax {
 		in.status = "failed"
 		in.appendLogLocked(fmt.Sprintf("[supervisor: gave up after %d exits within %s]", in.failCount, crashLoopWindow))
-		role := in.role
+		role, pid, cont := in.role, in.pid, in.container
 		in.mu.Unlock()
 		regRemove(role)
+		janitorUnregister(pid, cont)
 		return
 	}
 	backoff := restartBackoff[min(in.failCount-1, len(restartBackoff)-1)]
 	in.status = "restarting"
 	in.appendLogLocked(fmt.Sprintf("[supervisor: restart #%d in %s]", in.restarts+1, backoff))
 	in.restartTimer = time.AfterFunc(backoff, in.doRestart) // terminate() cancels this
+	pid, cont := in.pid, in.container
 	in.mu.Unlock()
+	janitorUnregister(pid, cont) // the dead child's entry; respawn re-registers
 }
 
 // doRestart is invoked by the backoff timer to bring the child back up.
@@ -710,6 +720,7 @@ func (in *instance) terminate() {
 	in.mu.Unlock()
 	if settled {
 		regRemove(role) // no exit event will fire for a child that isn't running
+		janitorUnregister(pid, cont)
 	}
 	if cont != "" {
 		// Removing the container makes the foreground docker CLI exit on its own.

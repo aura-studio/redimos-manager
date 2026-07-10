@@ -31,3 +31,7 @@ dist/
 
 # DynamoDB Local shared-db artifact (created when the java engine runs)
 dynamodb-local-metadata.json
+
+# lifeline janitor helper (built from native/janitor)
+native/rm-janitor
+rm-janitor
