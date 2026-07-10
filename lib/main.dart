@@ -549,7 +549,9 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     return Column(
       children: [
         Padding(
-          padding: const EdgeInsets.all(8),
+          // vertical 4 + 40px button = 48, matching the tab bar so this divider
+          // lines up with the tab bar's divider across the split.
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
           child: FilledButton.icon(
             onPressed: _newConfig,
             icon: const Icon(Icons.add),
@@ -713,7 +715,9 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   }
 
   Widget _tab(IconData icon, String label) => Tab(
-        height: 42,
+        // 48px so the tab bar's bottom divider lines up with the sidebar's
+        // "New config" divider across the split.
+        height: 48,
         child: Row(mainAxisSize: MainAxisSize.min, children: [
           Icon(icon, size: 16),
           const SizedBox(width: 7),
