@@ -555,13 +555,18 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   Widget _configList() {
     return Column(
       children: [
-        Padding(
-          padding: const EdgeInsets.all(8),
-          child: FilledButton.icon(
-            onPressed: _newConfig,
-            icon: const Icon(Icons.add),
-            label: const Text('New config'),
-            style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(40)),
+        // Fixed 50px header — same explicit height as the tab bar, so the thin
+        // rule below lines up with the tab bar's rule across the split.
+        SizedBox(
+          height: 50,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            child: FilledButton.icon(
+              onPressed: _newConfig,
+              icon: const Icon(Icons.add),
+              label: const Text('New config'),
+              style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(40)),
+            ),
           ),
         ),
         const Divider(height: 1), // thin sidebar rule
@@ -642,22 +647,26 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          TabBar(
-            controller: _tabs,
-            // Four equal-width tabs sharing the full width.
-            labelColor: Theme.of(context).colorScheme.primary,
-            unselectedLabelColor: Theme.of(context).textTheme.bodySmall?.color,
-            indicatorColor: Theme.of(context).colorScheme.primary,
-            indicatorWeight: 2.5,
-            // Drop the tab bar's own M3 divider so it doesn't double up with the
-            // explicit bold rule below.
-            dividerColor: Colors.transparent,
-            tabs: [
-              _tab(Icons.tune, 'Configure'),
-              _tab(Icons.insights, 'Monitor'),
-              _tab(Icons.terminal, 'Logs'),
-              _tab(Icons.chevron_right, 'Cmd'),
-            ],
+          // Fixed 50px — same explicit height as the sidebar's "New config"
+          // header, so the thin rule below lines up across the split.
+          SizedBox(
+            height: 50,
+            child: TabBar(
+              controller: _tabs,
+              // Four equal-width tabs sharing the full width.
+              labelColor: Theme.of(context).colorScheme.primary,
+              unselectedLabelColor: Theme.of(context).textTheme.bodySmall?.color,
+              indicatorColor: Theme.of(context).colorScheme.primary,
+              indicatorWeight: 2.5,
+              // Drop the tab bar's own M3 divider so it doesn't double up.
+              dividerColor: Colors.transparent,
+              tabs: [
+                _tab(Icons.tune, 'Configure'),
+                _tab(Icons.insights, 'Monitor'),
+                _tab(Icons.terminal, 'Logs'),
+                _tab(Icons.chevron_right, 'Cmd'),
+              ],
+            ),
           ),
           const Divider(height: 1), // thin rule under the tabs
           Expanded(
@@ -665,15 +674,12 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
               controller: _tabs,
               physics: const NeverScrollableScrollPhysics(),
               children: [
-                // configure
-                SingleChildScrollView(
-                  padding: const EdgeInsets.all(16),
-                  child: ConfigEditor(
-                    key: _editorKey,
-                    config: c,
-                    onSave: _save,
-                    onDelete: _delete,
-                  ),
+                // configure (scrolls its own fields, pins the action bar)
+                ConfigEditor(
+                  key: _editorKey,
+                  config: c,
+                  onSave: _save,
+                  onDelete: _delete,
                 ),
                 // monitor
                 MonitorView(
@@ -945,8 +951,14 @@ class _ConfigEditorState extends State<ConfigEditor> {
       // The right credential field fills whatever is left after the leadW column.
       final credRightW = (cw - leadW - 12).clamp(120.0, 4000.0).toDouble();
       return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // Scrollable field area — the pinned action bar below never moves.
+          Expanded(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
           // ── 1 · Name ─────────────────────────────────────────
           _sectionHead('1', 'Name', topPad: 6),
           SizedBox(width: cw, child: _field(_name, 'Name')),
@@ -1098,39 +1110,49 @@ class _ConfigEditorState extends State<ConfigEditor> {
             ),
           ),
 
-          // Actions scroll with the form (not pinned).
-          const SizedBox(height: 22),
+          const SizedBox(height: 16),
+                ],
+              ),
+            ),
+          ),
+          // Pinned action bar: locked to the bottom (never scrolls), 48px tall so
+          // its top divider lines up with the Local DynamoDB panel's divider.
           const Divider(height: 1),
-          const SizedBox(height: 18),
-          Row(children: [
-            FilledButton.icon(
-              icon: const Icon(Icons.save),
-              label: const Text('Save'),
-              onPressed: () => widget.onSave(_collect()),
+          SizedBox(
+            height: 48,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Row(children: [
+                FilledButton.icon(
+                  icon: const Icon(Icons.save),
+                  label: const Text('Save'),
+                  onPressed: () => widget.onSave(_collect()),
+                ),
+                const SizedBox(width: 12),
+                // Restore: discard unsaved edits, reverting fields to the saved config.
+                OutlinedButton.icon(
+                  icon: const Icon(Icons.restore),
+                  label: const Text('Restore'),
+                  onPressed: () {
+                    final wasDirty = isDirty;
+                    _resetControllers();
+                    if (wasDirty && mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Reverted unsaved changes')),
+                      );
+                    }
+                  },
+                ),
+                const Spacer(),
+                OutlinedButton.icon(
+                  icon: const Icon(Icons.delete_outline),
+                  label: const Text('Delete'),
+                  style: OutlinedButton.styleFrom(foregroundColor: Colors.redAccent),
+                  onPressed: _confirmDelete,
+                ),
+              ]),
             ),
-            const SizedBox(width: 12),
-            // Restore: discard unsaved edits, reverting fields to the saved config.
-            OutlinedButton.icon(
-              icon: const Icon(Icons.restore),
-              label: const Text('Restore'),
-              onPressed: () {
-                final wasDirty = isDirty;
-                _resetControllers();
-                if (wasDirty && mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Reverted unsaved changes')),
-                  );
-                }
-              },
-            ),
-            const Spacer(),
-            OutlinedButton.icon(
-              icon: const Icon(Icons.delete_outline),
-              label: const Text('Delete'),
-              style: OutlinedButton.styleFrom(foregroundColor: Colors.redAccent),
-              onPressed: _confirmDelete,
-            ),
-          ]),
+          ),
         ],
       );
     });
