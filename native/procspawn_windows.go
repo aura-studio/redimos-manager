@@ -195,12 +195,14 @@ func assignPidToJob(job uintptr, pid int) error {
 func resumeProcess(pid int) {
 	if procNtResumeProcess.Find() == nil {
 		if h, err := syscall.OpenProcess(processSuspendResume, false, uint32(pid)); err == nil {
-			_, _, _ = procNtResumeProcess.Call(uintptr(h)) // NTSTATUS; best-effort
+			status, _, _ := procNtResumeProcess.Call(uintptr(h)) // NTSTATUS (0 = success)
 			_ = syscall.CloseHandle(h)
-			return
+			if status == 0 {
+				return
+			}
 		}
 	}
-	resumeThreadsToolhelp(pid)
+	resumeThreadsToolhelp(pid) // NtResumeProcess unavailable or failed — fall through
 }
 
 // threadEntry32 mirrors THREADENTRY32 (tlhelp32.h): 28 bytes, all 4-aligned.
@@ -254,6 +256,22 @@ func killInstanceTree(in *instance, pid int) {
 		}
 	}
 	killPid(pid)
+}
+
+// releaseInstance closes the instance's job handle once the instance reaches a
+// terminal state (stopped / error / failed). This both plugs a handle leak
+// across the app's lifetime and — because it is a KILL_ON_JOB_CLOSE job — reaps
+// any straggler still inside it. A supervised restart reuses the SAME instance
+// and re-creates a job in postSpawn, so this is only ever called when the
+// instance will not restart. Idempotent (zeroes the handle).
+func releaseInstance(in *instance) {
+	in.mu.Lock()
+	job := in.job
+	in.job = 0
+	in.mu.Unlock()
+	if job != 0 {
+		_ = syscall.CloseHandle(syscall.Handle(job))
+	}
 }
 
 // killChildTree kills a process for which no instance/job exists (registry

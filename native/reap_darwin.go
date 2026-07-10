@@ -16,7 +16,7 @@ import (
 // can't touch unrelated apps that happen to use the same port (e.g. a real
 // Redis on 6379). Best-effort: any failure is ignored (the caller falls back
 // to the normal spawn/supervisor path).
-func reapStalePort(port int, match string) {
+func reapStalePort(port int, match string, live map[int]bool) {
 	if match == "" {
 		return
 	}
@@ -26,8 +26,8 @@ func reapStalePort(port int, match string) {
 	}
 	for _, line := range strings.Fields(string(out)) {
 		pid, perr := strconv.Atoi(line)
-		if perr != nil || pid <= 0 {
-			continue
+		if perr != nil || pid <= 0 || live[pid] {
+			continue // skip a child this session already manages
 		}
 		cmd, cerr := exec.Command("ps", "-o", "command=", "-p", line).Output()
 		if cerr != nil || !strings.Contains(string(cmd), match) {

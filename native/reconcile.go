@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -84,7 +85,8 @@ func (m *manager) tryAdoptNativeDdb(rec childRec) bool {
 	}
 	in := &instance{
 		port: rec.Port, role: "ddb", autoRestart: true, detached: true, adopted: true,
-		pid: rec.PID, status: "running", started: time.UnixMicro(rec.StartUnixMicro),
+		pid: rec.PID, startMicro: rec.StartUnixMicro, status: "running",
+		started: time.UnixMicro(rec.StartUnixMicro),
 		bin: bin, launchArgs: args, launchEnv: os.Environ(),
 	}
 	in.appendLog(adoptionBanner(rec))
@@ -98,9 +100,12 @@ func (m *manager) tryAdoptNativeDdb(rec childRec) bool {
 }
 
 // dockerContainerRunning reports whether a container with exactly this name is
-// currently running.
+// currently running. Bounded: a wedged docker daemon must not hang boot
+// reconcile (it runs during dylib load) or the adoption watcher loop.
 func dockerContainerRunning(docker, name string) bool {
-	out, err := exec.Command(docker, "inspect", "-f", "{{.State.Running}}", name).Output()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, docker, "inspect", "-f", "{{.State.Running}}", name).Output()
 	return err == nil && strings.TrimSpace(string(out)) == "true"
 }
 
@@ -191,25 +196,43 @@ func (m *manager) tryAdoptDocker(rec childRec) bool {
 	janitorRegister(detached, 0, docker, rec.Container)
 
 	// Log pump: docker keeps history, so adoption even recovers the tail the
-	// native path would have lost.
+	// native path would have lost. One shared pipe for both streams, closed on
+	// every path — the earlier asymmetric StdoutPipe/StderrPipe leaked fds when
+	// only the second pipe or Start failed.
 	logsCmd := exec.Command(docker, "logs", "--tail", "200", "-f", rec.Container)
-	if stdout, perr := logsCmd.StdoutPipe(); perr == nil {
-		if stderr, perr2 := logsCmd.StderrPipe(); perr2 == nil && logsCmd.Start() == nil {
-			go pump(stdout, in)
-			go pump(stderr, in)
-			go func() { _ = logsCmd.Wait() }()
+	if pr, pw, perr := os.Pipe(); perr == nil {
+		logsCmd.Stdout, logsCmd.Stderr = pw, pw
+		if logsCmd.Start() == nil {
+			go pump(pr, in)
+			go func() { _ = logsCmd.Wait(); _ = pr.Close() }()
+		} else {
+			_ = pr.Close()
 		}
+		_ = pw.Close() // the child holds its own dup; the parent's copy isn't needed
 	}
 	// Watcher: docker wait blocks until the container exits and prints its exit
-	// code — the container analog of cmd.Wait.
+	// code — the container analog of cmd.Wait. A CLI-side failure (daemon hiccup,
+	// socket reset) is NOT an exit: re-check liveness and re-arm rather than
+	// declaring a spurious exit that would trigger a restart.
 	go func() {
-		out, werr := exec.Command(docker, "wait", rec.Container).Output()
-		code := strings.TrimSpace(string(out))
-		switch {
-		case werr != nil, code == "0", code == "":
-			in.superviseExit(nil) // clean exit, or container already gone (rm -f race)
-		default:
-			in.superviseExit(fmt.Errorf("container exited with status %s", code))
+		for {
+			out, werr := exec.Command(docker, "wait", rec.Container).Output()
+			code := strings.TrimSpace(string(out))
+			if werr == nil && code != "" {
+				if code == "0" {
+					in.superviseExit(nil)
+				} else {
+					in.superviseExit(fmt.Errorf("container exited with status %s", code))
+				}
+				return
+			}
+			// wait failed or returned nothing: only a genuine exit if the
+			// container is actually gone; otherwise a transient CLI/daemon error.
+			if !dockerContainerRunning(docker, rec.Container) {
+				in.superviseExit(nil)
+				return
+			}
+			time.Sleep(2 * time.Second) // transient — retry the wait
 		}
 	}()
 	return true

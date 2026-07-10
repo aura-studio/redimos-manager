@@ -435,6 +435,24 @@ func (m *manager) buildDdbLaunch(cfg LocalDdbConfig) (bin string, args []string,
 	}
 }
 
+// publishDdb installs in as the Local DynamoDB child, but only if none is
+// already active — the atomic half of ddbStart's check-and-set (the initial
+// busy-check can't hold m.mu across the slow buildDdbLaunch tool probes).
+func (m *manager) publishDdb(in *instance) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.ddb != nil {
+		m.ddb.mu.Lock()
+		st := m.ddb.status
+		m.ddb.mu.Unlock()
+		if st == "running" || st == "preparing" || st == "restarting" {
+			return fmt.Errorf("local dynamodb already %s", st)
+		}
+	}
+	m.ddb = in
+	return nil
+}
+
 func (m *manager) ddbStart() error {
 	m.mu.Lock()
 	if m.lockErr != nil {
@@ -463,13 +481,17 @@ func (m *manager) ddbStart() error {
 	// tables) — it deliberately survives a manager crash so the next session can
 	// adopt it instead of wiping the data (no job jail / no janitor kill).
 	in := &instance{
-		port: cfg.Port, role: "ddb", autoRestart: true, detached: true,
+		port: cfg.Port, role: "ddb", autoRestart: true, detached: true, status: "preparing",
 		bin: bin, launchArgs: args, launchEnv: os.Environ(), container: container,
 	}
+	// Atomically re-check-and-publish: the top busy-check released m.mu while
+	// buildDdbLaunch probed tools, so a second concurrent Start could otherwise
+	// slip in and spawn a duelling same-name container. The "preparing" status is
+	// what the re-check sees.
+	if err := m.publishDdb(in); err != nil {
+		return err
+	}
 	if container != "" {
-		m.mu.Lock()
-		m.ddb = in
-		m.mu.Unlock()
 		if err := in.spawn(); err != nil {
 			in.mu.Lock()
 			in.status = "error"
@@ -483,16 +505,12 @@ func (m *manager) ddbStart() error {
 	// java engine: the jar may need downloading first.
 	dir := m.ddbJavaDir()
 	jarPath := filepath.Join(dir, "DynamoDBLocal.jar")
-	in.status = "preparing"
-	m.mu.Lock()
-	m.ddb = in
-	m.mu.Unlock()
 	go func() {
 		// A prior app session may have left an orphaned DynamoDBLocal bound to
 		// this port (a child survives an ungraceful app exit). Reap our own
 		// straggler first so the fresh child can bind instead of crash-looping
 		// on "address already in use".
-		reapStalePort(cfg.Port, jarPath)
+		reapStalePort(cfg.Port, jarPath, m.livePids())
 		if err := ensureDdbJar(in, dir); err != nil {
 			in.mu.Lock()
 			if !in.intendedStop {
@@ -681,6 +699,7 @@ func rm_shutdown() *C.char {
 	go func() { defer wg.Done(); mgr.stopAll() }()
 	go func() { defer wg.Done(); _ = mgr.ddbStop() }()
 	wg.Wait()
+	janitorClose() // disarm the lifeline; children are already down
 	return okJSON(nil)
 }
 

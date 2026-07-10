@@ -120,20 +120,22 @@ func fetchTCPTable(family uintptr) []byte {
 func listenersOnPort(port int) []int {
 	var pids []int
 	if buf := fetchTCPTable(afInet); len(buf) >= 4 {
-		n := *(*uint32)(unsafe.Pointer(&buf[0]))
-		rows := unsafe.Slice((*mibTCPRowOwnerPid)(unsafe.Pointer(&buf[4])), n)
-		for i := range rows {
-			if rows[i].State == mibTCPStateListen && ntohs16(rows[i].LocalPort) == port {
-				pids = append(pids, int(rows[i].OwningPid))
+		if n := *(*uint32)(unsafe.Pointer(&buf[0])); n > 0 && len(buf) >= 4+int(n)*int(unsafe.Sizeof(mibTCPRowOwnerPid{})) {
+			rows := unsafe.Slice((*mibTCPRowOwnerPid)(unsafe.Pointer(&buf[4])), n)
+			for i := range rows {
+				if rows[i].State == mibTCPStateListen && ntohs16(rows[i].LocalPort) == port {
+					pids = append(pids, int(rows[i].OwningPid))
+				}
 			}
 		}
 	}
 	if buf := fetchTCPTable(afInet6); len(buf) >= 4 {
-		n := *(*uint32)(unsafe.Pointer(&buf[0]))
-		rows := unsafe.Slice((*mibTCP6RowOwnerPid)(unsafe.Pointer(&buf[4])), n)
-		for i := range rows {
-			if rows[i].State == mibTCPStateListen && ntohs16(rows[i].LocalPort) == port {
-				pids = append(pids, int(rows[i].OwningPid))
+		if n := *(*uint32)(unsafe.Pointer(&buf[0])); n > 0 && len(buf) >= 4+int(n)*int(unsafe.Sizeof(mibTCP6RowOwnerPid{})) {
+			rows := unsafe.Slice((*mibTCP6RowOwnerPid)(unsafe.Pointer(&buf[4])), n)
+			for i := range rows {
+				if rows[i].State == mibTCPStateListen && ntohs16(rows[i].LocalPort) == port {
+					pids = append(pids, int(rows[i].OwningPid))
+				}
 			}
 		}
 	}
@@ -282,14 +284,14 @@ func ownedBy(pid int, matches []string) bool {
 
 // reapStalePort kills whatever LISTENs on port if — and only if — its image
 // path or command line contains our managed path.
-func reapStalePort(port int, match string) {
+func reapStalePort(port int, match string, live map[int]bool) {
 	if match == "" {
 		return
 	}
 	self := os.Getpid()
 	for _, pid := range listenersOnPort(port) {
-		if pid == 0 || pid == self {
-			continue
+		if pid == 0 || pid == self || live[pid] {
+			continue // skip a child this session already manages
 		}
 		if ownedBy(pid, []string{match}) {
 			killPid(pid)
@@ -340,6 +342,15 @@ func (m *manager) reapStartupOrphans() {
 		}
 		if !parentIsDead(int(pe.ParentProcessID), created) {
 			continue // its parent is alive — not an orphan
+		}
+		if !containsFold(processCommandLine(pid), "redimos.manager.session=") {
+			// Bar analogous to darwin's env-sentinel gate: only a process we
+			// spawned carries the session marker (java via -D; a user's own
+			// DynamoDBLocal.jar does not). redimos.exe carries the marker only in
+			// its env, not argv, so it isn't caught here — it's healed instead by
+			// reapStalePort at the next Start of its port, exactly like darwin's
+			// registry-less case. Prevents killing a user's own same-path process.
+			continue
 		}
 		killPid(pid)
 	}

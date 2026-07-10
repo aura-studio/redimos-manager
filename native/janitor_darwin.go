@@ -23,6 +23,7 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 )
 
 // The macOS lifetime-binding layer: a lifeline pipe to the rm-janitor helper
@@ -37,7 +38,9 @@ type janitorLink struct {
 	w       *os.File  // lifeline + control (janitor stdin)
 	cmd     *exec.Cmd // the running janitor
 	entries []string  // live registrations, replayed on janitor respawn
-	closing bool
+	closing bool      // set by janitorClose on graceful quit — stops respawns
+	started time.Time // last spawn time, for respawn-storm backoff
+	strikes int       // consecutive fast deaths
 }
 
 var janitor janitorLink
@@ -96,7 +99,7 @@ func (j *janitorLink) startLocked() {
 		return
 	}
 	_ = r.Close() // the janitor's dup keeps the read end alive
-	j.w, j.cmd = w, cmd
+	j.w, j.cmd, j.started = w, cmd, time.Now()
 	// Replay live registrations (fresh boot: none; respawn: current children).
 	for _, line := range j.entries {
 		_, _ = fmt.Fprintln(w, line)
@@ -105,16 +108,44 @@ func (j *janitorLink) startLocked() {
 		_ = cmd.Wait()
 		j.mu.Lock()
 		defer j.mu.Unlock()
-		if j.cmd == cmd {
-			if j.w != nil {
-				_ = j.w.Close()
-			}
-			j.w, j.cmd = nil, nil
-			if !j.closing {
-				j.startLocked() // the janitor died on us — bring it back
-			}
+		if j.cmd != cmd {
+			return
 		}
+		if j.w != nil {
+			_ = j.w.Close()
+		}
+		j.w, j.cmd = nil, nil
+		if j.closing {
+			return
+		}
+		// Respawn, but back off (and eventually give up) on a crash-loop so a
+		// broken janitor binary can't become a fork/exec storm for the app's
+		// whole lifetime.
+		if time.Since(j.started) < 3*time.Second {
+			j.strikes++
+		} else {
+			j.strikes = 0
+		}
+		if j.strikes >= 5 {
+			return // give up — the boot sweeps / job objects are the backstop
+		}
+		delay := time.Duration(j.strikes) * time.Second
+		time.AfterFunc(delay, startJanitor)
 	}()
+}
+
+// janitorClose stops the janitor for good on a graceful quit: it disarms the
+// respawn loop and closes the lifeline write end, which the janitor sees as EOF
+// (by then rm_shutdown has already killed the children, so its reap pass is an
+// idempotent no-op). Called from rm_shutdown.
+func janitorClose() {
+	janitor.mu.Lock()
+	defer janitor.mu.Unlock()
+	janitor.closing = true
+	if janitor.w != nil {
+		_ = janitor.w.Close()
+		janitor.w = nil
+	}
 }
 
 func (j *janitorLink) send(line string) {

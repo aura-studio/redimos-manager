@@ -103,11 +103,12 @@ const crashLoopMax = 5                   // give up after this many failures ...
 const crashLoopWindow = 30 * time.Second // ... within this window
 
 type instance struct {
-	mu      sync.Mutex
-	cmd     *exec.Cmd
-	pid     int
-	port    int
-	role    string // registry key: "config:<id>" | "ddb"
+	mu         sync.Mutex
+	cmd        *exec.Cmd
+	pid        int
+	startMicro int64 // process start-time identity of pid (0 = docker/unknown)
+	port       int
+	role       string // registry key: "config:<id>" | "ddb"
 	started time.Time
 	status  string // "running" | "restarting" | "stopped" | "error" | "failed"
 	exitMsg string
@@ -190,15 +191,20 @@ type manager struct {
 	lockErr   error    // non-nil when another instance already holds the lock
 }
 
-// mgr is assigned in init() rather than a var initializer: the adoption path
-// (newManager → reconcileOnBoot → superviseExit → spawn) transitively refers
-// back to mgr, which a var initializer would reject as an init cycle.
+// mgr is populated by init() (a var initializer would reject the newManager →
+// reconcileOnBoot → superviseExit → spawn back-edge as an init cycle).
 var mgr *manager
 
-func init() { mgr = newManager() }
+func init() { newManager() }
 
 func newManager() *manager {
 	m := &manager{running: map[string]*instance{}, storePath: defaultStorePath(), sessionID: newID()}
+	// Publish the global BEFORE anything that can transitively dereference it:
+	// spawn() reads mgr.sessionID, and reconcileOnBoot arms watcher / docker-wait
+	// goroutines whose exit callbacks reach doRestart → spawn. Goroutine creation
+	// and the synchronous reconcile both happen-after this store, so no reader
+	// can observe a nil mgr.
+	mgr = m
 	m.load()
 	if f, err := acquireInstanceLock(); err != nil {
 		// A sibling instance is live. Its children are healthy and supervised —
@@ -415,8 +421,17 @@ func (m *manager) start(id string) error {
 	if m.lockErr != nil {
 		return m.lockErr // a sibling instance owns the children; don't fight it
 	}
-	if in, ok := m.running[id]; ok && in.status == "running" {
-		return fmt.Errorf("already running (pid %d)", in.pid)
+	if in, ok := m.running[id]; ok {
+		in.mu.Lock()
+		st, pid := in.status, in.pid
+		in.mu.Unlock()
+		// Reject any non-terminal state (read under in.mu — status is mutated by
+		// the supervisor/watcher goroutines). "restarting" matters most: its
+		// armed backoff timer would otherwise spawn a phantom child into the map
+		// entry we're about to overwrite, and that phantom would hold the port.
+		if st == "running" || st == "restarting" || st == "preparing" {
+			return fmt.Errorf("already %s (pid %d) — stop it first", st, pid)
+		}
 	}
 	cfg, _ := m.findConfig(id)
 	if cfg == nil {
@@ -443,7 +458,7 @@ func (m *manager) start(id string) error {
 	// fresh child can bind instead of crash-looping on "address already in use".
 	// Only matches our own binary path, so a real Redis on the same port is safe.
 	if container == "" {
-		reapStalePort(cfg.Port, bin)
+		reapStalePort(cfg.Port, bin, m.livePidsLocked()) // spare our own live children
 	}
 	if err := in.spawn(); err != nil {
 		in.mu.Lock()
@@ -556,8 +571,14 @@ func (in *instance) spawn() error {
 	// too, though the container itself is identified by label instead).
 	cmd.Env = append(append([]string{}, in.launchEnv...), "REDIMOS_MANAGER_SESSION="+mgr.sessionID)
 	preSpawn(cmd) // per-OS: own process group (darwin) / job containment (windows)
-	stdout, _ := cmd.StdoutPipe()
-	stderr, _ := cmd.StderrPipe()
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return fmt.Errorf("stdout pipe: %w", err)
+	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return fmt.Errorf("stderr pipe: %w", err)
+	}
 	if err := cmd.Start(); err != nil {
 		return err
 	}
@@ -568,8 +589,14 @@ func (in *instance) spawn() error {
 		// Start: the user asked for a stop, so put the fresh child straight down
 		// instead of letting it outlive the request (or the app).
 		in.status = "stopped"
+		cont := in.container
 		in.mu.Unlock()
 		killChildTree(cmd.Process.Pid)
+		if cont != "" {
+			// The killed process is only the `docker run` CLI; remove the
+			// container it may have spawned, matching terminate()'s docker path.
+			_ = exec.Command(in.bin, "rm", "-f", cont).Run()
+		}
 		go func() { _ = cmd.Wait() }() // reap; no supervision for a child we just killed
 		return nil
 	}
@@ -590,12 +617,16 @@ func (in *instance) spawn() error {
 	in.opsPerSec, in.avgLatencyMs, in.throttled = 0, 0, 0
 	in.prevMtxAt = time.Time{}
 	in.appendLogLocked(fmt.Sprintf("$ %s %s", in.bin, strings.Join(in.launchArgs, " ")))
+	// Record the child's start-time identity so terminate() can re-verify the pid
+	// hasn't been reaped-and-recycled before it signals.
+	start, comm, idOK := procIdentity(cmd.Process.Pid)
+	in.startMicro = start
 	role, cont, port, bin, detached := in.role, in.container, in.port, in.bin, in.detached
 	in.mu.Unlock()
 
 	// Record the child in the persisted registry with its exact identity so the
 	// next session's boot reconciler can tell it apart from strangers.
-	if start, comm, ok := procIdentity(cmd.Process.Pid); ok {
+	if idOK {
 		regUpsert(childRec{
 			Role: role, PID: cmd.Process.Pid, StartUnixMicro: start, Comm: comm,
 			Port: port, Container: cont, Bin: bin, Session: mgr.sessionID,
@@ -622,6 +653,7 @@ func (in *instance) superviseExit(werr error) {
 		in.mu.Unlock()
 		regRemove(role) // terminal: nothing left to reconcile at next boot
 		janitorUnregister(pid, cont)
+		releaseInstance(in) // windows: close the job handle
 		return
 	}
 	if werr != nil {
@@ -637,6 +669,7 @@ func (in *instance) superviseExit(werr error) {
 		in.mu.Unlock()
 		regRemove(role)
 		janitorUnregister(pid, cont)
+		releaseInstance(in)
 		return
 	}
 	now := time.Now()
@@ -652,6 +685,7 @@ func (in *instance) superviseExit(werr error) {
 		in.mu.Unlock()
 		regRemove(role)
 		janitorUnregister(pid, cont)
+		releaseInstance(in)
 		return
 	}
 	backoff := restartBackoff[min(in.failCount-1, len(restartBackoff)-1)]
@@ -715,8 +749,8 @@ func (in *instance) terminate() {
 		in.restartTimer.Stop()
 		in.restartTimer = nil
 	}
-	proc := in.cmd
 	pid := in.pid
+	startMicro := in.startMicro
 	cont := in.container
 	bin := in.bin
 	role := in.role
@@ -729,20 +763,29 @@ func (in *instance) terminate() {
 	if settled {
 		regRemove(role) // no exit event will fire for a child that isn't running
 		janitorUnregister(pid, cont)
+		releaseInstance(in) // windows: close the job handle
 	}
 	if cont != "" {
 		// Removing the container makes the foreground docker CLI exit on its own.
 		_ = exec.Command(bin, "rm", "-f", cont).Run()
-	} else if running {
-		// Signal by pid only while the child is actually alive: our cmd.Wait
-		// goroutine (or the adoption watcher) hasn't reaped it, so the pid can't
-		// have been recycled.
-		if proc != nil && proc.Process != nil {
-			killInstanceTree(in, proc.Process.Pid)
-		} else if pid > 0 {
-			killInstanceTree(in, pid) // adopted child: no cmd handle, only a pid
+	} else if running && pid > 0 {
+		// The cmd.Wait goroutine (or adoption watcher) may have already reaped
+		// this pid a moment ago without superviseExit yet flipping status off
+		// "running" — signalling the raw pid/pgid then would risk a recycled pid.
+		// Re-verify the start-time identity right before killing; a mismatch means
+		// it's already gone. (Windows kills via the job handle, immune to reuse,
+		// so it skips the check when startMicro is unknown.)
+		if startMicro == 0 || identityMatches(pid, startMicro) {
+			killInstanceTree(in, pid)
 		}
 	}
+}
+
+// identityMatches reports whether pid is still the same process that recorded
+// startMicro (guards the reaped-then-recycled window before a kill).
+func identityMatches(pid int, startMicro int64) bool {
+	s, _, ok := procIdentity(pid)
+	return ok && s == startMicro
 }
 
 // livePids returns the pids of every child this session currently manages —
@@ -751,6 +794,12 @@ func (in *instance) terminate() {
 // sweeps (parentless + our path + our sentinel).
 func (m *manager) livePids() map[int]bool {
 	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.livePidsLocked()
+}
+
+// livePidsLocked is livePids for callers that already hold m.mu (e.g. start()).
+func (m *manager) livePidsLocked() map[int]bool {
 	ins := make([]*instance, 0, len(m.running)+1)
 	for _, in := range m.running {
 		ins = append(ins, in)
@@ -758,7 +807,6 @@ func (m *manager) livePids() map[int]bool {
 	if m.ddb != nil {
 		ins = append(ins, m.ddb)
 	}
-	m.mu.Unlock()
 	out := map[int]bool{}
 	for _, in := range ins {
 		in.mu.Lock()

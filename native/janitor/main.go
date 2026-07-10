@@ -71,7 +71,10 @@ func main() {
 				pgids[pgid] = pgidEntry{pgid: pgid, match: strings.Join(f[2:], " ")}
 			}
 		case len(f) >= 3 && f[0] == "CTR":
-			ctrs[f[2]] = f[1]
+			// Container name is the LAST field; the docker path (which can contain
+			// spaces) is everything between. Container names never contain spaces,
+			// so right-anchored parsing is unambiguous — mirrors the PGID branch.
+			ctrs[f[len(f)-1]] = strings.Join(f[1:len(f)-1], " ")
 		case len(f) == 3 && f[0] == "UNREG" && f[1] == "PGID":
 			if pgid, err := strconv.Atoi(f[2]); err == nil {
 				delete(pgids, pgid)

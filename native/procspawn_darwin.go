@@ -54,6 +54,9 @@ func killChildTree(pid int) {
 // group is the tree handle, no per-instance state needed.
 func killInstanceTree(in *instance, pid int) { killChildTree(pid) }
 
+// releaseInstance is a no-op on darwin (no job handle to close).
+func releaseInstance(in *instance) {}
+
 // killPid force-kills one specific pid whose identity the caller has already
 // verified (registry / cmdline match).
 func killPid(pid int) {
