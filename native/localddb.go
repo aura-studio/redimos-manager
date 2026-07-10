@@ -187,40 +187,59 @@ func javaBin() (string, bool) {
 
 // sampleContainer returns (cpuPercentTotal, memBytes). CPU is docker's
 // percent-of-one-core scale; the caller divides by NumCPU like the host path.
-func sampleContainer(dockerPath, name string) (float64, uint64, error) {
-	cmd := exec.Command(dockerPath, "stats", "--no-stream", "--format", "{{.CPUPerc}}|{{.MemUsage}}", name)
+func sampleContainer(dockerPath, name string) (cpu float64, mem uint64, diskBytes uint64, err error) {
+	cmd := exec.Command(dockerPath, "stats", "--no-stream", "--format", "{{.CPUPerc}}|{{.MemUsage}}|{{.BlockIO}}", name)
 	out := make(chan []byte, 1)
 	errc := make(chan error, 1)
 	go func() {
-		b, err := cmd.Output()
-		if err != nil {
-			errc <- err
+		b, e := cmd.Output()
+		if e != nil {
+			errc <- e
 			return
 		}
 		out <- b
 	}()
 	select {
 	case b := <-out:
-		parts := strings.SplitN(strings.TrimSpace(string(b)), "|", 2)
-		if len(parts) != 2 {
-			return 0, 0, fmt.Errorf("unexpected docker stats output")
+		parts := strings.SplitN(strings.TrimSpace(string(b)), "|", 3)
+		if len(parts) < 2 {
+			return 0, 0, 0, fmt.Errorf("unexpected docker stats output")
 		}
-		cpu, _ := strconv.ParseFloat(strings.TrimSuffix(strings.TrimSpace(parts[0]), "%"), 64)
-		mem := parseMemUsage(parts[1])
-		return cpu, mem, nil
-	case err := <-errc:
-		return 0, 0, err
+		cpu, _ = strconv.ParseFloat(strings.TrimSuffix(strings.TrimSpace(parts[0]), "%"), 64)
+		mem = parseMemUsage(parts[1])
+		if len(parts) == 3 {
+			diskBytes = parseBlockIO(parts[2]) // cumulative "read / write"
+		}
+		return cpu, mem, diskBytes, nil
+	case e := <-errc:
+		return 0, 0, 0, e
 	case <-time.After(6 * time.Second):
 		if cmd.Process != nil {
 			_ = cmd.Process.Kill()
 		}
-		return 0, 0, fmt.Errorf("docker stats timeout")
+		return 0, 0, 0, fmt.Errorf("docker stats timeout")
 	}
+}
+
+// parseBlockIO turns a docker-stats BlockIO cell ("1.2MB / 3.4MB") into the sum
+// of both directions in bytes.
+func parseBlockIO(s string) uint64 {
+	var total uint64
+	for _, part := range strings.Split(s, "/") {
+		total += parseSize(strings.TrimSpace(part))
+	}
+	return total
 }
 
 // parseMemUsage parses the left side of docker's "48.2MiB / 7.6GiB".
 func parseMemUsage(s string) uint64 {
-	s = strings.TrimSpace(strings.SplitN(s, "/", 2)[0])
+	// docker reports "used / limit"; we want the used side.
+	return parseSize(strings.SplitN(s, "/", 2)[0])
+}
+
+// parseSize parses a single docker-style size token ("512MiB", "1.2MB", "0B").
+func parseSize(s string) uint64 {
+	s = strings.TrimSpace(s)
 	units := []struct {
 		suffix string
 		mult   float64
@@ -536,6 +555,7 @@ func rm_ddb_get() *C.char {
 			"restarts":   in.restarts,
 			"cpuPercent": in.cpuPercent,
 			"memBytes":   in.memBytes,
+			"diskPerSec": in.diskPerSec,
 			"uptimeSec":  0,
 		}
 		if in.status == "running" {

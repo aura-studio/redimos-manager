@@ -128,7 +128,9 @@ type instance struct {
 	// Monitoring (filled by the sampler loop).
 	cpuPercent   float64       // % of all cores, Task-Manager style
 	memBytes     uint64        // working set
+	diskPerSec   float64       // disk I/O bytes/sec (read+written), rate over the interval
 	prevBusy     time.Duration // accumulated CPU time at the previous sample
+	prevDisk     uint64        // cumulative disk bytes at the previous sample
 	prevSampleAt time.Time
 
 	// redimos /metrics scraping (filled by the scraper loop).
@@ -209,10 +211,18 @@ func (m *manager) samplerLoop() {
 				continue
 			}
 			if cont != "" {
-				cpu, mem, err := sampleContainer(in.bin, cont)
+				cpu, mem, disk, err := sampleContainer(in.bin, cont)
+				now := time.Now()
 				if err == nil {
 					in.mu.Lock()
 					in.cpuPercent, in.memBytes = cpu/numCPU, mem
+					if !in.prevSampleAt.IsZero() && disk >= in.prevDisk {
+						if wall := now.Sub(in.prevSampleAt).Seconds(); wall > 0 {
+							in.diskPerSec = float64(disk-in.prevDisk) / wall
+						}
+					}
+					in.prevDisk = disk
+					in.prevSampleAt = now
 					in.mu.Unlock()
 				}
 				continue
@@ -220,7 +230,7 @@ func (m *manager) samplerLoop() {
 			if pid <= 0 {
 				continue
 			}
-			busy, mem, err := sampleProcess(pid)
+			busy, mem, disk, err := sampleProcess(pid)
 			now := time.Now()
 			in.mu.Lock()
 			if err != nil || in.pid != pid {
@@ -228,13 +238,17 @@ func (m *manager) samplerLoop() {
 				continue
 			}
 			in.memBytes = mem
-			if !in.prevSampleAt.IsZero() && busy >= in.prevBusy {
+			if !in.prevSampleAt.IsZero() {
 				wall := now.Sub(in.prevSampleAt)
-				if wall > 0 {
+				if busy >= in.prevBusy && wall > 0 {
 					in.cpuPercent = float64(busy-in.prevBusy) / float64(wall) / numCPU * 100
+				}
+				if disk >= in.prevDisk && wall > 0 {
+					in.diskPerSec = float64(disk-in.prevDisk) / wall.Seconds()
 				}
 			}
 			in.prevBusy = busy
+			in.prevDisk = disk
 			in.prevSampleAt = now
 			in.mu.Unlock()
 		}
@@ -495,8 +509,10 @@ func (in *instance) spawn() error {
 	in.started = time.Now()
 	in.status = "running"
 	in.prevBusy = 0
-	in.prevSampleAt = time.Time{} // fresh pid → fresh CPU baseline
+	in.prevDisk = 0
+	in.prevSampleAt = time.Time{} // fresh pid → fresh CPU / disk baseline
 	in.cpuPercent = 0
+	in.diskPerSec = 0
 	// Fresh listener → rediscover the metrics endpoint (docker maps a new host
 	// port each run; native -metrics-addr :0 auto-picks a new port too).
 	in.metricsAddr = ""

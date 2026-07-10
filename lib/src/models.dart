@@ -181,6 +181,7 @@ class LocalDdbInfo {
   final int restarts;
   final double cpuPercent;
   final int memBytes;
+  final double diskPerSec; // disk I/O bytes/sec (read+written)
   final bool dockerOk;
   final bool javaOk;
   final bool jarReady;
@@ -194,6 +195,7 @@ class LocalDdbInfo {
     required this.restarts,
     required this.cpuPercent,
     required this.memBytes,
+    required this.diskPerSec,
     required this.dockerOk,
     required this.javaOk,
     required this.jarReady,
@@ -211,6 +213,7 @@ class LocalDdbInfo {
       restarts: (st['restarts'] ?? 0) as int,
       cpuPercent: ((st['cpuPercent'] ?? 0) as num).toDouble(),
       memBytes: (st['memBytes'] ?? 0) as int,
+      diskPerSec: ((st['diskPerSec'] ?? 0) as num).toDouble(),
       dockerOk: (det['docker'] ?? false) as bool,
       javaOk: (det['java'] ?? false) as bool,
       jarReady: (det['jarReady'] ?? false) as bool,

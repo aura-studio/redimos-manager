@@ -184,6 +184,7 @@ class _HomePageState extends State<HomePage> {
   // The Local DynamoDB child's own CPU / memory history (singleton).
   final List<double> _ddbCpuHist = [];
   final List<double> _ddbMemHist = [];
+  final List<double> _ddbDiskHist = []; // disk I/O bytes/sec
 
   LocalDdbInfo? _ddb; // Local DynamoDB snapshot, refreshed with the status poll
 
@@ -244,8 +245,10 @@ class _HomePageState extends State<HomePage> {
     if (ddb != null && ddb.status == 'running') {
       _ddbCpuHist.add(ddb.cpuPercent);
       _ddbMemHist.add(ddb.memBytes / (1024 * 1024));
+      _ddbDiskHist.add(ddb.diskPerSec);
       if (_ddbCpuHist.length > _histCap) _ddbCpuHist.removeAt(0);
       if (_ddbMemHist.length > _histCap) _ddbMemHist.removeAt(0);
+      if (_ddbDiskHist.length > _histCap) _ddbDiskHist.removeAt(0);
     }
     setState(() {
       _status = st;
@@ -587,6 +590,7 @@ class _HomePageState extends State<HomePage> {
                   ddb: _usesLocalDdb(c) ? _ddb : null,
                   ddbCpuHist: _ddbCpuHist,
                   ddbMemHist: _ddbMemHist,
+                  ddbDiskHist: _ddbDiskHist,
                 ),
                 // logs
                 LogsView(
@@ -1223,6 +1227,7 @@ class MonitorView extends StatelessWidget {
   final LocalDdbInfo? ddb;
   final List<double> ddbCpuHist;
   final List<double> ddbMemHist;
+  final List<double> ddbDiskHist;
   const MonitorView({
     super.key,
     required this.status,
@@ -1235,12 +1240,21 @@ class MonitorView extends StatelessWidget {
     this.ddb,
     this.ddbCpuHist = const [],
     this.ddbMemHist = const [],
+    this.ddbDiskHist = const [],
   });
 
   String _fmtUptime(int s) {
     if (s < 60) return '${s}s';
     if (s < 3600) return '${s ~/ 60}m ${s % 60}s';
     return '${s ~/ 3600}h ${(s % 3600) ~/ 60}m';
+  }
+
+  // Bytes/sec → a compact human rate (e.g. "0 B/s", "812 KB/s", "3.4 MB/s").
+  String _fmtRate(double bytesPerSec) {
+    final b = bytesPerSec;
+    if (b < 1024) return '${b.round()} B/s';
+    if (b < 1024 * 1024) return '${(b / 1024).round()} KB/s';
+    return '${(b / (1024 * 1024)).toStringAsFixed(1)} MB/s';
   }
 
   Widget _tiles(InstanceStatus? st, bool running) {
@@ -1378,8 +1392,10 @@ class MonitorView extends StatelessWidget {
       'localstack' => 'LocalStack',
       _ => 'Java',
     };
+    // Same sparkHeight (48) as the redimos dashboard so every chart box across
+    // both sections is an identical size.
     Widget spark(String label, String value, List<double> data, Color color) =>
-        _SparkTile(label: label, value: value, data: data, color: color, width: null, sparkHeight: 44);
+        _SparkTile(label: label, value: value, data: data, color: color, width: null, sparkHeight: 48);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -1398,6 +1414,10 @@ class MonitorView extends StatelessWidget {
             Expanded(
                 child: spark('Memory', up ? '${(d.memBytes / (1024 * 1024)).round()} MB' : '—',
                     ddbMemHist, const Color(0xFF57CF92))),
+            const SizedBox(width: 12),
+            Expanded(
+                child: spark('Disk I/O', up ? _fmtRate(d.diskPerSec) : '—',
+                    ddbDiskHist, const Color(0xFFD9A85B))),
           ]),
         ),
         const SizedBox(height: 12),

@@ -38,12 +38,14 @@ func machToNanos(v uint64) uint64 {
 	return v * timebaseN / timebaseD
 }
 
-func sampleProcess(pid int) (busy time.Duration, memBytes uint64, err error) {
+func sampleProcess(pid int) (busy time.Duration, memBytes uint64, diskBytes uint64, err error) {
 	var ru C.struct_rusage_info_v2
 	rc := C.proc_pid_rusage(C.int(pid), C.RUSAGE_INFO_V2, (*C.rusage_info_t)(unsafe.Pointer(&ru)))
 	if rc != 0 {
-		return 0, 0, fmt.Errorf("proc_pid_rusage(%d) rc=%d", pid, rc)
+		return 0, 0, 0, fmt.Errorf("proc_pid_rusage(%d) rc=%d", pid, rc)
 	}
 	busy = time.Duration(machToNanos(uint64(ru.ri_user_time) + uint64(ru.ri_system_time)))
-	return busy, uint64(ru.ri_resident_size), nil
+	// Cumulative logical disk I/O (bytes read + written) since the process began.
+	disk := uint64(ru.ri_diskio_bytesread) + uint64(ru.ri_diskio_byteswritten)
+	return busy, uint64(ru.ri_resident_size), disk, nil
 }
