@@ -1,17 +1,51 @@
 // The "Browser" tab — an Another-Redis-Desktop-Manager-style key browser wired
 // straight to the running redimos proxy's RESP port (127.0.0.1:<config port>).
-// Left: glob search, namespace tree / flat toggle, SCAN pagination. Right: the
-// five type editors (String / Hash / List / Set / ZSet) with TTL, delete, and
-// common writes. Connection management, CLI, and the INFO dashboard are left out
-// (already covered by the config list, the Cmd tab, and the Monitor tab).
+//
+// Left: glob search, namespace tree / flat toggle, SCAN pagination (load more /
+// load all), multi-select batch delete, per-key and per-folder context menus.
+// Right: a multi-tab key workspace; each tab is one open key with the five type
+// editors (String / Hash / List / Set / ZSet), all with in-key pagination so a
+// large key never loads at once, an in-key keyword filter, TTL, and writes.
+//
+// Connection management, CLI, and the INFO dashboard are intentionally left out
+// (covered by the config list, the Cmd tab, and the Monitor tab). Key names are
+// read-only because redimos rejects RENAME.
 
 import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'models.dart';
 import 'resp_client.dart';
+
+/// Rows loaded so far and the cursor to fetch more. One open key = one tab.
+class _KeyTab {
+  final String key;
+  String type = '';
+  int ttl = -1;
+  bool loading = true;
+  String? error;
+
+  // string
+  final TextEditingController strCtrl = TextEditingController();
+  String strFormat = 'Text';
+
+  // collections — each row is [a, b]:
+  //   hash=(field,value)  list=(absIndex,value)  set=(member,'')  zset=(member,score)
+  final List<List<String>> rows = [];
+  int total = 0;
+  String cursor = '0'; // hash/set: *SCAN cursor. list/zset: unused (index = rows.length)
+  bool hasMore = false;
+  bool loadingMore = false;
+  bool mutating = false; // a write is in flight — freeze row edit/delete (positional
+                         // list delete would drift if a second op raced it)
+  String filter = '';
+
+  _KeyTab(this.key);
+  void dispose() => strCtrl.dispose();
+}
 
 class BrowserPageView extends StatefulWidget {
   final RedimosConfig config;
@@ -24,10 +58,14 @@ class BrowserPageView extends StatefulWidget {
 
 class _BrowserPageViewState extends State<BrowserPageView>
     with AutomaticKeepAliveClientMixin {
+  static const int _pageSize = 200;
+
   RedisClient? _client;
   bool _connecting = false;
   String? _connError;
   Timer? _reconnect;
+  int _connGen = 0; // bumped on disconnect/config-change so a stale in-flight connect bails
+  int _delSeq = 0; // uniquifier for positional list-delete sentinels
 
   // left panel
   final _search = TextEditingController();
@@ -37,19 +75,17 @@ class _BrowserPageViewState extends State<BrowserPageView>
   String _cursor = '0';
   bool _scanning = false;
   bool _scanDone = false;
-  String? _selected;
 
-  // right panel (key detail)
-  bool _loadingKey = false;
-  String? _keyType;
-  int _keyTtl = -1;
-  String? _detailError;
-  String _strFormat = 'Text';
-  final _strCtrl = TextEditingController();
-  Map<String, String> _hash = {};
-  List<String> _list = [];
-  List<String> _set = [];
-  List<(String, String)> _zset = [];
+  // multi-select
+  bool _selectMode = false;
+  final _checked = <String>{};
+
+  // right panel — multi-tab key workspace
+  final _tabs = <_KeyTab>[];
+  int _active = -1;
+
+  String? get _selected => _active >= 0 && _active < _tabs.length ? _tabs[_active].key : null;
+  _KeyTab? get _activeTab => _active >= 0 && _active < _tabs.length ? _tabs[_active] : null;
 
   @override
   bool get wantKeepAlive => true;
@@ -65,8 +101,7 @@ class _BrowserPageViewState extends State<BrowserPageView>
     super.didUpdateWidget(old);
     if (old.config.id != widget.config.id || old.config.port != widget.config.port) {
       _disconnect();
-      _resetLeft();
-      _selected = null;
+      _resetAll();
       if (widget.running) _connect();
     } else if (widget.running && !old.running) {
       _connect();
@@ -80,7 +115,9 @@ class _BrowserPageViewState extends State<BrowserPageView>
     _reconnect?.cancel();
     _client?.close();
     _search.dispose();
-    _strCtrl.dispose();
+    for (final t in _tabs) {
+      t.dispose();
+    }
     super.dispose();
   }
 
@@ -88,6 +125,7 @@ class _BrowserPageViewState extends State<BrowserPageView>
 
   Future<void> _connect() async {
     if (_connecting || (_client?.connected ?? false)) return;
+    final gen = ++_connGen;
     setState(() {
       _connecting = true;
       _connError = null;
@@ -95,14 +133,15 @@ class _BrowserPageViewState extends State<BrowserPageView>
     final c = RedisClient('127.0.0.1', widget.config.port,
         auth: widget.config.requirepass.isEmpty ? null : widget.config.requirepass);
     c.onClosed = (_) {
-      if (!mounted) return;
+      if (!mounted || gen != _connGen) return;
       setState(() => _client = null);
       _scheduleReconnect();
     };
     try {
       await c.connect();
       if (widget.config.multiDb && _db > 0) await c.select(_db);
-      if (!mounted) {
+      // A newer connect (config switch / disconnect) superseded this one — drop it.
+      if (gen != _connGen || !mounted) {
         c.close();
         return;
       }
@@ -112,7 +151,10 @@ class _BrowserPageViewState extends State<BrowserPageView>
       });
       _reload();
     } catch (e) {
-      if (!mounted) return;
+      if (gen != _connGen || !mounted) {
+        c.close();
+        return;
+      }
       setState(() {
         _connecting = false;
         _connError = '$e';
@@ -130,9 +172,22 @@ class _BrowserPageViewState extends State<BrowserPageView>
   }
 
   void _disconnect() {
+    _connGen++; // supersede any in-flight _connect and clear the connecting latch
+    _connecting = false;
     _reconnect?.cancel();
     _client?.close();
     if (mounted) setState(() => _client = null);
+  }
+
+  void _resetAll() {
+    _resetLeft();
+    for (final t in _tabs) {
+      t.dispose();
+    }
+    _tabs.clear();
+    _active = -1;
+    _selectMode = false;
+    _checked.clear();
   }
 
   // ---- left: key scan ----
@@ -171,69 +226,192 @@ class _BrowserPageViewState extends State<BrowserPageView>
     }
   }
 
-  // ---- right: key detail ----
+  Future<void> _loadAll() async {
+    var guard = 0;
+    while (!_scanDone && guard++ < 1000) {
+      await _scanMore();
+      if (!mounted) return;
+    }
+  }
 
-  Future<void> _openKey(String key) async {
+  // ---- open / load a key tab ----
+
+  void _openKey(String key) {
+    final i = _tabs.indexWhere((t) => t.key == key);
+    if (i >= 0) {
+      setState(() => _active = i);
+      return;
+    }
+    final t = _KeyTab(key);
+    setState(() {
+      _tabs.add(t);
+      _active = _tabs.length - 1;
+    });
+    _loadTab(t);
+  }
+
+  void _closeTab(int i) {
+    final t = _tabs[i];
+    t.dispose();
+    setState(() {
+      _tabs.removeAt(i);
+      if (_tabs.isEmpty) {
+        _active = -1;
+      } else if (_active >= _tabs.length) {
+        _active = _tabs.length - 1;
+      } else if (_active > i) {
+        _active--;
+      }
+    });
+  }
+
+  Future<void> _loadTab(_KeyTab t) async {
     final c = _client;
     if (c == null) return;
     setState(() {
-      _selected = key;
-      _loadingKey = true;
-      _detailError = null;
-      _keyType = null;
+      t.loading = true;
+      t.error = null;
+      t.rows.clear();
+      t.cursor = '0';
+      t.hasMore = false;
     });
     try {
-      final t = await c.type(key);
-      final ttl = await c.ttl(key);
-      String? sv;
-      Map<String, String> hv = {};
-      List<String> lv = [], setv = [];
-      List<(String, String)> zv = [];
-      switch (t) {
+      final type = await c.type(t.key);
+      final ttl = await c.ttl(t.key);
+      t.type = type;
+      t.ttl = ttl;
+      switch (type) {
         case 'string':
-          sv = await c.get(key);
+          final v = (await c.get(t.key)) ?? '';
+          if (!_tabs.contains(t)) return; // tab closed mid-load → strCtrl disposed
+          t.strCtrl.text = v;
+          t.strFormat = 'Text';
         case 'hash':
-          hv = await c.hgetall(key);
-        case 'list':
-          lv = await c.lrange(key, 0, 999);
+          t.total = await c.hlen(t.key);
+          await _hashPage(t);
         case 'set':
-          setv = await c.smembers(key);
+          t.total = await c.scard(t.key);
+          await _setPage(t);
+        case 'list':
+          t.total = await c.llen(t.key);
+          await _listPage(t);
         case 'zset':
-          zv = await c.zrange(key, 0, -1);
+          t.total = await c.zcard(t.key);
+          await _zsetPage(t);
       }
-      if (!mounted) return;
-      setState(() {
-        _loadingKey = false;
-        _keyType = t;
-        _keyTtl = ttl;
-        _strCtrl.text = sv ?? '';
-        _strFormat = 'Text';
-        _hash = hv;
-        _list = lv;
-        _set = setv;
-        _zset = zv;
-      });
+      // Tab may have been closed (and its controller disposed) mid-load.
+      if (!mounted || !_tabs.contains(t)) return;
+      setState(() => t.loading = false);
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted || !_tabs.contains(t)) return;
       setState(() {
-        _loadingKey = false;
-        _detailError = '$e';
+        t.loading = false;
+        t.error = '$e';
       });
     }
   }
 
-  Future<void> _refreshKey() async {
-    if (_selected != null) await _openKey(_selected!);
+  Future<void> _hashPage(_KeyTab t) async {
+    final before = t.rows.length;
+    do {
+      final (cur, pairs) = await _client!.hscan(t.key, t.cursor, count: _pageSize);
+      t.cursor = cur;
+      for (final p in pairs) {
+        t.rows.add([p.$1, p.$2]);
+      }
+    } while (t.rows.length == before && t.cursor != '0');
+    t.hasMore = t.cursor != '0';
   }
 
+  Future<void> _setPage(_KeyTab t) async {
+    final before = t.rows.length;
+    do {
+      final (cur, items) = await _client!.sscan(t.key, t.cursor, count: _pageSize);
+      t.cursor = cur;
+      for (final m in items) {
+        t.rows.add([m, '']);
+      }
+    } while (t.rows.length == before && t.cursor != '0');
+    t.hasMore = t.cursor != '0';
+  }
+
+  Future<void> _listPage(_KeyTab t) async {
+    final start = t.rows.length;
+    final items = await _client!.lrange(t.key, start, start + _pageSize - 1);
+    for (var i = 0; i < items.length; i++) {
+      t.rows.add(['${start + i}', items[i]]);
+    }
+    // A short page means we hit the end; don't trust a snapshot `total` that a
+    // concurrent writer may have changed (else Load more can stick or hide data).
+    t.hasMore = items.length == _pageSize;
+  }
+
+  Future<void> _zsetPage(_KeyTab t) async {
+    final start = t.rows.length;
+    final pairs = await _client!.zrange(t.key, start, start + _pageSize - 1);
+    for (final p in pairs) {
+      t.rows.add([p.$1, p.$2]); // (member, score)
+    }
+    t.hasMore = pairs.length == _pageSize;
+  }
+
+  Future<void> _loadMoreRows(_KeyTab t) async {
+    if (t.loadingMore || !t.hasMore) return;
+    setState(() => t.loadingMore = true);
+    try {
+      switch (t.type) {
+        case 'hash':
+          await _hashPage(t);
+        case 'set':
+          await _setPage(t);
+        case 'list':
+          await _listPage(t);
+        case 'zset':
+          await _zsetPage(t);
+      }
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+    }
+    if (mounted) setState(() => t.loadingMore = false);
+  }
+
+  Future<void> _refreshTab() async {
+    final t = _activeTab;
+    if (t != null) await _loadTab(t);
+  }
+
+  /// Run a write, then reload the *tab it was issued from* (captured now, so a
+  /// tab switch during the await doesn't refresh — and clobber — the wrong tab).
+  /// Marks the tab `mutating` for the duration so a second row edit/delete can't
+  /// race (a positional list delete would target a stale, shifted index).
   Future<void> _guard(Future<void> Function() op) async {
+    final t = _activeTab;
+    if (t != null && mounted) setState(() => t.mutating = true);
     try {
       await op();
-      await _refreshKey();
+      if (t != null && _tabs.contains(t)) await _loadTab(t);
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
-      }
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+    } finally {
+      if (t != null && mounted) setState(() => t.mutating = false);
+    }
+  }
+
+  /// Delete a list element by absolute index (LREM-by-value would delete the
+  /// first equal element, not the row the user clicked). Tag the slot with a
+  /// unique sentinel then remove that sentinel.
+  Future<void> _lremAt(String key, int index) async {
+    final sentinel = '__redimos_rmdel_${_delSeq++}_${DateTime.now().microsecondsSinceEpoch}__';
+    await _client!.lset(key, index, sentinel);
+    await _client!.lrem(key, 1, sentinel);
+  }
+
+  Future<void> _copy(String text, [String label = 'Copied']) async {
+    await Clipboard.setData(ClipboardData(text: text));
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(label), duration: const Duration(milliseconds: 900)),
+      );
     }
   }
 
@@ -272,8 +450,11 @@ class _BrowserPageViewState extends State<BrowserPageView>
       Padding(
         padding: const EdgeInsets.fromLTRB(12, 12, 12, 6),
         child: Row(children: [
-          if (widget.config.multiDb) ...[
-            DropdownButton<int>(
+          Tooltip(
+            message: widget.config.multiDb
+                ? 'Select database (SELECT)'
+                : 'MultiDB is off for this config — SELECT has no effect (every DB maps to db0)',
+            child: DropdownButton<int>(
               value: _db,
               underline: const SizedBox.shrink(),
               items: [for (var i = 0; i < 16; i++) DropdownMenuItem(value: i, child: Text('DB$i'))],
@@ -281,11 +462,12 @@ class _BrowserPageViewState extends State<BrowserPageView>
                 if (v == null) return;
                 setState(() => _db = v);
                 await _client?.select(v);
+                if (!mounted) return;
                 _reload();
               },
             ),
-            const SizedBox(width: 8),
-          ],
+          ),
+          const SizedBox(width: 8),
           Expanded(
             child: FilledButton.icon(
               onPressed: _newKeyDialog,
@@ -322,6 +504,16 @@ class _BrowserPageViewState extends State<BrowserPageView>
               style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant)),
           const Spacer(),
           IconButton(
+            tooltip: _selectMode ? 'Exit select' : 'Select multiple',
+            visualDensity: VisualDensity.compact,
+            isSelected: _selectMode,
+            icon: Icon(_selectMode ? Icons.check_box : Icons.check_box_outlined, size: 18),
+            onPressed: () => setState(() {
+              _selectMode = !_selectMode;
+              if (!_selectMode) _checked.clear();
+            }),
+          ),
+          IconButton(
             tooltip: _tree ? 'Flat view' : 'Tree view',
             visualDensity: VisualDensity.compact,
             icon: Icon(_tree ? Icons.account_tree : Icons.list, size: 18),
@@ -343,15 +535,44 @@ class _BrowserPageViewState extends State<BrowserPageView>
                     style: const TextStyle(color: Colors.grey)))
             : ListView(children: _tree ? _treeNodes() : _flatNodes()),
       ),
+      if (_selectMode && _checked.isNotEmpty)
+        Container(
+          color: scheme.errorContainer,
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          child: Row(children: [
+            Text('${_checked.length} selected', style: TextStyle(color: scheme.onErrorContainer)),
+            const Spacer(),
+            TextButton(
+              onPressed: () => setState(_checked.clear),
+              child: const Text('Clear'),
+            ),
+            FilledButton.icon(
+              style: FilledButton.styleFrom(backgroundColor: scheme.error),
+              onPressed: _batchDelete,
+              icon: const Icon(Icons.delete_outline, size: 16),
+              label: const Text('Delete'),
+            ),
+          ]),
+        ),
       if (!_scanDone)
         Padding(
           padding: const EdgeInsets.all(8),
-          child: OutlinedButton(
-            onPressed: _scanning ? null : _scanMore,
-            child: _scanning
-                ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-                : const Text('Load more'),
-          ),
+          child: Row(children: [
+            Expanded(
+              child: OutlinedButton(
+                onPressed: _scanning ? null : _scanMore,
+                child: _scanning
+                    ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                    : const Text('Load more'),
+              ),
+            ),
+            const SizedBox(width: 8),
+            OutlinedButton(
+              style: OutlinedButton.styleFrom(foregroundColor: scheme.error),
+              onPressed: _scanning ? null : _loadAllConfirm,
+              child: const Text('Load all'),
+            ),
+          ]),
         ),
     ]);
   }
@@ -363,17 +584,56 @@ class _BrowserPageViewState extends State<BrowserPageView>
   Widget _leaf(String key, String label, int depth) {
     final sel = key == _selected;
     return InkWell(
-      onTap: () => _openKey(key),
+      onTap: () {
+        if (_selectMode) {
+          setState(() => _checked.contains(key) ? _checked.remove(key) : _checked.add(key));
+        } else {
+          _openKey(key);
+        }
+      },
+      onSecondaryTapDown: (d) => _keyMenu(key, d.globalPosition),
+      onLongPress: () => _keyMenu(key, null),
       child: Container(
         color: sel ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.15) : null,
         padding: EdgeInsets.fromLTRB(12.0 + depth * 16, 7, 8, 7),
         child: Row(children: [
+          if (_selectMode)
+            Padding(
+              padding: const EdgeInsets.only(right: 4),
+              child: Icon(
+                _checked.contains(key) ? Icons.check_box : Icons.check_box_outline_blank,
+                size: 15,
+                color: Theme.of(context).colorScheme.primary,
+              ),
+            ),
           Icon(Icons.vpn_key, size: 13, color: Theme.of(context).hintColor),
           const SizedBox(width: 6),
           Expanded(child: Text(label, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 13))),
         ]),
       ),
     );
+  }
+
+  Future<void> _keyMenu(String key, Offset? at) async {
+    final pos = at ?? const Offset(200, 200);
+    final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
+    final choice = await showMenu<String>(
+      context: context,
+      position: RelativeRect.fromLTRB(pos.dx, pos.dy, overlay.size.width - pos.dx, 0),
+      items: const [
+        PopupMenuItem(value: 'open', child: Text('Open')),
+        PopupMenuItem(value: 'copy', child: Text('Copy name')),
+        PopupMenuItem(value: 'delete', child: Text('Delete')),
+      ],
+    );
+    switch (choice) {
+      case 'open':
+        _openKey(key);
+      case 'copy':
+        await _copy(key, 'Key name copied');
+      case 'delete':
+        await _deleteKeys([key]);
+    }
   }
 
   // Namespace tree grouped on ':'.
@@ -387,10 +647,10 @@ class _BrowserPageViewState extends State<BrowserPageView>
       }
       node[parts.last] = k; // leaf: value is the full key
     }
-    return _renderBranch(root, 0);
+    return _renderBranch(root, 0, '');
   }
 
-  List<Widget> _renderBranch(Map<String, dynamic> node, int depth) {
+  List<Widget> _renderBranch(Map<String, dynamic> node, int depth, String prefix) {
     final branches = <String>[];
     final leaves = <MapEntry<String, String>>[];
     node.forEach((k, v) {
@@ -406,11 +666,13 @@ class _BrowserPageViewState extends State<BrowserPageView>
     for (final b in branches) {
       final name = b.substring(b.indexOf('/', 1) + 1);
       final child = node[b] as Map<String, dynamic>;
+      final childPrefix = prefix.isEmpty ? name : '$prefix:$name';
       out.add(_Folder(
         name: name,
         count: _countLeaves(child),
         depth: depth,
-        children: _renderBranch(child, depth + 1),
+        onDelete: () => _deleteFolder(childPrefix),
+        children: _renderBranch(child, depth + 1, childPrefix),
       ));
     }
     for (final l in leaves) {
@@ -425,29 +687,79 @@ class _BrowserPageViewState extends State<BrowserPageView>
     return n;
   }
 
-  // ---- right panel ----
+  // ---- right panel: tab strip + active detail ----
 
   Widget _rightPanel() {
-    if (_selected == null) {
+    if (_tabs.isEmpty) {
       return _center(Icons.vpn_key, 'No key selected', 'Pick a key on the left to view it.');
     }
-    if (_loadingKey) return const Center(child: CircularProgressIndicator());
-    if (_detailError != null) {
-      return _center(Icons.error_outline, 'Cannot read key', _detailError!);
-    }
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      _tabStrip(),
+      const Divider(height: 1),
+      Expanded(child: _detail(_tabs[_active])),
+    ]);
+  }
+
+  Widget _tabStrip() {
+    final scheme = Theme.of(context).colorScheme;
+    return SizedBox(
+      height: 38,
+      child: ListView.builder(
+        scrollDirection: Axis.horizontal,
+        itemCount: _tabs.length,
+        itemBuilder: (ctx, i) {
+          final active = i == _active;
+          return InkWell(
+            onTap: () => setState(() => _active = i),
+            child: Container(
+              constraints: const BoxConstraints(maxWidth: 220),
+              padding: const EdgeInsets.only(left: 12, right: 4),
+              decoration: BoxDecoration(
+                color: active ? scheme.primary.withValues(alpha: 0.12) : null,
+                border: Border(
+                  bottom: BorderSide(
+                    color: active ? scheme.primary : Colors.transparent,
+                    width: 2,
+                  ),
+                ),
+              ),
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                Flexible(
+                  child: Text(_tabs[i].key,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 12.5, fontWeight: active ? FontWeight.w600 : FontWeight.w400)),
+                ),
+                IconButton(
+                  tooltip: 'Close',
+                  visualDensity: VisualDensity.compact,
+                  iconSize: 14,
+                  icon: const Icon(Icons.close),
+                  onPressed: () => _closeTab(i),
+                ),
+              ]),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _detail(_KeyTab t) {
+    if (t.loading) return const Center(child: CircularProgressIndicator());
+    if (t.error != null) return _center(Icons.error_outline, 'Cannot read key', t.error!);
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        _keyHeader(),
+        _keyHeader(t),
         const SizedBox(height: 16),
-        _typeEditor(),
+        _typeEditor(t),
       ]),
     );
   }
 
-  Widget _keyHeader() {
+  Widget _keyHeader(_KeyTab t) {
     final scheme = Theme.of(context).colorScheme;
-    final ttlText = _keyTtl < 0 ? 'No expiry' : '${_keyTtl}s';
+    final ttlText = t.ttl < 0 ? 'No expiry' : '${t.ttl}s';
     return Row(children: [
       Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
@@ -455,224 +767,438 @@ class _BrowserPageViewState extends State<BrowserPageView>
           color: scheme.primaryContainer,
           borderRadius: BorderRadius.circular(6),
         ),
-        child: Text((_keyType ?? '?').toUpperCase(),
+        child: Text((t.type).toUpperCase(),
             style: TextStyle(fontWeight: FontWeight.w600, color: scheme.onPrimaryContainer)),
       ),
       const SizedBox(width: 10),
       Expanded(
         child: Tooltip(
           message: 'redimos does not support RENAME — key names are read-only here',
-          child: Text(_selected!, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+          child: Text(t.key, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
         ),
       ),
-      const SizedBox(width: 8),
+      IconButton(
+        tooltip: 'Copy key name',
+        onPressed: () => _copy(t.key, 'Key name copied'),
+        icon: const Icon(Icons.copy, size: 16),
+      ),
+      const SizedBox(width: 4),
       OutlinedButton.icon(
         onPressed: _editTtlDialog,
         icon: const Icon(Icons.schedule, size: 16),
         label: Text('TTL: $ttlText'),
       ),
       const SizedBox(width: 6),
-      IconButton(tooltip: 'Refresh', onPressed: _refreshKey, icon: const Icon(Icons.refresh, size: 18)),
+      IconButton(tooltip: 'Refresh', onPressed: _refreshTab, icon: const Icon(Icons.refresh, size: 18)),
       IconButton(
         tooltip: 'Delete key',
-        onPressed: _deleteKeyDialog,
+        onPressed: () => _deleteKeys([t.key]),
         icon: Icon(Icons.delete_outline, size: 18, color: scheme.error),
       ),
     ]);
   }
 
-  Widget _typeEditor() {
-    switch (_keyType) {
+  Widget _typeEditor(_KeyTab t) {
+    switch (t.type) {
       case 'string':
-        return _stringEditor();
+        return _stringEditor(t);
       case 'hash':
-        return _hashEditor();
+        return _collectionEditor(t, ['Field', 'Value'],
+            onAdd: () => _fieldValueDialog('Add field',
+                onSubmit: (f, v) => _client!.hset(t.key, f, v)),
+            rowEdit: (r) => _fieldValueDialog('Edit field',
+                field: r[0], value: r[1], fieldLocked: true,
+                onSubmit: (f, v) => _client!.hset(t.key, f, v)),
+            rowDelete: (r) => _client!.hdel(t.key, r[0]));
       case 'list':
-        return _listEditor();
+        return _collectionEditor(t, ['#', 'Value'], numbered: false,
+            onAdd: () => _listAddDialog(t.key),
+            rowEdit: (r) => _singleValueDialog('Edit value', value: r[1],
+                onSubmit: (v) => _client!.lset(t.key, int.parse(r[0]), v)),
+            rowDelete: (r) => _lremAt(t.key, int.parse(r[0])));
       case 'set':
-        return _setEditor();
+        return _collectionEditor(t, ['Member'], singleColumn: true,
+            onAdd: () => _singleValueDialog('Add member', onSubmit: (v) => _client!.sadd(t.key, v)),
+            rowEdit: (r) => _singleValueDialog('Edit member', value: r[0],
+                onSubmit: (v) async {
+                  await _client!.sadd(t.key, v);
+                  if (v != r[0]) await _client!.srem(t.key, r[0]);
+                }),
+            rowDelete: (r) => _client!.srem(t.key, r[0]));
       case 'zset':
-        return _zsetEditor();
+        return _collectionEditor(t, ['Score', 'Member'], scoreFirst: true,
+            onAdd: () => _scoreMemberDialog('Add member',
+                onSubmit: (s, m) => _client!.zadd(t.key, s, m)),
+            rowEdit: (r) => _scoreMemberDialog('Edit score', score: r[1], member: r[0], memberLocked: true,
+                onSubmit: (s, m) => _client!.zadd(t.key, s, m)),
+            rowDelete: (r) => _client!.zrem(t.key, r[0]));
       default:
-        return Text('Unsupported type: $_keyType');
+        return Text('Unsupported type: ${t.type}');
     }
   }
 
   // -- string --
-  Widget _stringEditor() {
-    String display = _strCtrl.text;
-    if (_strFormat == 'JSON') {
-      try {
-        display = const JsonEncoder.withIndent('  ').convert(jsonDecode(_strCtrl.text));
-      } catch (_) {}
+  Widget _stringEditor(_KeyTab t) {
+    final raw = t.strCtrl.text;
+    // The RESP layer decodes bulk strings as UTF-8 (lossy) — a replacement char
+    // means the value has non-UTF-8 bytes, so Hex/Size are approximate and a Save
+    // would persist the mojibake. Warn rather than silently corrupt.
+    final binaryish = raw.contains('�');
+    Widget body;
+    if (t.strFormat == 'JSON') {
+      Widget child;
+      if (raw.length > 200000) {
+        child = Text('Value is ${raw.length ~/ 1024} KB — too large to render as a JSON tree. Use Text view.',
+            style: const TextStyle(color: Colors.orange, fontFamily: 'monospace'));
+      } else {
+        Object? decoded;
+        String? err;
+        try {
+          decoded = jsonDecode(raw);
+        } catch (_) {
+          err = 'Not valid JSON';
+        }
+        child = err != null
+            ? Text(err, style: const TextStyle(color: Colors.orange, fontFamily: 'monospace'))
+            : _JsonView(data: decoded);
+      }
+      body = Container(
+        width: double.infinity,
+        constraints: const BoxConstraints(minHeight: 140),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          border: Border.all(color: Theme.of(context).dividerColor),
+          borderRadius: BorderRadius.circular(6),
+        ),
+        child: child,
+      );
+    } else if (t.strFormat == 'Hex') {
+      final hex = utf8
+          .encode(raw)
+          .map((b) => b.toRadixString(16).padLeft(2, '0'))
+          .join(' ');
+      body = Container(
+        width: double.infinity,
+        constraints: const BoxConstraints(minHeight: 140),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          border: Border.all(color: Theme.of(context).dividerColor),
+          borderRadius: BorderRadius.circular(6),
+        ),
+        child: SelectableText(hex, style: const TextStyle(fontFamily: 'monospace', fontSize: 13)),
+      );
+    } else {
+      body = TextField(
+        controller: t.strCtrl,
+        minLines: 6,
+        maxLines: 20,
+        style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
+        decoration: const InputDecoration(
+          border: OutlineInputBorder(),
+          contentPadding: EdgeInsets.all(12),
+        ),
+        onChanged: (_) => setState(() {}),
+      );
     }
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      if (binaryish)
+        Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: Row(children: [
+            const Icon(Icons.warning_amber, size: 16, color: Colors.orange),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text('This value has non-UTF-8 bytes — Hex/Size are approximate and saving may corrupt it.',
+                  style: TextStyle(fontSize: 12, color: Colors.orange.shade800)),
+            ),
+          ]),
+        ),
       Row(children: [
         DropdownButton<String>(
-          value: _strFormat,
+          value: t.strFormat,
           items: const [
             DropdownMenuItem(value: 'Text', child: Text('Text')),
             DropdownMenuItem(value: 'JSON', child: Text('JSON')),
+            DropdownMenuItem(value: 'Hex', child: Text('Hex')),
           ],
-          onChanged: (v) => setState(() => _strFormat = v ?? 'Text'),
+          onChanged: (v) => setState(() => t.strFormat = v ?? 'Text'),
         ),
         const SizedBox(width: 12),
-        Text('Size: ${utf8.encode(_strCtrl.text).length}B',
+        Text('Size: ${utf8.encode(raw).length}B',
             style: TextStyle(fontSize: 12, color: Theme.of(context).hintColor)),
+        const SizedBox(width: 8),
+        TextButton.icon(
+          onPressed: () => _copy(raw, 'Value copied'),
+          icon: const Icon(Icons.copy, size: 14),
+          label: const Text('Copy'),
+        ),
         const Spacer(),
         FilledButton(
-          onPressed: () => _guard(() => _client!.set(_selected!, _strCtrl.text)),
+          onPressed: () => _guard(() => _client!.set(t.key, t.strCtrl.text)),
           child: const Text('Save'),
         ),
       ]),
       const SizedBox(height: 8),
-      _strFormat == 'JSON'
-          ? Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                border: Border.all(color: Theme.of(context).dividerColor),
-                borderRadius: BorderRadius.circular(6),
-              ),
-              child: SelectableText(display, style: const TextStyle(fontFamily: 'monospace', fontSize: 13)),
-            )
-          : TextField(
-              controller: _strCtrl,
-              minLines: 6,
-              maxLines: 20,
-              style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
-              decoration: const InputDecoration(
-                border: OutlineInputBorder(),
-                contentPadding: EdgeInsets.all(12),
-              ),
-              onChanged: (_) => setState(() {}),
-            ),
+      body,
     ]);
   }
 
-  // -- hash --
-  Widget _hashEditor() {
-    final entries = _hash.entries.toList()..sort((a, b) => a.key.compareTo(b.key));
-    return _collectionCard(
-      total: entries.length,
-      onAdd: () => _fieldValueDialog('Add field', onSubmit: (f, v) => _client!.hset(_selected!, f, v)),
-      columns: const ['Field', 'Value'],
-      rows: [
-        for (final e in entries)
-          _row([e.key, e.value],
-              onEdit: () => _fieldValueDialog('Edit field',
-                  field: e.key, value: e.value, fieldLocked: true,
-                  onSubmit: (f, v) => _client!.hset(_selected!, f, v)),
-              onDelete: () => _client!.hdel(_selected!, e.key)),
-      ],
-    );
-  }
-
-  // -- list --
-  Widget _listEditor() {
-    return _collectionCard(
-      total: _list.length,
-      onAdd: () => _singleValueDialog('Push value', onSubmit: (v) => _client!.rpush(_selected!, v)),
-      columns: const ['#', 'Value'],
-      rows: [
-        for (var i = 0; i < _list.length; i++)
-          _row(['$i', _list[i]],
-              onEdit: () => _singleValueDialog('Edit value', value: _list[i],
-                  onSubmit: (v) => _client!.lset(_selected!, i, v)),
-              onDelete: () => _client!.lrem(_selected!, 1, _list[i])),
-      ],
-    );
-  }
-
-  // -- set --
-  Widget _setEditor() {
-    final members = [..._set]..sort();
-    return _collectionCard(
-      total: members.length,
-      onAdd: () => _singleValueDialog('Add member', onSubmit: (v) => _client!.sadd(_selected!, v)),
-      columns: const ['Member'],
-      rows: [
-        for (final m in members)
-          _row([m], onDelete: () => _client!.srem(_selected!, m)),
-      ],
-    );
-  }
-
-  // -- zset --
-  Widget _zsetEditor() {
-    return _collectionCard(
-      total: _zset.length,
-      onAdd: () => _scoreMemberDialog('Add member',
-          onSubmit: (s, m) => _client!.zadd(_selected!, s, m)),
-      columns: const ['Score', 'Member'],
-      rows: [
-        for (final e in _zset)
-          _row([e.$2, e.$1],
-              onEdit: () => _scoreMemberDialog('Edit score', score: e.$2, member: e.$1, memberLocked: true,
-                  onSubmit: (s, m) => _client!.zadd(_selected!, s, m)),
-              onDelete: () => _client!.zrem(_selected!, e.$1)),
-      ],
-    );
-  }
-
-  Widget _collectionCard({
-    required int total,
+  // -- shared collection editor (hash / list / set / zset) --
+  Widget _collectionEditor(
+    _KeyTab t,
+    List<String> columns, {
     required VoidCallback onAdd,
-    required List<String> columns,
-    required List<DataRow> rows,
+    required void Function(List<String>) rowEdit,
+    required Future<void> Function(List<String>) rowDelete,
+    bool scoreFirst = false,
+    bool numbered = true,
+    bool singleColumn = false,
   }) {
+    final f = t.filter.trim().toLowerCase();
+    final visible = f.isEmpty
+        ? t.rows
+        : t.rows.where((r) => r[0].toLowerCase().contains(f) || r[1].toLowerCase().contains(f)).toList();
+    final scheme = Theme.of(context).colorScheme;
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Row(children: [
         FilledButton.icon(onPressed: onAdd, icon: const Icon(Icons.add, size: 16), label: const Text('Add')),
         const SizedBox(width: 12),
-        Text('Total: $total', style: TextStyle(color: Theme.of(context).hintColor)),
+        Text('Total: ${t.total}${t.rows.length < t.total ? '  (loaded ${t.rows.length})' : ''}',
+            style: TextStyle(color: Theme.of(context).hintColor)),
+        const Spacer(),
+        SizedBox(
+          width: 220,
+          child: TextField(
+            decoration: const InputDecoration(
+              isDense: true,
+              prefixIcon: Icon(Icons.filter_alt_outlined, size: 16),
+              hintText: 'Keyword search',
+              border: OutlineInputBorder(),
+              contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+            ),
+            onChanged: (v) => setState(() => t.filter = v),
+          ),
+        ),
       ]),
       const SizedBox(height: 10),
-      SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: DataTable(
-          columnSpacing: 32,
-          headingRowHeight: 38,
-          dataRowMinHeight: 36,
-          dataRowMaxHeight: 46,
-          columns: [
-            for (final c in columns) DataColumn(label: Text(c, style: const TextStyle(fontWeight: FontWeight.w600))),
-            const DataColumn(label: Text('')),
-          ],
-          rows: rows,
+      if (visible.isEmpty)
+        Padding(
+          padding: const EdgeInsets.all(20),
+          child: Center(
+            child: Text(t.filter.isEmpty ? 'Empty' : 'No match in loaded rows',
+                style: const TextStyle(color: Colors.grey)),
+          ),
+        )
+      else
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: DataTable(
+            columnSpacing: 28,
+            headingRowHeight: 38,
+            dataRowMinHeight: 36,
+            dataRowMaxHeight: 48,
+            columns: [
+              if (numbered) const DataColumn(label: Text('#', style: TextStyle(fontWeight: FontWeight.w600))),
+              for (final c in columns) DataColumn(label: Text(c, style: const TextStyle(fontWeight: FontWeight.w600))),
+              const DataColumn(label: Text('')),
+            ],
+            rows: [
+              for (var i = 0; i < visible.length; i++)
+                _dataRow(i, visible[i],
+                    scoreFirst: scoreFirst, numbered: numbered, singleColumn: singleColumn,
+                    disabled: t.mutating, onEdit: rowEdit, onDelete: rowDelete),
+            ],
+          ),
         ),
-      ),
+      if (t.hasMore)
+        Padding(
+          padding: const EdgeInsets.only(top: 10),
+          child: OutlinedButton(
+            onPressed: t.loadingMore ? null : () => _loadMoreRows(t),
+            child: t.loadingMore
+                ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                : Text('Load more  (${t.rows.length}/${t.total})'),
+          ),
+        ),
+      if (f.isNotEmpty && t.hasMore)
+        Padding(
+          padding: const EdgeInsets.only(top: 4),
+          child: Text('Filter applies to loaded rows only — load more to search further.',
+              style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant)),
+        ),
     ]);
   }
 
-  DataRow _row(List<String> cells, {VoidCallback? onEdit, Future<void> Function()? onDelete}) {
+  DataRow _dataRow(
+    int i,
+    List<String> row, {
+    required bool scoreFirst,
+    required bool numbered,
+    required bool singleColumn,
+    required bool disabled,
+    required void Function(List<String>) onEdit,
+    required Future<void> Function(List<String>) onDelete,
+  }) {
+    // display cells: scoreFirst (zset) shows [score(b), member(a)]; set shows
+    // [member]; else [a, b] — key off the type flag, NOT whether the value is
+    // empty (an empty hash/list value must still emit its column, or the
+    // DataCell count won't match the header and DataTable asserts).
+    final cells = scoreFirst
+        ? [row[1], row[0]]
+        : (singleColumn ? [row[0]] : [row[0], row[1]]);
+    final copyText = row[1].isNotEmpty ? row[1] : row[0];
     return DataRow(cells: [
+      if (numbered) DataCell(Text('${i + 1}', style: TextStyle(color: Theme.of(context).hintColor))),
       for (final c in cells)
         DataCell(ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 460),
+          constraints: const BoxConstraints(maxWidth: 440),
           child: Text(c, maxLines: 2, overflow: TextOverflow.ellipsis),
         )),
       DataCell(Row(mainAxisSize: MainAxisSize.min, children: [
-        if (onEdit != null)
-          IconButton(
-            visualDensity: VisualDensity.compact,
-            icon: const Icon(Icons.edit, size: 16),
-            onPressed: onEdit,
-          ),
-        if (onDelete != null)
-          IconButton(
-            visualDensity: VisualDensity.compact,
-            icon: Icon(Icons.delete_outline, size: 16, color: Theme.of(context).colorScheme.error),
-            onPressed: () => _guard(onDelete),
-          ),
+        IconButton(
+          tooltip: 'Copy',
+          visualDensity: VisualDensity.compact,
+          icon: const Icon(Icons.copy, size: 15),
+          onPressed: () => _copy(copyText),
+        ),
+        IconButton(
+          visualDensity: VisualDensity.compact,
+          tooltip: 'Edit',
+          icon: const Icon(Icons.edit, size: 15),
+          onPressed: disabled ? null : () => onEdit(row),
+        ),
+        IconButton(
+          visualDensity: VisualDensity.compact,
+          tooltip: 'Delete',
+          icon: Icon(Icons.delete_outline, size: 15, color: Theme.of(context).colorScheme.error),
+          // Disabled while a write is in flight so a second (positional) delete
+          // can't fire against a stale, shifted index.
+          onPressed: disabled ? null : () => _guard(() => onDelete(row)),
+        ),
       ])),
     ]);
+  }
+
+  // ---- deletes ----
+
+  Future<void> _deleteKeys(List<String> keys) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(keys.length == 1 ? 'Delete key?' : 'Delete ${keys.length} keys?'),
+        content: Text(keys.length == 1
+            ? 'Permanently delete "${keys.first}"? This cannot be undone.'
+            : 'Permanently delete ${keys.length} keys? This cannot be undone.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Theme.of(context).colorScheme.error),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    var failed = 0;
+    for (final k in keys) {
+      try {
+        await _client!.del(k);
+      } catch (_) {
+        failed++;
+      }
+    }
+    if (!mounted) return;
+    setState(() {
+      // Remember which tab is active by key — indices shift as we remove tabs
+      // before it, so a plain clamp would land on the wrong tab.
+      final activeKey = _active >= 0 && _active < _tabs.length ? _tabs[_active].key : null;
+      _keys.removeWhere(keys.contains);
+      _checked.removeAll(keys);
+      for (var i = _tabs.length - 1; i >= 0; i--) {
+        if (keys.contains(_tabs[i].key)) {
+          _tabs[i].dispose();
+          _tabs.removeAt(i);
+        }
+      }
+      _active = _tabs.isEmpty
+          ? -1
+          : (activeKey == null ? 0 : _tabs.indexWhere((t) => t.key == activeKey));
+      if (_active < 0) _active = _tabs.isEmpty ? -1 : 0;
+    });
+    if (failed > 0) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$failed key(s) could not be deleted')));
+    }
+  }
+
+  Future<void> _batchDelete() => _deleteKeys(_checked.toList());
+
+  Future<void> _deleteFolder(String prefix) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete whole folder?'),
+        content: Text('Scan and delete every key under "$prefix:" ? This cannot be undone.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Theme.of(context).colorScheme.error),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    // Escape glob metacharacters so a folder like `user[admin]` matches literally
+    // (SCAN MATCH is a glob: unescaped `[ ] * ?` would over- or under-match), then
+    // belt-and-braces filter on the literal prefix.
+    final literal = '$prefix:';
+    final matchPrefix = prefix.replaceAllMapped(RegExp(r'[\\*?\[\]^]'), (m) => '\\${m[0]}');
+    final toDel = <String>[];
+    var cursor = '0';
+    var guard = 0;
+    try {
+      do {
+        final page = await _client!.scan(cursor, match: '$matchPrefix:*', count: 500);
+        toDel.addAll(page.items.where((k) => k.startsWith(literal)));
+        cursor = page.cursor;
+      } while (cursor != '0' && guard++ < 1000);
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+      return;
+    }
+    for (final k in toDel) {
+      try {
+        await _client!.del(k);
+      } catch (_) {}
+    }
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Deleted ${toDel.length} key(s)')));
+    _reload();
+  }
+
+  Future<void> _loadAllConfirm() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Load all keys?'),
+        content: const Text('This walks the entire keyspace with SCAN. On a large database it may take a while.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Load all')),
+        ],
+      ),
+    );
+    if (ok == true) await _loadAll();
   }
 
   // ---- dialogs ----
 
   Future<void> _editTtlDialog() async {
-    final ctrl = TextEditingController(text: _keyTtl < 0 ? '' : '$_keyTtl');
+    final t = _activeTab;
+    if (t == null) return;
+    final ctrl = TextEditingController(text: t.ttl < 0 ? '' : '${t.ttl}');
     await showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -688,43 +1214,14 @@ class _BrowserPageViewState extends State<BrowserPageView>
             onPressed: () {
               Navigator.pop(ctx);
               final s = int.tryParse(ctrl.text.trim());
-              _guard(() => s == null || s < 0 ? _client!.persist(_selected!) : _client!.expire(_selected!, s));
+              // 0 (or blank/negative) → persist; EXPIRE key 0 would delete the key.
+              _guard(() => s == null || s <= 0 ? _client!.persist(t.key) : _client!.expire(t.key, s));
             },
             child: const Text('Apply'),
           ),
         ],
       ),
     );
-  }
-
-  Future<void> _deleteKeyDialog() async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Delete key?'),
-        content: Text('Permanently delete "$_selected"? This cannot be undone.'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-          FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: Theme.of(context).colorScheme.error),
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
-    );
-    if (ok == true) {
-      try {
-        await _client!.del(_selected!);
-        setState(() {
-          _keys.remove(_selected);
-          _selected = null;
-          _keyType = null;
-        });
-      } catch (e) {
-        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
-      }
-    }
   }
 
   Future<void> _newKeyDialog() async {
@@ -773,26 +1270,62 @@ class _BrowserPageViewState extends State<BrowserPageView>
               onPressed: () async {
                 final name = nameCtrl.text.trim();
                 if (name.isEmpty) return;
-                Navigator.pop(ctx);
+                final c = _client;
+                if (c == null) {
+                  Navigator.pop(ctx);
+                  return;
+                }
                 final v = valCtrl.text.trim();
+                // A new String key does SET, which silently replaces an existing
+                // key of ANY type. (Other types fail with WRONGTYPE, caught below.)
+                if (type == 'string') {
+                  String existing;
+                  try {
+                    existing = await c.type(name);
+                  } catch (_) {
+                    existing = 'none'; // connection dropped mid-dialog; skip the precheck
+                  }
+                  if (existing != 'none' && existing.isNotEmpty && ctx.mounted) {
+                    final go = await showDialog<bool>(
+                      context: ctx,
+                      builder: (c2) => AlertDialog(
+                        title: const Text('Overwrite key?'),
+                        content: Text('A "$existing" key named "$name" already exists. '
+                            'Creating a String will replace it. Continue?'),
+                        actions: [
+                          TextButton(onPressed: () => Navigator.pop(c2, false), child: const Text('Cancel')),
+                          FilledButton(
+                            style: FilledButton.styleFrom(backgroundColor: Theme.of(c2).colorScheme.error),
+                            onPressed: () => Navigator.pop(c2, true),
+                            child: const Text('Overwrite'),
+                          ),
+                        ],
+                      ),
+                    );
+                    if (go != true) return;
+                  }
+                }
+                if (!ctx.mounted) return;
+                Navigator.pop(ctx);
                 await _guardTop(() async {
                   switch (type) {
                     case 'string':
-                      await _client!.set(name, v.isEmpty ? '' : v);
+                      await c.set(name, v.isEmpty ? '' : v);
                     case 'hash':
                       final p = v.split('=');
-                      await _client!.hset(name, p.first, p.length > 1 ? p.sublist(1).join('=') : '');
+                      await c.hset(name, p.first, p.length > 1 ? p.sublist(1).join('=') : '');
                     case 'list':
-                      await _client!.rpush(name, v);
+                      await c.rpush(name, v);
                     case 'set':
-                      await _client!.sadd(name, v);
+                      await c.sadd(name, v);
                     case 'zset':
                       final p = v.split('=');
-                      await _client!.zadd(name, p.first.isEmpty ? '0' : p.first, p.length > 1 ? p.sublist(1).join('=') : '');
+                      await c.zadd(name, p.first.isEmpty ? '0' : p.first, p.length > 1 ? p.sublist(1).join('=') : '');
                   }
                 });
+                if (!mounted) return;
                 if (!_keys.contains(name)) setState(() => _keys.insert(0, name));
-                await _openKey(name);
+                _openKey(name);
               },
               child: const Text('Create'),
             ),
@@ -810,11 +1343,54 @@ class _BrowserPageViewState extends State<BrowserPageView>
     }
   }
 
+  Future<void> _listAddDialog(String key) async {
+    final ctrl = TextEditingController();
+    String where = 'tail';
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(builder: (ctx, setD) {
+        return AlertDialog(
+          title: const Text('Add value'),
+          content: SizedBox(
+            width: 380,
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              TextField(controller: ctrl, minLines: 3, maxLines: 10,
+                  decoration: const InputDecoration(labelText: 'Value', border: OutlineInputBorder())),
+              const SizedBox(height: 12),
+              Row(children: [
+                const Text('Push at: '),
+                const SizedBox(width: 8),
+                SegmentedButton<String>(
+                  segments: const [
+                    ButtonSegment(value: 'head', label: Text('Head')),
+                    ButtonSegment(value: 'tail', label: Text('Tail')),
+                  ],
+                  selected: {where},
+                  onSelectionChanged: (s) => setD(() => where = s.first),
+                ),
+              ]),
+            ]),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+            FilledButton(
+              onPressed: () {
+                Navigator.pop(ctx);
+                _guard(() => where == 'head' ? _client!.lpush(key, ctrl.text) : _client!.rpush(key, ctrl.text));
+              },
+              child: const Text('Add'),
+            ),
+          ],
+        );
+      }),
+    );
+  }
+
   Future<void> _singleValueDialog(String title,
       {String? value, required Future<void> Function(String) onSubmit}) async {
     final ctrl = TextEditingController(text: value ?? '');
     await _formDialog(title, [ctrl], (v) => onSubmit(v[0]),
-        labels: const ['Value']);
+        labels: const ['Value'], multiline: const [true]);
   }
 
   Future<void> _fieldValueDialog(String title,
@@ -823,7 +1399,7 @@ class _BrowserPageViewState extends State<BrowserPageView>
     final f = TextEditingController(text: field ?? '');
     final v = TextEditingController(text: value ?? '');
     await _formDialog(title, [f, v], (x) => onSubmit(x[0], x[1]),
-        labels: const ['Field', 'Value'], locked: [fieldLocked, false]);
+        labels: const ['Field', 'Value'], locked: [fieldLocked, false], multiline: const [false, true]);
   }
 
   Future<void> _scoreMemberDialog(String title,
@@ -832,24 +1408,26 @@ class _BrowserPageViewState extends State<BrowserPageView>
     final s = TextEditingController(text: score ?? '');
     final m = TextEditingController(text: member ?? '');
     await _formDialog(title, [s, m], (x) => onSubmit(x[0], x[1]),
-        labels: const ['Score', 'Member'], locked: [false, memberLocked]);
+        labels: const ['Score', 'Member'], locked: [false, memberLocked], multiline: const [false, true]);
   }
 
   Future<void> _formDialog(String title, List<TextEditingController> ctrls,
       Future<void> Function(List<String>) onSubmit,
-      {required List<String> labels, List<bool>? locked}) async {
+      {required List<String> labels, List<bool>? locked, List<bool>? multiline}) async {
     await showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text(title),
         content: SizedBox(
-          width: 380,
+          width: 400,
           child: Column(mainAxisSize: MainAxisSize.min, children: [
             for (var i = 0; i < ctrls.length; i++) ...[
               if (i > 0) const SizedBox(height: 12),
               TextField(
                 controller: ctrls[i],
                 enabled: locked == null || !locked[i],
+                minLines: (multiline != null && multiline[i]) ? 3 : 1,
+                maxLines: (multiline != null && multiline[i]) ? 12 : 1,
                 decoration: InputDecoration(labelText: labels[i], border: const OutlineInputBorder()),
               ),
             ],
@@ -888,8 +1466,15 @@ class _Folder extends StatefulWidget {
   final String name;
   final int count;
   final int depth;
+  final VoidCallback onDelete;
   final List<Widget> children;
-  const _Folder({required this.name, required this.count, required this.depth, required this.children});
+  const _Folder({
+    required this.name,
+    required this.count,
+    required this.depth,
+    required this.onDelete,
+    required this.children,
+  });
 
   @override
   State<_Folder> createState() => _FolderState();
@@ -903,6 +1488,8 @@ class _FolderState extends State<_Folder> {
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       InkWell(
         onTap: () => setState(() => _open = !_open),
+        onSecondaryTapDown: (d) => _menu(d.globalPosition),
+        onLongPress: () => _menu(null),
         child: Padding(
           padding: EdgeInsets.fromLTRB(8.0 + widget.depth * 16, 7, 8, 7),
           child: Row(children: [
@@ -917,5 +1504,127 @@ class _FolderState extends State<_Folder> {
       ),
       if (_open) ...widget.children,
     ]);
+  }
+
+  Future<void> _menu(Offset? at) async {
+    final pos = at ?? const Offset(200, 200);
+    final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
+    final choice = await showMenu<String>(
+      context: context,
+      position: RelativeRect.fromLTRB(pos.dx, pos.dy, overlay.size.width - pos.dx, 0),
+      items: const [
+        PopupMenuItem(value: 'delete', child: Text('Scan & delete whole folder')),
+      ],
+    );
+    if (choice == 'delete') widget.onDelete();
+  }
+}
+
+// A compact collapsible, syntax-highlighted JSON tree.
+class _JsonView extends StatelessWidget {
+  final Object? data;
+  const _JsonView({required this.data});
+
+  @override
+  Widget build(BuildContext context) => _JsonNode(label: null, value: data, depth: 0, last: true);
+}
+
+class _JsonNode extends StatefulWidget {
+  final String? label; // object key or list index prefix
+  final Object? value;
+  final int depth;
+  final bool last;
+  const _JsonNode({required this.label, required this.value, required this.depth, required this.last});
+
+  @override
+  State<_JsonNode> createState() => _JsonNodeState();
+}
+
+class _JsonNodeState extends State<_JsonNode> {
+  // Deep levels start collapsed so a huge/deep document doesn't build tens of
+  // thousands of widgets up front; each node also caps how many children it draws.
+  static const int _maxChildren = 500;
+  late bool _open = widget.depth < 3;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    const mono = TextStyle(fontFamily: 'monospace', fontSize: 12.5);
+    final v = widget.value;
+    final keyPrefix = widget.label == null
+        ? const TextSpan(text: '')
+        : TextSpan(text: '"${widget.label}": ', style: mono.copyWith(color: scheme.primary));
+
+    if (v is Map || v is List) {
+      final List<MapEntry<String?, Object?>> entries = v is Map
+          ? v.entries.map((e) => MapEntry<String?, Object?>(e.key.toString(), e.value)).toList()
+          : [for (var i = 0; i < (v as List).length; i++) MapEntry<String?, Object?>(null, v[i])];
+      final isMap = v is Map;
+      final open = isMap ? '{' : '[';
+      final close = isMap ? '}' : ']';
+      return Padding(
+        padding: EdgeInsets.only(left: widget.depth == 0 ? 0 : 14),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          InkWell(
+            onTap: () => setState(() => _open = !_open),
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              Icon(_open ? Icons.expand_more : Icons.chevron_right, size: 14, color: scheme.onSurfaceVariant),
+              Flexible(
+                child: RichText(
+                  text: TextSpan(children: [
+                    keyPrefix,
+                    TextSpan(text: _open ? open : '$open … $close${widget.last ? '' : ','}', style: mono),
+                  ]),
+                ),
+              ),
+            ]),
+          ),
+          if (_open) ...[
+            for (var i = 0; i < entries.length && i < _maxChildren; i++)
+              _JsonNode(
+                label: entries[i].key,
+                value: entries[i].value,
+                depth: widget.depth + 1,
+                last: i == entries.length - 1,
+              ),
+            if (entries.length > _maxChildren)
+              Padding(
+                padding: const EdgeInsets.only(left: 14),
+                child: Text('… ${entries.length - _maxChildren} more',
+                    style: mono.copyWith(color: scheme.onSurfaceVariant)),
+              ),
+            Padding(
+              padding: const EdgeInsets.only(left: 14),
+              child: Text('$close${widget.last ? '' : ','}', style: mono),
+            ),
+          ],
+        ]),
+      );
+    }
+
+    // scalar
+    Color c = scheme.onSurface;
+    String text;
+    if (v == null) {
+      text = 'null';
+      c = Colors.grey;
+    } else if (v is String) {
+      text = '"$v"';
+      c = Colors.green.shade600;
+    } else if (v is num || v is bool) {
+      text = '$v';
+      c = Colors.orange.shade700;
+    } else {
+      text = '$v';
+    }
+    return Padding(
+      padding: EdgeInsets.only(left: widget.depth == 0 ? 0 : 14),
+      child: RichText(
+        text: TextSpan(children: [
+          keyPrefix,
+          TextSpan(text: '$text${widget.last ? '' : ','}', style: mono.copyWith(color: c)),
+        ]),
+      ),
+    );
   }
 }

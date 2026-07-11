@@ -248,4 +248,36 @@ class RedisClient {
 
   Future<void> zadd(String key, String score, String member) => call(['ZADD', key, score, member]);
   Future<void> zrem(String key, String member) => call(['ZREM', key, member]);
+
+  // ---- in-key pagination helpers (so large keys don't load all at once) ----
+
+  Future<int> llen(String key) async => (await call(['LLEN', key]) as int?) ?? 0;
+  Future<int> hlen(String key) async => (await call(['HLEN', key]) as int?) ?? 0;
+  Future<int> scard(String key) async => (await call(['SCARD', key]) as int?) ?? 0;
+  Future<int> zcard(String key) async => (await call(['ZCARD', key]) as int?) ?? 0;
+  Future<void> lpush(String key, String value) => call(['LPUSH', key, value]);
+
+  /// One HSCAN page: (nextCursor, [(field, value)]). Cursor "0" = walk complete.
+  Future<(String, List<(String, String)>)> hscan(String key, String cursor,
+      {String match = '*', int count = 200}) async {
+    final r = await call(['HSCAN', key, cursor, 'MATCH', match, 'COUNT', '$count']);
+    final list = (r as List?) ?? [];
+    final cur = list.isNotEmpty ? _s(list[0]) : '0';
+    final flat = list.length > 1 ? ((list[1] as List?) ?? const []) : const [];
+    final out = <(String, String)>[];
+    for (var i = 0; i + 1 < flat.length; i += 2) {
+      out.add((_s(flat[i]), _s(flat[i + 1])));
+    }
+    return (cur, out);
+  }
+
+  /// One SSCAN page: (nextCursor, [member]). Cursor "0" = walk complete.
+  Future<(String, List<String>)> sscan(String key, String cursor,
+      {String match = '*', int count = 200}) async {
+    final r = await call(['SSCAN', key, cursor, 'MATCH', match, 'COUNT', '$count']);
+    final list = (r as List?) ?? [];
+    final cur = list.isNotEmpty ? _s(list[0]) : '0';
+    final items = list.length > 1 ? ((list[1] as List?) ?? const []).map(_s).toList() : <String>[];
+    return (cur, items);
+  }
 }

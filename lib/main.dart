@@ -191,8 +191,8 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   Timer? _poll;
   // Lets the parent inspect / save the editor form before leaving it.
   final _editorKey = GlobalKey<_ConfigEditorState>();
-  // Right-pane tabs (Configure / Monitor / Logs / Cmd) — owned here so the
-  // table-mismatch flow can jump back to Configure.
+  // Right-pane tabs (Configure / Monitor / Logs / Table / PartiQL / Browser /
+  // Cmd) — owned here so the table-mismatch flow can jump back to Configure.
   late final TabController _tabs = TabController(length: 7, vsync: this);
 
   // Rolling CPU / memory history per config id, fed by the status poll and
@@ -671,9 +671,9 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                 _tab(Icons.tune, 'Configure'),
                 _tab(Icons.insights, 'Monitor'),
                 _tab(Icons.terminal, 'Logs'),
-                _tab(Icons.chevron_right, 'Cmd'),
                 _tab(Icons.table_chart, 'Table'),
                 _tab(Icons.code, 'PartiQL'),
+                _tab(Icons.chevron_right, 'Cmd'),
                 _tab(Icons.travel_explore, 'Browser'),
               ],
             ),
@@ -710,14 +710,6 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                   status: st,
                   embedded: true,
                 ),
-                // cmd — interactive redis-cli against the running proxy
-                CmdConsole(
-                  key: ValueKey('cmd-${c.id}'),
-                  host: '127.0.0.1',
-                  port: c.port,
-                  auth: c.requirepass.isEmpty ? null : c.requirepass,
-                  running: st?.isRunning ?? false,
-                ),
                 // table — read-only DynamoDB item browser (Explore-items style)
                 TablePageView(
                   key: ValueKey('table-${c.id}'),
@@ -730,6 +722,14 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                   key: ValueKey('partiql-${c.id}'),
                   core: _core!,
                   config: c,
+                  running: st?.isRunning ?? false,
+                ),
+                // cmd — interactive redis-cli against the running proxy
+                CmdConsole(
+                  key: ValueKey('cmd-${c.id}'),
+                  host: '127.0.0.1',
+                  port: c.port,
+                  auth: c.requirepass.isEmpty ? null : c.requirepass,
                   running: st?.isRunning ?? false,
                 ),
                 // browser — Redis key browser over the proxy (ARDM style)
