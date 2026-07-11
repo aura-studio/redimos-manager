@@ -7,6 +7,7 @@ import 'dart:ui' show AppExitResponse;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'src/browser_page.dart';
 import 'src/cmd_console.dart';
 import 'src/models.dart';
 import 'src/native.dart';
@@ -192,7 +193,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   final _editorKey = GlobalKey<_ConfigEditorState>();
   // Right-pane tabs (Configure / Monitor / Logs / Cmd) — owned here so the
   // table-mismatch flow can jump back to Configure.
-  late final TabController _tabs = TabController(length: 6, vsync: this);
+  late final TabController _tabs = TabController(length: 7, vsync: this);
 
   // Rolling CPU / memory history per config id, fed by the status poll and
   // drawn as sparklines in the monitor panel.
@@ -673,6 +674,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                 _tab(Icons.chevron_right, 'Cmd'),
                 _tab(Icons.table_chart, 'Table'),
                 _tab(Icons.code, 'PartiQL'),
+                _tab(Icons.travel_explore, 'Browser'),
               ],
             ),
           ),
@@ -727,6 +729,12 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                 PartiqlPageView(
                   key: ValueKey('partiql-${c.id}'),
                   core: _core!,
+                  config: c,
+                  running: st?.isRunning ?? false,
+                ),
+                // browser — Redis key browser over the proxy (ARDM style)
+                BrowserPageView(
+                  key: ValueKey('browser-${c.id}'),
                   config: c,
                   running: st?.isRunning ?? false,
                 ),
