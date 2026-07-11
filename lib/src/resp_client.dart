@@ -249,6 +249,16 @@ class RedisClient {
   Future<void> zadd(String key, String score, String member) => call(['ZADD', key, score, member]);
   Future<void> zrem(String key, String member) => call(['ZREM', key, member]);
 
+  /// ZSet page in descending score order (member, score) — for the DESC view.
+  Future<List<(String, String)>> zrevrange(String key, int start, int stop) async {
+    final list = (await call(['ZREVRANGE', key, '$start', '$stop', 'WITHSCORES']) as List?) ?? [];
+    final out = <(String, String)>[];
+    for (var i = 0; i + 1 < list.length; i += 2) {
+      out.add((_s(list[i]), _s(list[i + 1])));
+    }
+    return out;
+  }
+
   // ---- in-key pagination helpers (so large keys don't load all at once) ----
 
   Future<int> llen(String key) async => (await call(['LLEN', key]) as int?) ?? 0;

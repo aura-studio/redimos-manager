@@ -32,6 +32,9 @@ class _KeyTab {
   final TextEditingController strCtrl = TextEditingController();
   String strFormat = 'Text';
 
+  // inline TTL editor (ARDM-style: TTL | <input> | reset | apply)
+  final TextEditingController ttlCtrl = TextEditingController();
+
   // collections — each row is [a, b]:
   //   hash=(field,value)  list=(absIndex,value)  set=(member,'')  zset=(member,score)
   final List<List<String>> rows = [];
@@ -42,9 +45,15 @@ class _KeyTab {
   bool mutating = false; // a write is in flight — freeze row edit/delete (positional
                          // list delete would drift if a second op raced it)
   String filter = '';
+  bool desc = true; // zset display order — ARDM defaults to DESC
+  int? sortCol; // 0 = first data column, 1 = second; null = server order
+  bool sortAsc = true;
 
   _KeyTab(this.key);
-  void dispose() => strCtrl.dispose();
+  void dispose() {
+    strCtrl.dispose();
+    ttlCtrl.dispose();
+  }
 }
 
 class BrowserPageView extends StatefulWidget {
@@ -280,6 +289,7 @@ class _BrowserPageViewState extends State<BrowserPageView>
       final ttl = await c.ttl(t.key);
       t.type = type;
       t.ttl = ttl;
+      t.ttlCtrl.text = '$ttl';
       switch (type) {
         case 'string':
           final v = (await c.get(t.key)) ?? '';
@@ -348,11 +358,20 @@ class _BrowserPageViewState extends State<BrowserPageView>
 
   Future<void> _zsetPage(_KeyTab t) async {
     final start = t.rows.length;
-    final pairs = await _client!.zrange(t.key, start, start + _pageSize - 1);
+    final pairs = t.desc
+        ? await _client!.zrevrange(t.key, start, start + _pageSize - 1)
+        : await _client!.zrange(t.key, start, start + _pageSize - 1);
     for (final p in pairs) {
       t.rows.add([p.$1, p.$2]); // (member, score)
     }
     t.hasMore = pairs.length == _pageSize;
+  }
+
+  /// Flip a zset tab between DESC/ASC and reload its window from scratch.
+  Future<void> _setZsetOrder(_KeyTab t, bool desc) async {
+    if (t.desc == desc) return;
+    t.desc = desc;
+    await _loadTab(t);
   }
 
   Future<void> _loadMoreRows(_KeyTab t) async {
@@ -414,6 +433,31 @@ class _BrowserPageViewState extends State<BrowserPageView>
       );
     }
   }
+
+  // ---- copy-as-command (ARDM parity: row </> and header </>) ----
+
+  /// Double-quote an argument the way ARDM's "Copy as command" does.
+  String _cq(String s) => '"${s.replaceAll(r'\', r'\\').replaceAll('"', r'\"')}"';
+
+  /// The redis command recreating ONE row of a collection key.
+  String _rowCommand(_KeyTab t, List<String> row) => switch (t.type) {
+        'hash' => 'HSET ${_cq(t.key)} ${_cq(row[0])} ${_cq(row[1])}',
+        'list' => 'RPUSH ${_cq(t.key)} ${_cq(row[1])}',
+        'set' => 'SADD ${_cq(t.key)} ${_cq(row[0])}',
+        'zset' => 'ZADD ${_cq(t.key)} ${row[1]} ${_cq(row[0])}', // score unquoted
+        _ => '',
+      };
+
+  /// The redis command recreating the whole key from its loaded rows, in the
+  /// current display order — same output as ARDM's blue header </> button.
+  String _keyCommand(_KeyTab t) => switch (t.type) {
+        'string' => 'SET ${_cq(t.key)} ${_cq(t.strCtrl.text)}',
+        'hash' => 'HSET ${_cq(t.key)} ${t.rows.map((r) => '${_cq(r[0])} ${_cq(r[1])}').join(' ')}',
+        'list' => 'RPUSH ${_cq(t.key)} ${t.rows.map((r) => _cq(r[1])).join(' ')}',
+        'set' => 'SADD ${_cq(t.key)} ${t.rows.map((r) => _cq(r[0])).join(' ')}',
+        'zset' => 'ZADD ${_cq(t.key)} ${t.rows.map((r) => '${r[1]} ${_cq(r[0])}').join(' ')}',
+        _ => '',
+      };
 
   // -------------------------------------------------------------------------
 
@@ -567,8 +611,10 @@ class _BrowserPageViewState extends State<BrowserPageView>
               ),
             ),
             const SizedBox(width: 8),
-            OutlinedButton(
-              style: OutlinedButton.styleFrom(foregroundColor: scheme.error),
+            // ARDM's "load all" is a red filled button — it walks the whole keyspace.
+            FilledButton(
+              style: FilledButton.styleFrom(
+                  backgroundColor: scheme.error, foregroundColor: scheme.onError),
               onPressed: _scanning ? null : _loadAllConfirm,
               child: const Text('Load all'),
             ),
@@ -606,8 +652,7 @@ class _BrowserPageViewState extends State<BrowserPageView>
                 color: Theme.of(context).colorScheme.primary,
               ),
             ),
-          Icon(Icons.vpn_key, size: 13, color: Theme.of(context).hintColor),
-          const SizedBox(width: 6),
+          // ARDM leaves are plain text (no key glyph), indented under folders.
           Expanded(child: Text(label, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 13))),
         ]),
       ),
@@ -676,7 +721,8 @@ class _BrowserPageViewState extends State<BrowserPageView>
       ));
     }
     for (final l in leaves) {
-      out.add(_leaf(l.value, l.key, depth));
+      // ARDM shows the FULL key name on tree leaves, not just the last segment.
+      out.add(_leaf(l.value, l.value, depth));
     }
     return out;
   }
@@ -747,6 +793,18 @@ class _BrowserPageViewState extends State<BrowserPageView>
   Widget _detail(_KeyTab t) {
     if (t.loading) return const Center(child: CircularProgressIndicator());
     if (t.error != null) return _center(Icons.error_outline, 'Cannot read key', t.error!);
+    // The string editor fills the pane height (ARDM's textarea does), so it
+    // lays out without an outer scroll; collection tables keep the scroll.
+    if (t.type == 'string') {
+      return Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          _keyHeader(t),
+          const SizedBox(height: 16),
+          Expanded(child: _stringEditor(t)),
+        ]),
+      );
+    }
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
@@ -757,69 +815,149 @@ class _BrowserPageViewState extends State<BrowserPageView>
     );
   }
 
+  // ARDM-style header: [type | key name  ⎘] [TTL | <secs> ↺ ✓] [🗑][↻][</>]
   Widget _keyHeader(_KeyTab t) {
     final scheme = Theme.of(context).colorScheme;
-    final ttlText = t.ttl < 0 ? 'No expiry' : '${t.ttl}s';
-    return Row(children: [
-      Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-        decoration: BoxDecoration(
-          color: scheme.primaryContainer,
-          borderRadius: BorderRadius.circular(6),
+    final border = Border.all(color: scheme.outlineVariant);
+
+    // A prefix segment of an input-look group (like ARDM's "Hash" / "TTL").
+    Widget seg(String label) => Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: scheme.surfaceContainerHigh,
+            border: Border(right: BorderSide(color: scheme.outlineVariant)),
+          ),
+          child: Text(label,
+              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: scheme.onSurfaceVariant)),
+        );
+
+    // ARDM's square colored action buttons (delete red / refresh green / cmd blue).
+    Widget squareBtn(Color color, IconData icon, String tooltip, VoidCallback onTap) => Tooltip(
+          message: tooltip,
+          child: Material(
+            color: color,
+            borderRadius: BorderRadius.circular(6),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(6),
+              onTap: onTap,
+              child: SizedBox(width: 44, height: 36, child: Icon(icon, size: 17, color: Colors.white)),
+            ),
+          ),
+        );
+
+    void applyTtl() {
+      final s = int.tryParse(t.ttlCtrl.text.trim());
+      // 0 / blank / negative → persist (EXPIRE key 0 would delete the key).
+      _guard(() => s == null || s <= 0 ? _client!.persist(t.key) : _client!.expire(t.key, s));
+    }
+
+    return SizedBox(
+      height: 36,
+      child: Row(children: [
+        // key group: type badge + read-only name + copy
+        Expanded(
+          child: Container(
+            decoration: BoxDecoration(border: border, borderRadius: BorderRadius.circular(6)),
+            clipBehavior: Clip.antiAlias,
+            child: Row(children: [
+              seg(_typeLabel(t.type)),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Tooltip(
+                  message: 'redimos does not support RENAME — key names are read-only here',
+                  child: Text(t.key,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+                ),
+              ),
+              IconButton(
+                tooltip: 'Copy key name',
+                visualDensity: VisualDensity.compact,
+                onPressed: () => _copy(t.key, 'Key name copied'),
+                icon: Icon(Icons.copy, size: 14, color: scheme.onSurfaceVariant),
+              ),
+            ]),
+          ),
         ),
-        child: Text((t.type).toUpperCase(),
-            style: TextStyle(fontWeight: FontWeight.w600, color: scheme.onPrimaryContainer)),
-      ),
-      const SizedBox(width: 10),
-      Expanded(
-        child: Tooltip(
-          message: 'redimos does not support RENAME — key names are read-only here',
-          child: Text(t.key, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+        const SizedBox(width: 10),
+        // TTL group: label + inline seconds input + reset + apply
+        Container(
+          decoration: BoxDecoration(border: border, borderRadius: BorderRadius.circular(6)),
+          clipBehavior: Clip.antiAlias,
+          child: Row(children: [
+            seg('TTL'),
+            SizedBox(
+              width: 76,
+              child: TextField(
+                controller: t.ttlCtrl,
+                keyboardType: TextInputType.number,
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontSize: 13),
+                decoration: const InputDecoration(
+                  isDense: true,
+                  border: InputBorder.none,
+                  contentPadding: EdgeInsets.symmetric(vertical: 9),
+                ),
+                onSubmitted: (_) => applyTtl(),
+              ),
+            ),
+            IconButton(
+              tooltip: 'Reset',
+              visualDensity: VisualDensity.compact,
+              onPressed: () => setState(() => t.ttlCtrl.text = '${t.ttl}'),
+              icon: Icon(Icons.history, size: 15, color: scheme.onSurfaceVariant),
+            ),
+            IconButton(
+              tooltip: 'Apply TTL (≤0 = persist)',
+              visualDensity: VisualDensity.compact,
+              onPressed: applyTtl,
+              icon: Icon(Icons.check, size: 16, color: scheme.primary),
+            ),
+          ]),
         ),
-      ),
-      IconButton(
-        tooltip: 'Copy key name',
-        onPressed: () => _copy(t.key, 'Key name copied'),
-        icon: const Icon(Icons.copy, size: 16),
-      ),
-      const SizedBox(width: 4),
-      OutlinedButton.icon(
-        onPressed: _editTtlDialog,
-        icon: const Icon(Icons.schedule, size: 16),
-        label: Text('TTL: $ttlText'),
-      ),
-      const SizedBox(width: 6),
-      IconButton(tooltip: 'Refresh', onPressed: _refreshTab, icon: const Icon(Icons.refresh, size: 18)),
-      IconButton(
-        tooltip: 'Delete key',
-        onPressed: () => _deleteKeys([t.key]),
-        icon: Icon(Icons.delete_outline, size: 18, color: scheme.error),
-      ),
-    ]);
+        const SizedBox(width: 10),
+        squareBtn(const Color(0xFFE25B5B), Icons.delete_outline, 'Delete key', () => _deleteKeys([t.key])),
+        const SizedBox(width: 6),
+        squareBtn(const Color(0xFF57B36A), Icons.refresh, 'Refresh', _refreshTab),
+        const SizedBox(width: 6),
+        squareBtn(const Color(0xFF4A8FE0), Icons.code, 'Copy as command',
+            () => _copy(_keyCommand(t), 'Command copied')),
+      ]),
+    );
   }
+
+  String _typeLabel(String type) => switch (type) {
+        'string' => 'String',
+        'hash' => 'Hash',
+        'list' => 'List',
+        'set' => 'Set',
+        'zset' => 'Zset',
+        _ => type,
+      };
 
   Widget _typeEditor(_KeyTab t) {
     switch (t.type) {
       case 'string':
         return _stringEditor(t);
       case 'hash':
-        return _collectionEditor(t, ['Field', 'Value'],
-            onAdd: () => _fieldValueDialog('Add field',
+        return _collectionEditor(t, ['Key', 'Value'],
+            onAdd: () => _fieldValueDialog('Add New Line',
                 onSubmit: (f, v) => _client!.hset(t.key, f, v)),
-            rowEdit: (r) => _fieldValueDialog('Edit field',
+            rowEdit: (r) => _fieldValueDialog('Edit Line',
                 field: r[0], value: r[1], fieldLocked: true,
                 onSubmit: (f, v) => _client!.hset(t.key, f, v)),
             rowDelete: (r) => _client!.hdel(t.key, r[0]));
       case 'list':
         return _collectionEditor(t, ['#', 'Value'], numbered: false,
             onAdd: () => _listAddDialog(t.key),
-            rowEdit: (r) => _singleValueDialog('Edit value', value: r[1],
+            rowEdit: (r) => _singleValueDialog('Edit Line', value: r[1],
                 onSubmit: (v) => _client!.lset(t.key, int.parse(r[0]), v)),
             rowDelete: (r) => _lremAt(t.key, int.parse(r[0])));
       case 'set':
         return _collectionEditor(t, ['Member'], singleColumn: true,
-            onAdd: () => _singleValueDialog('Add member', onSubmit: (v) => _client!.sadd(t.key, v)),
-            rowEdit: (r) => _singleValueDialog('Edit member', value: r[0],
+            onAdd: () => _singleValueDialog('Add New Line', onSubmit: (v) => _client!.sadd(t.key, v)),
+            rowEdit: (r) => _singleValueDialog('Edit Line', value: r[0],
                 onSubmit: (v) async {
                   await _client!.sadd(t.key, v);
                   if (v != r[0]) await _client!.srem(t.key, r[0]);
@@ -827,9 +965,9 @@ class _BrowserPageViewState extends State<BrowserPageView>
             rowDelete: (r) => _client!.srem(t.key, r[0]));
       case 'zset':
         return _collectionEditor(t, ['Score', 'Member'], scoreFirst: true,
-            onAdd: () => _scoreMemberDialog('Add member',
+            onAdd: () => _scoreMemberDialog('Add New Line',
                 onSubmit: (s, m) => _client!.zadd(t.key, s, m)),
-            rowEdit: (r) => _scoreMemberDialog('Edit score', score: r[1], member: r[0], memberLocked: true,
+            rowEdit: (r) => _scoreMemberDialog('Edit Line', score: r[1], member: r[0], memberLocked: true,
                 onSubmit: (s, m) => _client!.zadd(t.key, s, m)),
             rowDelete: (r) => _client!.zrem(t.key, r[0]));
       default:
@@ -864,13 +1002,13 @@ class _BrowserPageViewState extends State<BrowserPageView>
       }
       body = Container(
         width: double.infinity,
-        constraints: const BoxConstraints(minHeight: 140),
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
           border: Border.all(color: Theme.of(context).dividerColor),
           borderRadius: BorderRadius.circular(6),
         ),
-        child: child,
+        child: SingleChildScrollView(
+            child: Align(alignment: Alignment.topLeft, child: child)),
       );
     } else if (t.strFormat == 'Hex') {
       final hex = utf8
@@ -879,19 +1017,26 @@ class _BrowserPageViewState extends State<BrowserPageView>
           .join(' ');
       body = Container(
         width: double.infinity,
-        constraints: const BoxConstraints(minHeight: 140),
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
           border: Border.all(color: Theme.of(context).dividerColor),
           borderRadius: BorderRadius.circular(6),
         ),
-        child: SelectableText(hex, style: const TextStyle(fontFamily: 'monospace', fontSize: 13)),
+        child: SingleChildScrollView(
+          child: Align(
+            alignment: Alignment.topLeft,
+            child: SelectableText(hex, style: const TextStyle(fontFamily: 'monospace', fontSize: 13)),
+          ),
+        ),
       );
     } else {
+      // Fill the pane height like ARDM's textarea.
       body = TextField(
         controller: t.strCtrl,
-        minLines: 6,
-        maxLines: 20,
+        expands: true,
+        minLines: null,
+        maxLines: null,
+        textAlignVertical: TextAlignVertical.top,
         style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
         decoration: const InputDecoration(
           border: OutlineInputBorder(),
@@ -932,14 +1077,18 @@ class _BrowserPageViewState extends State<BrowserPageView>
           icon: const Icon(Icons.copy, size: 14),
           label: const Text('Copy'),
         ),
-        const Spacer(),
-        FilledButton(
+      ]),
+      const SizedBox(height: 8),
+      Expanded(child: body),
+      const SizedBox(height: 10),
+      // ARDM puts Save below the value area, bottom-right.
+      Align(
+        alignment: Alignment.centerRight,
+        child: FilledButton(
           onPressed: () => _guard(() => _client!.set(t.key, t.strCtrl.text)),
           child: const Text('Save'),
         ),
-      ]),
-      const SizedBox(height: 8),
-      body,
+      ),
     ]);
   }
 
@@ -955,30 +1104,47 @@ class _BrowserPageViewState extends State<BrowserPageView>
     bool singleColumn = false,
   }) {
     final f = t.filter.trim().toLowerCase();
-    final visible = f.isEmpty
+    var visible = f.isEmpty
         ? t.rows
         : t.rows.where((r) => r[0].toLowerCase().contains(f) || r[1].toLowerCase().contains(f)).toList();
     final scheme = Theme.of(context).colorScheme;
+
+    // Column-header sorting over the loaded rows (display column → row slot).
+    // zset: col0=score(r[1]) col1=member(r[0]); list (!numbered): the only data
+    // column is the value (r[1], r[0] is the absolute index); else r[0]/r[1].
+    String cellOf(List<String> r, int col) => scoreFirst
+        ? (col == 0 ? r[1] : r[0])
+        : (!numbered ? r[1] : (col == 0 ? r[0] : r[1]));
+    if (t.sortCol != null) {
+      int cmp(List<String> a, List<String> b) {
+        final x = cellOf(a, t.sortCol!), y = cellOf(b, t.sortCol!);
+        final nx = num.tryParse(x), ny = num.tryParse(y);
+        final c = (nx != null && ny != null) ? nx.compareTo(ny) : x.compareTo(y);
+        return t.sortAsc ? c : -c;
+      }
+      visible = [...visible]..sort(cmp);
+    }
+
+    // Data columns: hash Field/Value, list Value, set Member, zset Score/Member.
+    final dataCols = numbered ? columns : columns.sublist(1);
+    final idHeader = 'ID (Total: ${t.total})';
+
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Row(children: [
-        FilledButton.icon(onPressed: onAdd, icon: const Icon(Icons.add, size: 16), label: const Text('Add')),
-        const SizedBox(width: 12),
-        Text('Total: ${t.total}${t.rows.length < t.total ? '  (loaded ${t.rows.length})' : ''}',
-            style: TextStyle(color: Theme.of(context).hintColor)),
-        const Spacer(),
-        SizedBox(
-          width: 220,
-          child: TextField(
-            decoration: const InputDecoration(
-              isDense: true,
-              prefixIcon: Icon(Icons.filter_alt_outlined, size: 16),
-              hintText: 'Keyword search',
-              border: OutlineInputBorder(),
-              contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-            ),
-            onChanged: (v) => setState(() => t.filter = v),
+        FilledButton(onPressed: onAdd, child: const Text('Add New Line')),
+        // ARDM shows a DESC/ASC order toggle for zsets, DESC first.
+        if (scoreFirst) ...[
+          const SizedBox(width: 10),
+          SegmentedButton<bool>(
+            style: const ButtonStyle(visualDensity: VisualDensity.compact),
+            segments: const [
+              ButtonSegment(value: true, label: Text('DESC'), icon: Icon(Icons.arrow_drop_down)),
+              ButtonSegment(value: false, label: Text('ASC'), icon: Icon(Icons.arrow_drop_up)),
+            ],
+            selected: {t.desc},
+            onSelectionChanged: (s) => _setZsetOrder(t, s.first),
           ),
-        ),
+        ],
       ]),
       const SizedBox(height: 10),
       if (visible.isEmpty)
@@ -990,34 +1156,68 @@ class _BrowserPageViewState extends State<BrowserPageView>
           ),
         )
       else
-        SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: DataTable(
+        // Fill the pane width like ARDM (long values still get a horizontal
+        // scroll once the intrinsic width exceeds the viewport).
+        LayoutBuilder(
+          builder: (ctx, box) => SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: ConstrainedBox(
+              constraints: BoxConstraints(minWidth: box.maxWidth),
+              child: DataTable(
             columnSpacing: 28,
-            headingRowHeight: 38,
+            headingRowHeight: 44,
             dataRowMinHeight: 36,
             dataRowMaxHeight: 48,
+            sortColumnIndex: t.sortCol == null ? null : t.sortCol! + 1,
+            sortAscending: t.sortAsc,
             columns: [
-              if (numbered) const DataColumn(label: Text('#', style: TextStyle(fontWeight: FontWeight.w600))),
-              for (final c in columns) DataColumn(label: Text(c, style: const TextStyle(fontWeight: FontWeight.w600))),
-              const DataColumn(label: Text('')),
+              DataColumn(label: Text(idHeader, style: const TextStyle(fontWeight: FontWeight.w600))),
+              for (var j = 0; j < dataCols.length; j++)
+                DataColumn(
+                  label: Text(dataCols[j], style: const TextStyle(fontWeight: FontWeight.w600)),
+                  onSort: (_, asc) => setState(() {
+                    t.sortCol = j;
+                    t.sortAsc = asc;
+                  }),
+                ),
+              // ARDM puts the keyword filter in the table header, over the actions.
+              DataColumn(
+                label: SizedBox(
+                  width: 190,
+                  child: TextField(
+                    style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w400),
+                    decoration: const InputDecoration(
+                      isDense: true,
+                      hintText: 'Keyword Search',
+                      border: OutlineInputBorder(),
+                      contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                    ),
+                    onChanged: (v) => setState(() => t.filter = v),
+                  ),
+                ),
+              ),
             ],
             rows: [
               for (var i = 0; i < visible.length; i++)
-                _dataRow(i, visible[i],
+                _dataRow(t, i, visible[i],
                     scoreFirst: scoreFirst, numbered: numbered, singleColumn: singleColumn,
                     disabled: t.mutating, onEdit: rowEdit, onDelete: rowDelete),
             ],
+              ),
+            ),
           ),
         ),
       if (t.hasMore)
         Padding(
           padding: const EdgeInsets.only(top: 10),
-          child: OutlinedButton(
-            onPressed: t.loadingMore ? null : () => _loadMoreRows(t),
-            child: t.loadingMore
-                ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-                : Text('Load more  (${t.rows.length}/${t.total})'),
+          child: SizedBox(
+            width: double.infinity,
+            child: OutlinedButton(
+              onPressed: t.loadingMore ? null : () => _loadMoreRows(t),
+              child: t.loadingMore
+                  ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                  : Text('load more  (${t.rows.length}/${t.total})'),
+            ),
           ),
         ),
       if (f.isNotEmpty && t.hasMore)
@@ -1030,6 +1230,7 @@ class _BrowserPageViewState extends State<BrowserPageView>
   }
 
   DataRow _dataRow(
+    _KeyTab t,
     int i,
     List<String> row, {
     required bool scoreFirst,
@@ -1039,6 +1240,7 @@ class _BrowserPageViewState extends State<BrowserPageView>
     required void Function(List<String>) onEdit,
     required Future<void> Function(List<String>) onDelete,
   }) {
+    final scheme = Theme.of(context).colorScheme;
     // display cells: scoreFirst (zset) shows [score(b), member(a)]; set shows
     // [member]; else [a, b] — key off the type flag, NOT whether the value is
     // empty (an empty hash/list value must still emit its column, or the
@@ -1046,37 +1248,52 @@ class _BrowserPageViewState extends State<BrowserPageView>
     final cells = scoreFirst
         ? [row[1], row[0]]
         : (singleColumn ? [row[0]] : [row[0], row[1]]);
-    final copyText = row[1].isNotEmpty ? row[1] : row[0];
-    return DataRow(cells: [
-      if (numbered) DataCell(Text('${i + 1}', style: TextStyle(color: Theme.of(context).hintColor))),
-      for (final c in cells)
-        DataCell(ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 440),
-          child: Text(c, maxLines: 2, overflow: TextOverflow.ellipsis),
-        )),
-      DataCell(Row(mainAxisSize: MainAxisSize.min, children: [
-        IconButton(
-          tooltip: 'Copy',
-          visualDensity: VisualDensity.compact,
-          icon: const Icon(Icons.copy, size: 15),
-          onPressed: () => _copy(copyText),
-        ),
-        IconButton(
-          visualDensity: VisualDensity.compact,
-          tooltip: 'Edit',
-          icon: const Icon(Icons.edit, size: 15),
-          onPressed: disabled ? null : () => onEdit(row),
-        ),
-        IconButton(
-          visualDensity: VisualDensity.compact,
-          tooltip: 'Delete',
-          icon: Icon(Icons.delete_outline, size: 15, color: Theme.of(context).colorScheme.error),
-          // Disabled while a write is in flight so a second (positional) delete
-          // can't fire against a stale, shifted index.
-          onPressed: disabled ? null : () => _guard(() => onDelete(row)),
-        ),
-      ])),
-    ]);
+    // What the copy icon yields: the row's VALUE — hash value, list element,
+    // set member, and for zset the MEMBER (row[0]; row[1] is the score).
+    final copyText = scoreFirst || singleColumn ? row[0] : row[1];
+    // ARDM renders all four row action icons in the same accent blue.
+    final iconColor = disabled ? scheme.outline : const Color(0xFF4A8FE0);
+    return DataRow(
+      // zebra striping like ARDM
+      color: WidgetStatePropertyAll(
+          i.isOdd ? scheme.surfaceContainerHigh.withValues(alpha: 0.45) : null),
+      cells: [
+        if (numbered) DataCell(Text('${i + 1}', style: TextStyle(color: Theme.of(context).hintColor))),
+        for (final c in cells)
+          DataCell(ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 440),
+            child: Text(c, maxLines: 2, overflow: TextOverflow.ellipsis),
+          )),
+        DataCell(Row(mainAxisSize: MainAxisSize.min, children: [
+          IconButton(
+            tooltip: 'Copy',
+            visualDensity: VisualDensity.compact,
+            icon: Icon(Icons.description_outlined, size: 15, color: iconColor),
+            onPressed: () => _copy(copyText),
+          ),
+          IconButton(
+            visualDensity: VisualDensity.compact,
+            tooltip: 'Edit',
+            icon: Icon(Icons.edit, size: 15, color: iconColor),
+            onPressed: disabled ? null : () => onEdit(row),
+          ),
+          IconButton(
+            visualDensity: VisualDensity.compact,
+            tooltip: 'Delete',
+            icon: Icon(Icons.delete_outline, size: 15, color: iconColor),
+            // Disabled while a write is in flight so a second (positional) delete
+            // can't fire against a stale, shifted index.
+            onPressed: disabled ? null : () => _guard(() => onDelete(row)),
+          ),
+          IconButton(
+            visualDensity: VisualDensity.compact,
+            tooltip: 'Copy as command',
+            icon: Icon(Icons.code, size: 15, color: iconColor),
+            onPressed: () => _copy(_rowCommand(t, row), 'Command copied'),
+          ),
+        ])),
+      ],
+    );
   }
 
   // ---- deletes ----
@@ -1194,35 +1411,6 @@ class _BrowserPageViewState extends State<BrowserPageView>
   }
 
   // ---- dialogs ----
-
-  Future<void> _editTtlDialog() async {
-    final t = _activeTab;
-    if (t == null) return;
-    final ctrl = TextEditingController(text: t.ttl < 0 ? '' : '${t.ttl}');
-    await showDialog<void>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Set TTL'),
-        content: TextField(
-          controller: ctrl,
-          keyboardType: TextInputType.number,
-          decoration: const InputDecoration(labelText: 'Seconds (blank = persist)', border: OutlineInputBorder()),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-          FilledButton(
-            onPressed: () {
-              Navigator.pop(ctx);
-              final s = int.tryParse(ctrl.text.trim());
-              // 0 (or blank/negative) → persist; EXPIRE key 0 would delete the key.
-              _guard(() => s == null || s <= 0 ? _client!.persist(t.key) : _client!.expire(t.key, s));
-            },
-            child: const Text('Apply'),
-          ),
-        ],
-      ),
-    );
-  }
 
   Future<void> _newKeyDialog() async {
     final nameCtrl = TextEditingController();
@@ -1350,7 +1538,7 @@ class _BrowserPageViewState extends State<BrowserPageView>
       context: context,
       builder: (ctx) => StatefulBuilder(builder: (ctx, setD) {
         return AlertDialog(
-          title: const Text('Add value'),
+          title: const Text('Add New Line'),
           content: SizedBox(
             width: 380,
             child: Column(mainAxisSize: MainAxisSize.min, children: [
@@ -1419,15 +1607,34 @@ class _BrowserPageViewState extends State<BrowserPageView>
       builder: (ctx) => AlertDialog(
         title: Text(title),
         content: SizedBox(
-          width: 400,
+          width: 560,
           child: Column(mainAxisSize: MainAxisSize.min, children: [
             for (var i = 0; i < ctrls.length; i++) ...[
               if (i > 0) const SizedBox(height: 12),
+              // ARDM's Edit Line shows Size + Copy above the value area.
+              if (multiline != null && multiline[i])
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 6),
+                  child: ValueListenableBuilder<TextEditingValue>(
+                    valueListenable: ctrls[i],
+                    builder: (c2, v, _) => Row(children: [
+                      Text('Size: ${utf8.encode(v.text).length}B',
+                          style: TextStyle(fontSize: 12, color: Theme.of(c2).hintColor)),
+                      const SizedBox(width: 8),
+                      TextButton.icon(
+                        onPressed: () => _copy(v.text, 'Value copied'),
+                        icon: const Icon(Icons.copy, size: 13),
+                        label: const Text('Copy', style: TextStyle(fontSize: 12)),
+                      ),
+                      const Spacer(),
+                    ]),
+                  ),
+                ),
               TextField(
                 controller: ctrls[i],
                 enabled: locked == null || !locked[i],
-                minLines: (multiline != null && multiline[i]) ? 3 : 1,
-                maxLines: (multiline != null && multiline[i]) ? 12 : 1,
+                minLines: (multiline != null && multiline[i]) ? 8 : 1,
+                maxLines: (multiline != null && multiline[i]) ? 16 : 1,
                 decoration: InputDecoration(labelText: labels[i], border: const OutlineInputBorder()),
               ),
             ],
@@ -1440,7 +1647,7 @@ class _BrowserPageViewState extends State<BrowserPageView>
               Navigator.pop(ctx);
               _guard(() => onSubmit(ctrls.map((c) => c.text).toList()));
             },
-            child: const Text('Save'),
+            child: const Text('OK'),
           ),
         ],
       ),
