@@ -673,7 +673,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                 _tab(Icons.terminal, 'Logs'),
                 _tab(Icons.table_chart, 'Table'),
                 _tab(Icons.code, 'PartiQL'),
-                _tab(Icons.chevron_right, 'Cmd'),
+                _tab(Icons.chevron_right, 'Console'),
                 _tab(Icons.travel_explore, 'Browser'),
               ],
             ),
@@ -703,12 +703,14 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                   ddbMemHist: _ddbMemHist,
                   ddbDiskHist: _ddbDiskHist,
                 ),
-                // logs
+                // logs — plus the Local DynamoDB engine's log when this config
+                // is wired to it (mirrors the Monitor tab's two sections)
                 LogsView(
                   core: _core!,
                   configId: logsConfigId,
                   status: st,
                   embedded: true,
+                  ddb: _usesLocalDdb(c) ? _ddb : null,
                 ),
                 // table — read-only DynamoDB item browser (Explore-items style)
                 TablePageView(
@@ -1295,6 +1297,10 @@ class LogsView extends StatefulWidget {
   final bool expanded;
   final VoidCallback? onToggle;
   final bool embedded; // headerless body that fills the tab and scrolls
+  // Non-null when the selected config is wired to the managed Local DynamoDB:
+  // the embedded tab then shows a second LOCAL DYNAMODB log section (mirrors
+  // the Monitor tab's two-section layout).
+  final LocalDdbInfo? ddb;
   const LogsView({
     super.key,
     required this.core,
@@ -1303,6 +1309,7 @@ class LogsView extends StatefulWidget {
     this.expanded = true,
     this.onToggle,
     this.embedded = false,
+    this.ddb,
   });
   @override
   State<LogsView> createState() => _LogsViewState();
@@ -1310,8 +1317,13 @@ class LogsView extends StatefulWidget {
 
 class _LogsViewState extends State<LogsView> {
   List<String> _lines = [];
+  List<String> _ddbLines = [];
   Timer? _t;
   final _scroll = ScrollController();
+  final _ddbScroll = ScrollController();
+  // Per-section collapse state for the embedded two-section layout.
+  bool _redimosOpen = true;
+  bool _ddbOpen = true;
 
   @override
   void initState() {
@@ -1324,25 +1336,40 @@ class _LogsViewState extends State<LogsView> {
   void dispose() {
     _t?.cancel();
     _scroll.dispose();
+    _ddbScroll.dispose();
     super.dispose();
+  }
+
+  void _jumpToEnd(ScrollController sc) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (sc.hasClients) sc.jumpTo(sc.position.maxScrollExtent);
+    });
   }
 
   void _pull() {
     if (widget.configId == null) {
       if (_lines.isNotEmpty) setState(() => _lines = []);
-      return;
-    }
-    try {
-      final l = widget.core.logs(widget.configId!);
-      if (l.length != _lines.length) {
-        setState(() => _lines = l);
-        if (widget.embedded) {
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (_scroll.hasClients) _scroll.jumpTo(_scroll.position.maxScrollExtent);
-          });
+    } else {
+      try {
+        final l = widget.core.logs(widget.configId!);
+        if (l.length != _lines.length) {
+          setState(() => _lines = l);
+          if (widget.embedded) _jumpToEnd(_scroll);
         }
-      }
-    } catch (_) {}
+      } catch (_) {}
+    }
+    // The backing engine's own log, shown alongside when this config uses it.
+    if (widget.ddb != null) {
+      try {
+        final l = widget.core.ddbLogs();
+        if (l.length != _ddbLines.length) {
+          setState(() => _ddbLines = l);
+          if (widget.embedded) _jumpToEnd(_ddbScroll);
+        }
+      } catch (_) {}
+    } else if (_ddbLines.isNotEmpty) {
+      setState(() => _ddbLines = []);
+    }
   }
 
   @override
@@ -1357,24 +1384,99 @@ class _LogsViewState extends State<LogsView> {
         : _lines;
     if (widget.embedded) {
       final scheme = Theme.of(context).colorScheme;
-      return Container(
-        color: scheme.surfaceContainerLowest,
+      final ddb = widget.ddb;
+      final ddbTail = _ddbLines.length > maxTail
+          ? _ddbLines.sublist(_ddbLines.length - maxTail)
+          : _ddbLines;
+
+      Widget logCard(List<String> lines, ScrollController sc) => Container(
+            width: double.infinity,
+            decoration: BoxDecoration(
+              color: scheme.surfaceContainerLowest,
+              borderRadius: BorderRadius.circular(6),
+            ),
+            padding: const EdgeInsets.all(12),
+            alignment: Alignment.topLeft,
+            child: lines.isEmpty
+                ? Text('(no output)',
+                    style: TextStyle(color: Theme.of(context).textTheme.bodySmall?.color))
+                : SingleChildScrollView(
+                    controller: sc,
+                    child: SelectableText(
+                      lines.join('\n'),
+                      style: TextStyle(
+                          fontFamily: 'monospace',
+                          fontSize: 12,
+                          height: 1.4,
+                          color: scheme.onSurface),
+                    ),
+                  ),
+          );
+
+      // Section header in the Monitor tab's idiom (icon + letter-spaced label),
+      // with a collapse chevron (same icon as the sidebar dock's) on the left
+      // and the process's status line on the right. Tapping toggles the section.
+      Widget header(IconData icon, String label, String? line, bool open,
+              VoidCallback onToggle) =>
+          InkWell(
+            onTap: onToggle,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 2),
+              child: Row(children: [
+                Icon(open ? Icons.expand_more : Icons.expand_less,
+                    size: 18, color: Colors.grey),
+                const SizedBox(width: 6),
+                Icon(icon, size: 16, color: scheme.onSurfaceVariant),
+                const SizedBox(width: 8),
+                Text(label,
+                    style: TextStyle(
+                        fontSize: 12,
+                        letterSpacing: 1.3,
+                        fontWeight: FontWeight.w700,
+                        color: scheme.onSurfaceVariant)),
+                const Spacer(),
+                if (line != null)
+                  Text(line, style: const TextStyle(fontSize: 11, color: Colors.grey)),
+              ]),
+            ),
+          );
+
+      final stLine = st == null
+          ? null
+          : (st.isRunning
+              ? 'running · pid ${st.pid} · ${st.uptimeSec}s'
+              : st.status + (st.exitMsg.isNotEmpty ? ' · ${st.exitMsg}' : ''));
+      final ddbLine = ddb == null
+          ? null
+          : (ddb.status == 'running'
+              ? 'running · pid ${ddb.pid} · ${ddb.uptimeSec}s'
+              : ddb.status + (ddb.exitMsg.isNotEmpty ? ' · ${ddb.exitMsg}' : ''));
+
+      return Padding(
         padding: const EdgeInsets.all(12),
-        alignment: Alignment.topLeft,
-        child: tail.isEmpty
-            ? Text('(no output)',
-                style: TextStyle(color: Theme.of(context).textTheme.bodySmall?.color))
-            : SingleChildScrollView(
-                controller: _scroll,
-                child: SelectableText(
-                  tail.join('\n'),
-                  style: TextStyle(
-                      fontFamily: 'monospace',
-                      fontSize: 12,
-                      height: 1.4,
-                      color: scheme.onSurface),
-                ),
-              ),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          header(Icons.dns, 'REDIMOS', stLine, _redimosOpen, () {
+            setState(() => _redimosOpen = !_redimosOpen);
+            if (_redimosOpen) _jumpToEnd(_scroll);
+          }),
+          if (_redimosOpen) ...[
+            const SizedBox(height: 8),
+            Expanded(child: logCard(tail, _scroll)),
+          ],
+          // Second section when this config is wired to the managed Local
+          // DynamoDB — same split as the Monitor tab.
+          if (ddb != null) ...[
+            const SizedBox(height: 14),
+            header(Icons.storage, 'LOCAL DYNAMODB', ddbLine, _ddbOpen, () {
+              setState(() => _ddbOpen = !_ddbOpen);
+              if (_ddbOpen) _jumpToEnd(_ddbScroll);
+            }),
+            if (_ddbOpen) ...[
+              const SizedBox(height: 8),
+              Expanded(child: logCard(ddbTail, _ddbScroll)),
+            ],
+          ],
+        ]),
       );
     }
     return Column(
