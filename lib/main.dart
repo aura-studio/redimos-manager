@@ -801,7 +801,16 @@ class _ConfigEditorState extends State<ConfigEditor> {
   late final TextEditingController _pass;
   late String _version;
   late bool _multiDb;
+  // DynamoDB target mode: 'endpoint' = a DynamoDB-compatible URL (Local/LocalStack/
+  // custom), 'aws' = real AWS via region + credentials (endpoint cleared on save).
+  late String _ddbMode;
   final _tableFocus = FocusNode();
+
+  static String _ddbModeOf(RedimosConfig c) =>
+      c.endpoint.trim().isEmpty &&
+              (c.accessKeyId.isNotEmpty || c.secretKey.isNotEmpty || c.region.isNotEmpty)
+          ? 'aws'
+          : 'endpoint';
 
   // Applied by the table-mismatch dialog (from the parent). Both leave the form
   // dirty so the user reviews and Saves before starting.
@@ -861,6 +870,7 @@ class _ConfigEditorState extends State<ConfigEditor> {
     _autoCreate = c.autoCreateTable;
     _autoRestart = c.autoRestart;
     _runMode = c.runMode.isEmpty ? 'native' : c.runMode;
+    _ddbMode = _ddbModeOf(c);
     _extraFlags = c.extraFlags.map((f) => FlagKV(key: f.key, value: f.value)).toList();
     for (final f in _extraFlags) {
       _flagVals.add(TextEditingController(text: f.value));
@@ -910,6 +920,7 @@ class _ConfigEditorState extends State<ConfigEditor> {
       _autoCreate = c.autoCreateTable;
       _autoRestart = c.autoRestart;
       _runMode = c.runMode.isEmpty ? 'native' : c.runMode;
+      _ddbMode = _ddbModeOf(c);
       _extraFlags = c.extraFlags.map((f) => FlagKV(key: f.key, value: f.value)).toList();
       for (final f in _extraFlags) {
         _flagVals.add(TextEditingController(text: f.value));
@@ -939,7 +950,9 @@ class _ConfigEditorState extends State<ConfigEditor> {
     c.name = _name.text.trim();
     c.port = int.tryParse(_port.text.trim()) ?? 0;
     c.table = _table.text.trim();
-    c.endpoint = _endpoint.text.trim();
+    // AWS mode must clear the endpoint — a lingering URL would keep redimos
+    // pointed at the local/custom endpoint instead of real AWS.
+    c.endpoint = _ddbMode == 'aws' ? '' : _endpoint.text.trim();
     c.partitionID = _partitionID.text.trim();
     c.region = _region.text.trim();
     c.accessKeyId = _ak.text.trim();
@@ -985,11 +998,9 @@ class _ConfigEditorState extends State<ConfigEditor> {
       const gap = 12.0;
       final halfW = ((cw - gap) / 2).clamp(120.0, 4000.0).toDouble();
       final dropW = ((halfW - gap * 2) / 3).clamp(64.0, 2000.0).toDouble(); // ⅓ of a half
-      final endW = ((halfW - gap) / 2).clamp(90.0, 2000.0).toDouble();      // ½ of a half
       final leadW = halfW;         // AccessKeyID / SessionToken (left half)
       final redisAuthW = halfW;    // Auth (left half)
       final redimosTableW = halfW; // Table (left half)
-      final urlW = halfW;          // Url (left half)
       final credRightW = halfW;    // SecretAccessKey / Source (right half)
       return Column(
         children: [
@@ -1047,20 +1058,6 @@ class _ConfigEditorState extends State<ConfigEditor> {
             const SizedBox(width: 12),
             SizedBox(
               width: dropW,
-              child: DropdownButtonFormField<bool>(
-                initialValue: _autoCreate,
-                isDense: true,
-                decoration: _dd('AutoCreate'),
-                items: const [
-                  DropdownMenuItem(value: true, child: Text('On')),
-                  DropdownMenuItem(value: false, child: Text('Off')),
-                ],
-                onChanged: (v) => setState(() => _autoCreate = v ?? false),
-              ),
-            ),
-            const SizedBox(width: 12),
-            SizedBox(
-              width: dropW,
               child: DropdownButtonFormField<String>(
                 initialValue: _version,
                 isDense: true,
@@ -1070,6 +1067,20 @@ class _ConfigEditorState extends State<ConfigEditor> {
                   DropdownMenuItem(value: 'v2', child: Text('v2')),
                 ],
                 onChanged: (v) => setState(() => _version = v ?? 'v2'),
+              ),
+            ),
+            const SizedBox(width: 12),
+            SizedBox(
+              width: dropW,
+              child: DropdownButtonFormField<bool>(
+                initialValue: _autoCreate,
+                isDense: true,
+                decoration: _dd('AutoCreate'),
+                items: const [
+                  DropdownMenuItem(value: true, child: Text('On')),
+                  DropdownMenuItem(value: false, child: Text('Off')),
+                ],
+                onChanged: (v) => setState(() => _autoCreate = v ?? false),
               ),
             ),
             const SizedBox(width: 12),
@@ -1088,27 +1099,48 @@ class _ConfigEditorState extends State<ConfigEditor> {
             ),
           ]),
 
-          // ── 4 · DynamoDB (endpoint + credentials) ────────────
+          // ── 4 · DynamoDB (target: endpoint URL vs real AWS) ───
           _sectionHead('4', 'DynamoDB'),
-          Row(children: [
-            SizedBox(width: urlW, child: _field(_endpoint, 'Url')),
-            const SizedBox(width: 12),
-            SizedBox(width: endW, child: _field(_partitionID, 'PartitionID')),
-            const SizedBox(width: 12),
-            SizedBox(width: endW, child: _field(_region, 'SigningRegion')),
-          ]),
+          // Mini tab switch: Endpoint = a DynamoDB-compatible URL (Local /
+          // LocalStack / custom); AWS = real AWS via region + credentials.
+          Align(
+            alignment: Alignment.centerLeft,
+            child: SegmentedButton<String>(
+              style: const ButtonStyle(visualDensity: VisualDensity.compact),
+              segments: const [
+                ButtonSegment(
+                    value: 'endpoint',
+                    label: Text('Endpoint'),
+                    icon: Icon(Icons.link, size: 15)),
+                ButtonSegment(
+                    value: 'aws',
+                    label: Text('AWS'),
+                    icon: Icon(Icons.cloud_outlined, size: 15)),
+              ],
+              selected: {_ddbMode},
+              onSelectionChanged: (s) => setState(() => _ddbMode = s.first),
+            ),
+          ),
           const SizedBox(height: 14),
-          Row(children: [
-            SizedBox(width: leadW, child: _field(_ak, 'AccessKeyID')),
-            const SizedBox(width: 12),
-            SizedBox(width: credRightW, child: _field(_sk, 'SecretAccessKey', obscure: true)),
-          ]),
-          const SizedBox(height: 12),
-          Row(children: [
-            SizedBox(width: leadW, child: _field(_sessionToken, 'SessionToken', obscure: true)),
-            const SizedBox(width: 12),
-            SizedBox(width: credRightW, child: _field(_source, 'Source')),
-          ]),
+          if (_ddbMode == 'endpoint')
+            // Endpoint mode: the URL is all that's needed.
+            Row(children: [
+              SizedBox(width: cw, child: _field(_endpoint, 'Url')),
+            ])
+          else ...[
+            // AWS mode: region + the credential triple.
+            Row(children: [
+              SizedBox(width: leadW, child: _field(_region, 'Region')),
+              const SizedBox(width: 12),
+              SizedBox(width: credRightW, child: _field(_ak, 'AccessKeyID')),
+            ]),
+            const SizedBox(height: 12),
+            Row(children: [
+              SizedBox(width: leadW, child: _field(_sk, 'SecretAccessKey', obscure: true)),
+              const SizedBox(width: 12),
+              SizedBox(width: credRightW, child: _field(_sessionToken, 'SessionToken', obscure: true)),
+            ]),
+          ],
 
           // ── 5 · Extra flags ──────────────────────────────────
           _sectionHead('5', 'Extra flags'),
