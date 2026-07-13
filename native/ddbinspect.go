@@ -158,9 +158,17 @@ func ddbCall(cfg *Config, target string, payload map[string]any) (map[string]any
 		return nil, err
 	}
 	defer resp.Body.Close()
-	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	// Cap the body generously (a DynamoDB response is bounded — a Scan page is ≤1 MB
+	// of item data, a few MB on the wire once Binary keys are base64-encoded), but do
+	// NOT silently accept a truncated/undecodable body: on a 200 a discarded decode
+	// error would report bogus success — e.g. an oversized Scan page decoding to nil
+	// would look like an empty page and stop a purge mid-table with deleted:0.
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 32<<20))
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
 	var out map[string]any
-	_ = json.Unmarshal(raw, &out)
+	uerr := json.Unmarshal(raw, &out)
 	if resp.StatusCode != 200 {
 		msg := ""
 		if out != nil {
@@ -172,7 +180,31 @@ func ddbCall(cfg *Config, target string, payload map[string]any) (map[string]any
 		}
 		return out, fmt.Errorf("http %d: %s", resp.StatusCode, msg)
 	}
+	if uerr != nil {
+		return nil, fmt.Errorf("decode response (%d bytes): %w", len(raw), uerr)
+	}
 	return out, nil
+}
+
+// isAwsHost reports whether an endpoint URL targets a real AWS DynamoDB host, so
+// destructive table lifecycle can be walled off there too — not only for the empty
+// (default-resolver) endpoint — since the manager can't tell a test AWS account from
+// production even when an explicit regional/FIPS/VPC-interface URL is typed.
+func isAwsHost(endpoint string) bool {
+	u, err := url.Parse(strings.TrimSpace(endpoint))
+	if err != nil {
+		return false
+	}
+	h := strings.ToLower(u.Hostname())
+	return h == "amazonaws.com" || strings.HasSuffix(h, ".amazonaws.com")
+}
+
+// awsModeForEndpoint reports whether destructive table/item ops must be refused for
+// this endpoint: the empty endpoint (default AWS resolver) OR an explicit AWS host.
+// Local / LocalStack / custom endpoints return false.
+func awsModeForEndpoint(ep string) bool {
+	ep = strings.TrimSpace(ep)
+	return ep == "" || isAwsHost(ep)
 }
 
 // hashKeyType returns the DynamoDB attribute type ("S"/"B"/...) of a table's

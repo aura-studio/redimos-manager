@@ -3,10 +3,12 @@ package main
 // Local DynamoDB: a single managed local backend for configs to point at.
 // Three engines × two storage modes = five launch methods:
 //
-//   1. java      + memory    java -jar DynamoDBLocal.jar -inMemory
+//   1. java      + memory    java -jar DynamoDBLocal.jar -inMemory -sharedDb
 //   2. java      + persist   java -jar DynamoDBLocal.jar -dbPath <dir> -sharedDb
-//   3. docker    + memory    docker run amazon/dynamodb-local ... -inMemory
+//   3. docker    + memory    docker run amazon/dynamodb-local ... -inMemory -sharedDb
 //   4. docker    + persist   docker run -v <vol>:/data ... -dbPath /data -sharedDb
+// (-sharedDb is always on so all clients — the proxy and the Endpoint tab's
+//  ListTables — share one table namespace regardless of creds/region.)
 //   5. localstack             docker run -e SERVICES=dynamodb localstack/localstack
 //
 // The child reuses the generic instance machinery (logs pump, supervisor with
@@ -405,7 +407,12 @@ func (m *manager) buildDdbLaunch(cfg LocalDdbConfig) (bin string, args []string,
 		if cfg.Storage == "persist" {
 			a = append(a, "-dbPath", "/data", "-sharedDb")
 		} else {
-			a = append(a, "-inMemory")
+			// -sharedDb even in memory: WITHOUT it DynamoDB Local partitions tables by
+			// (accessKeyId, region), so a redimos proxy's auto-created table is invisible
+			// to the Endpoint tab's ListTables (which signs with different creds/region).
+			// One shared namespace makes it behave like real DynamoDB. (-inMemory only
+			// conflicts with -dbPath, not -sharedDb.)
+			a = append(a, "-inMemory", "-sharedDb")
 		}
 		return docker, a, ddbContainerName, nil
 
@@ -426,7 +433,7 @@ func (m *manager) buildDdbLaunch(cfg LocalDdbConfig) (bin string, args []string,
 			_ = os.MkdirAll(cfg.DataDir, 0o755)
 			a = append(a, "-dbPath", cfg.DataDir, "-sharedDb")
 		} else {
-			a = append(a, "-inMemory")
+			a = append(a, "-inMemory", "-sharedDb") // shared namespace — see the docker branch
 		}
 		return java, a, "", nil
 

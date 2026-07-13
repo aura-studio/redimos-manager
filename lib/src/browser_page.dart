@@ -60,6 +60,12 @@ class _KeyTab {
   }
 }
 
+// Denser theme for this data tab — smaller controls / tighter tap targets.
+ThemeData _denseTabTheme(BuildContext context) => Theme.of(context).copyWith(
+      visualDensity: const VisualDensity(horizontal: -2, vertical: -2),
+      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+    );
+
 class BrowserPageView extends StatefulWidget {
   final RedimosConfig config;
   final bool running;
@@ -514,11 +520,14 @@ class _BrowserPageViewState extends State<BrowserPageView>
         ]),
       );
     }
-    return Row(children: [
-      SizedBox(width: 320, child: _leftPanel()),
-      const VerticalDivider(width: 1),
-      Expanded(child: _rightPanel()),
-    ]);
+    return Theme(
+      data: _denseTabTheme(context),
+      child: Row(children: [
+        SizedBox(width: 288, child: _leftPanel()),
+        const VerticalDivider(width: 1),
+        Expanded(child: _rightPanel()),
+      ]),
+    );
   }
 
   // ---- left panel ----
@@ -832,7 +841,7 @@ class _BrowserPageViewState extends State<BrowserPageView>
     // lays out without an outer scroll; collection tables keep the scroll.
     if (t.type == 'string') {
       return Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(11),
         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           _keyHeader(t),
           const SizedBox(height: 16),
@@ -841,7 +850,7 @@ class _BrowserPageViewState extends State<BrowserPageView>
       );
     }
     return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(11),
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         _keyHeader(t),
         const SizedBox(height: 16),
@@ -903,7 +912,7 @@ class _BrowserPageViewState extends State<BrowserPageView>
                   message: 'redimos does not support RENAME — key names are read-only here',
                   child: Text(t.key,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+                      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
                 ),
               ),
               IconButton(
@@ -1184,7 +1193,7 @@ class _BrowserPageViewState extends State<BrowserPageView>
       const SizedBox(height: 10),
       if (visible.isEmpty)
         Padding(
-          padding: const EdgeInsets.all(20),
+          padding: const EdgeInsets.all(12),
           child: Center(
             child: Text(t.filter.isEmpty ? 'Empty' : 'No match in loaded rows',
                 style: const TextStyle(color: Colors.grey)),
@@ -1199,10 +1208,10 @@ class _BrowserPageViewState extends State<BrowserPageView>
             child: ConstrainedBox(
               constraints: BoxConstraints(minWidth: box.maxWidth),
               child: DataTable(
-            columnSpacing: 28,
-            headingRowHeight: 44,
-            dataRowMinHeight: 36,
-            dataRowMaxHeight: 48,
+            columnSpacing: 16,
+            headingRowHeight: 30,
+            dataRowMinHeight: 28,
+            dataRowMaxHeight: 34,
             sortColumnIndex: t.sortCol == null ? null : t.sortCol! + 1,
             sortAscending: t.sortAsc,
             columns: [

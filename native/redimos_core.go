@@ -1419,6 +1419,52 @@ func rm_table_recreate(in *C.char) *C.char {
 	return cjson(mgr.recreateTable(C.GoString(in)))
 }
 
+// rm_table_inspect returns the blast-radius info (allowed?, endpoint, loopback,
+// item count/age, bound running dependents) for a Purge/Delete confirmation on an
+// arbitrary table. Input: {config, table}. Read-only.
+//
+//export rm_table_inspect
+func rm_table_inspect(in *C.char) *C.char {
+	var req struct {
+		Config Config `json:"config"`
+		Table  string `json:"table"`
+	}
+	if err := json.Unmarshal([]byte(C.GoString(in)), &req); err != nil {
+		return errJSON(err)
+	}
+	return cjson(mgr.inspectTable(&req.Config, req.Table))
+}
+
+// rm_table_purge deletes every item from a table (schema kept). Input: {config,
+// table}. Endpoint-gated.
+//
+//export rm_table_purge
+func rm_table_purge(in *C.char) *C.char {
+	var req struct {
+		Config Config `json:"config"`
+		Table  string `json:"table"`
+	}
+	if err := json.Unmarshal([]byte(C.GoString(in)), &req); err != nil {
+		return errJSON(err)
+	}
+	return cjson(mgr.purgeItems(&req.Config, req.Table))
+}
+
+// rm_table_delete drops a table entirely (no recreate), stopping any bound running
+// configs and leaving them stopped. Input: {config, table}. Endpoint-gated.
+//
+//export rm_table_delete
+func rm_table_delete(in *C.char) *C.char {
+	var req struct {
+		Config Config `json:"config"`
+		Table  string `json:"table"`
+	}
+	if err := json.Unmarshal([]byte(C.GoString(in)), &req); err != nil {
+		return errJSON(err)
+	}
+	return cjson(mgr.deleteTableOnly(&req.Config, req.Table))
+}
+
 //export rm_status
 func rm_status() *C.char { return cjson(mgr.statuses()) }
 

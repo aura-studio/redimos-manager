@@ -15,6 +15,12 @@ import 'package:flutter/services.dart';
 import 'models.dart';
 import 'native.dart';
 
+// Denser theme for this data tab — smaller controls / tighter tap targets.
+ThemeData _denseTabTheme(BuildContext context) => Theme.of(context).copyWith(
+      visualDensity: const VisualDensity(horizontal: -2, vertical: -2),
+      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+    );
+
 class PartiqlPageView extends StatefulWidget {
   final NativeCore core;
   final RedimosConfig config;
@@ -159,11 +165,13 @@ class _PartiqlPageViewState extends State<PartiqlPageView>
       return _center(Icons.code, 'No table configured',
           'Set a Table name in Configure to run PartiQL statements.');
     }
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
+    return Theme(
+      data: _denseTabTheme(context),
+      child: SingleChildScrollView(
+      padding: const EdgeInsets.all(12),
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         _headerRow(),
-        const SizedBox(height: 12),
+        const SizedBox(height: 10),
         _editorCard(),
         if (_error != null || _res != null) ...[
           const SizedBox(height: 12),
@@ -178,7 +186,7 @@ class _PartiqlPageViewState extends State<PartiqlPageView>
           _jsonView ? _jsonCard() : _resultsCard(),
         ],
       ]),
-    );
+    ));
   }
 
   Widget _headerRow() {
@@ -186,7 +194,7 @@ class _PartiqlPageViewState extends State<PartiqlPageView>
     return Row(children: [
       Icon(Icons.code, size: 18, color: scheme.primary),
       const SizedBox(width: 8),
-      const Text('PartiQL editor', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
+      const Text('PartiQL editor', style: TextStyle(fontSize: 15.5, fontWeight: FontWeight.w600)),
       const SizedBox(width: 12),
       Text(widget.config.table,
           style: TextStyle(fontSize: 13, color: Theme.of(context).hintColor)),
@@ -213,7 +221,7 @@ class _PartiqlPageViewState extends State<PartiqlPageView>
         elevation: 0,
         color: Theme.of(context).colorScheme.surfaceContainerHigh,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        child: Padding(padding: const EdgeInsets.all(16), child: child),
+        child: Padding(padding: const EdgeInsets.all(11), child: child),
       );
 
   Widget _editorCard() => _card(
@@ -227,7 +235,7 @@ class _PartiqlPageViewState extends State<PartiqlPageView>
               hintText: 'SELECT * FROM "${widget.config.table}" — type a PartiQL statement',
               hintStyle: const TextStyle(fontFamily: 'monospace', fontSize: 13),
               border: const OutlineInputBorder(),
-              contentPadding: const EdgeInsets.all(12),
+              contentPadding: const EdgeInsets.all(10),
             ),
             onChanged: (_) => setState(() {}), // Run enable/disable
           ),
@@ -340,7 +348,7 @@ class _PartiqlPageViewState extends State<PartiqlPageView>
         Row(children: [
           Expanded(
             child: Text('Items returned (${r.returned})',
-                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+                style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600)),
           ),
           IconButton(
             tooltip: 'Preferences',
@@ -356,7 +364,7 @@ class _PartiqlPageViewState extends State<PartiqlPageView>
             prefixIcon: const Icon(Icons.search, size: 18),
             hintText: 'Find items',
             border: const OutlineInputBorder(),
-            contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
             suffixIcon: _find.text.isEmpty
                 ? null
                 : IconButton(
@@ -402,10 +410,10 @@ class _PartiqlPageViewState extends State<PartiqlPageView>
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             child: DataTable(
-              columnSpacing: 28,
-              headingRowHeight: 40,
-              dataRowMinHeight: 38,
-              dataRowMaxHeight: 44,
+              columnSpacing: 16,
+              headingRowHeight: 30,
+              dataRowMinHeight: 28,
+              dataRowMaxHeight: 34,
               columns: [
                 for (final c in cols)
                   DataColumn(
@@ -463,7 +471,7 @@ class _PartiqlPageViewState extends State<PartiqlPageView>
         Row(children: [
           Expanded(
             child: Text('Items returned (${_res!.returned})',
-                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+                style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600)),
           ),
           IconButton(
             tooltip: 'Copy',

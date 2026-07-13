@@ -141,9 +141,9 @@ func (m *manager) tablePrecheck(id string) map[string]any {
 	}
 	m.mu.Unlock()
 
-	// endpoint empty == AWS mode == table lifecycle not allowed.
+	// AWS target (empty endpoint OR an explicit AWS host) == table lifecycle not allowed.
 	endpoint := strings.TrimSpace(c.Endpoint)
-	if endpoint == "" {
+	if awsModeForEndpoint(endpoint) {
 		return map[string]any{
 			"ok":      true,
 			"allowed": false,
@@ -211,10 +211,11 @@ func (m *manager) recreateTable(id string) map[string]any {
 	}
 	m.mu.Unlock()
 
-	// L2 backstop: never touch a table lifecycle without an explicit endpoint.
-	if strings.TrimSpace(c.Endpoint) == "" {
+	// L2 backstop: never touch a table lifecycle on a real AWS target (empty endpoint
+	// or an explicit AWS host).
+	if awsModeForEndpoint(c.Endpoint) {
 		return map[string]any{"ok": false,
-			"error": "destructive table ops require an explicit endpoint (AWS mode is read-only for table lifecycle)"}
+			"error": "destructive table ops require an explicit non-AWS endpoint (real AWS is read-only for table lifecycle)"}
 	}
 
 	// Snapshot which dependents are running now — these get stopped and restored.
@@ -301,4 +302,111 @@ func (m *manager) recreateTable(id string) map[string]any {
 	return map[string]any{"ok": true, "recreated": true,
 		"steps":   append(steps, "restart done; table not yet ACTIVE (still creating)"),
 		"warning": "table not ACTIVE yet — check the Logs tab"}
+}
+
+// depsForTable returns every saved config on cfg's (normalised) endpoint bound to
+// the given table name (which may differ from cfg.Table — the Endpoint tab acts on
+// an arbitrary row). Caller must NOT hold m.mu.
+func (m *manager) depsForTable(cfg *Config, table string) []map[string]any {
+	key := normEndpoint(cfg.Endpoint) + "\x00" + table
+	out := []map[string]any{}
+	m.mu.Lock()
+	for i := range m.st.Configs {
+		c := &m.st.Configs[i]
+		if normEndpoint(c.Endpoint)+"\x00"+c.Table == key {
+			out = append(out, map[string]any{"id": c.ID, "name": c.Name})
+		}
+	}
+	m.mu.Unlock()
+	for _, d := range out {
+		d["running"] = m.isActive(d["id"].(string))
+	}
+	return out
+}
+
+// inspectTable gathers the blast-radius info (endpoint, loopback, item count, age,
+// bound running dependents) that the Purge / Delete confirmation dialogs need for an
+// arbitrary table on cfg's endpoint. Read-only. Endpoint-gated: AWS mode returns
+// allowed:false so the UI can hard-disable the destructive actions.
+func (m *manager) inspectTable(cfg *Config, table string) map[string]any {
+	endpoint := strings.TrimSpace(cfg.Endpoint)
+	if strings.TrimSpace(table) == "" {
+		return map[string]any{"ok": false, "error": "no table specified"}
+	}
+	if awsModeForEndpoint(endpoint) {
+		return map[string]any{"ok": true, "allowed": false,
+			"reason": "AWS mode — table lifecycle operations are disabled for real AWS targets.",
+			"table":  table}
+	}
+	deps := m.depsForTable(cfg, table)
+	itemCount, ageDays := -1, -1
+	if desc, err := ddbCall(cfg, "DescribeTable", map[string]any{"TableName": table}); err == nil {
+		if tbl, ok := desc["Table"].(map[string]any); ok {
+			if n, ok := tbl["ItemCount"].(float64); ok {
+				itemCount = int(n)
+			}
+			if cd, ok := tbl["CreationDateTime"].(float64); ok && cd > 0 {
+				ageDays = int(time.Since(time.Unix(int64(cd), 0)).Hours() / 24)
+			}
+		}
+	}
+	return map[string]any{"ok": true, "allowed": true, "table": table,
+		"endpoint": endpoint, "loopback": endpointIsLoopback(endpoint),
+		"itemCount": itemCount, "ageDays": ageDays, "dependents": deps}
+}
+
+// deleteTableOnly drops `table` on cfg's endpoint WITHOUT recreating it. Any running
+// config bound to it is stopped first and left stopped with auto-start cleared — a
+// running proxy against a deleted table serves errors and would crash-loop on the
+// next restart. Endpoint-gated (L2 backstop). Transactional: if the delete fails the
+// stopped configs are restarted to restore prior state.
+func (m *manager) deleteTableOnly(cfg *Config, table string) map[string]any {
+	if awsModeForEndpoint(cfg.Endpoint) {
+		return map[string]any{"ok": false,
+			"error": "destructive table ops require an explicit non-AWS endpoint (real AWS is read-only for table lifecycle)"}
+	}
+	if strings.TrimSpace(table) == "" {
+		return map[string]any{"ok": false, "error": "no table specified"}
+	}
+
+	deps := m.depsForTable(cfg, table)
+	var wasRunning []string
+	for _, d := range deps {
+		if d["running"] == true {
+			wasRunning = append(wasRunning, d["id"].(string))
+		}
+	}
+	steps := []string{}
+	for _, did := range wasRunning {
+		_ = m.stop(did) // don't touch auto-start yet — restore cleanly if the delete fails
+	}
+	if len(wasRunning) > 0 {
+		steps = append(steps, fmt.Sprintf("stopped %d config(s)", len(wasRunning)))
+	}
+	time.Sleep(500 * time.Millisecond) // let ports/handles free before the delete
+
+	dc := *cfg
+	dc.Table = table // delete the row's table via cfg's endpoint/creds (cfg.Table may differ)
+	if err := deleteTableAndWait(&dc); err != nil {
+		for _, did := range wasRunning { // restore prior state on failure (auto-start untouched)
+			_ = m.start(did)
+		}
+		return map[string]any{"ok": false,
+			"error": "delete table failed: " + err.Error(),
+			"steps": append(steps, "restored stopped configs")}
+	}
+	// Delete succeeded: clear auto-start for EVERY bound config — not just the ones
+	// that were running. A bound-but-inactive config left with auto-start would
+	// relaunch into the now-missing table on the next boot (or, with AutoCreate on,
+	// silently recreate it and undo this delete).
+	for _, d := range deps {
+		if id, ok := d["id"].(string); ok {
+			m.rememberConfigAutoStart(id, false)
+		}
+	}
+	steps = append(steps, "deleted table "+table)
+	if len(wasRunning) > 0 {
+		steps = append(steps, fmt.Sprintf("left %d config(s) stopped", len(wasRunning)))
+	}
+	return map[string]any{"ok": true, "steps": steps}
 }

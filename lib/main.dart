@@ -189,6 +189,11 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   List<RedimosConfig> _configs = [];
   Map<String, InstanceStatus> _status = {};
   String? _selectedId;
+  // Endpoint tab "Browse" on a table that isn't the config's own points the Table
+  // tab at it (read-only). Keyed by config id so switching configs drops the override
+  // without a manual clear at every selection site.
+  String? _browseTable;
+  String? _browseForId;
   // Configs that were running at the last AppBar "Stop all". While non-empty and
   // nothing is running, the Stop-all button becomes a green "restore" triangle.
   List<String> _stopAllSnapshot = [];
@@ -763,14 +768,36 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                   core: _core!,
                   config: c,
                   running: st?.isRunning ?? false,
-                  onOpenTable: (_) => _tabs.animateTo(4), // jump to the Table tab
+                  onOpenTable: (name) {
+                    // Point the Table tab at this row's table (read-only when it
+                    // isn't the config's own), then jump to it. Browsing the config's
+                    // OWN table must NOT set the override — otherwise it lingers and,
+                    // if the config's table is later renamed, spuriously re-enters
+                    // read-only foreign-browse of the old name.
+                    setState(() {
+                      if (name == c.table) {
+                        _browseTable = null;
+                        _browseForId = null;
+                      } else {
+                        _browseTable = name;
+                        _browseForId = c.id;
+                      }
+                    });
+                    _tabs.animateTo(4);
+                  },
                 ),
-                // table — read-only DynamoDB item browser (Explore-items style)
+                // table — DynamoDB item browser (Explore-items style). tableOverride
+                // lets the Endpoint tab browse any table on the same endpoint.
                 TablePageView(
                   key: ValueKey('table-${c.id}'),
                   core: _core!,
                   config: c,
                   running: st?.isRunning ?? false,
+                  tableOverride: _browseForId == c.id ? _browseTable : null,
+                  onExitBrowse: () => setState(() {
+                    _browseTable = null;
+                    _browseForId = null;
+                  }),
                 ),
                 // partiql — statement editor (console PartiQL-editor style)
                 PartiqlPageView(

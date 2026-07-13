@@ -68,12 +68,31 @@ class _FilterRow {
   bool get needsTwo => op == 'between';
 }
 
+// A denser theme for the data tabs (Table / PartiQL / Browser): smaller controls
+// and tighter tap targets so these dense query/browse surfaces read as compact and
+// refined instead of chunky. Applied at each tab's root.
+ThemeData _denseTabTheme(BuildContext context) => Theme.of(context).copyWith(
+      visualDensity: const VisualDensity(horizontal: -2, vertical: -2),
+      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+    );
+
 class TablePageView extends StatefulWidget {
   final NativeCore core;
   final RedimosConfig config;
   final bool running;
+  // When set (via the Endpoint tab's Browse on a table that isn't this config's),
+  // the tab browses THAT table on the same endpoint instead of config.table, and
+  // is read-only (item writes stay tied to the config's own table). onExitBrowse
+  // returns to the config's table.
+  final String? tableOverride;
+  final VoidCallback? onExitBrowse;
   const TablePageView(
-      {super.key, required this.core, required this.config, required this.running});
+      {super.key,
+      required this.core,
+      required this.config,
+      required this.running,
+      this.tableOverride,
+      this.onExitBrowse});
 
   @override
   State<TablePageView> createState() => _TablePageViewState();
@@ -127,7 +146,8 @@ class _TablePageViewState extends State<TablePageView>
     super.didUpdateWidget(old);
     if (old.config.id != widget.config.id ||
         old.config.table != widget.config.table ||
-        old.config.endpoint != widget.config.endpoint) {
+        old.config.endpoint != widget.config.endpoint ||
+        old.tableOverride != widget.tableOverride) {
       _resetAll();
       _loadMeta();
     }
@@ -176,7 +196,7 @@ class _TablePageViewState extends State<TablePageView>
       _metaError = null;
     });
     await Future.delayed(const Duration(milliseconds: 16));
-    final m = widget.core.tableMeta(widget.config);
+    final m = widget.core.tableMeta(_effCfg);
     if (!mounted) return;
     setState(() {
       _loadingMeta = false;
@@ -197,7 +217,7 @@ class _TablePageViewState extends State<TablePageView>
   Map<String, dynamic> _buildReq(Map<String, dynamic>? startKey) {
     final t = _target;
     return {
-      'config': widget.config.toJson(),
+      'config': _effCfg.toJson(),
       'op': _isQuery ? 'query' : 'scan',
       'index': (t == null || t.isTable) ? '' : t.name,
       'projection': _projection,
@@ -287,8 +307,10 @@ class _TablePageViewState extends State<TablePageView>
       return _center(Icons.table_chart_outlined, 'No table configured',
           'Set a Table name in Configure to browse it.');
     }
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
+    return Theme(
+      data: _denseTabTheme(context),
+      child: SingleChildScrollView(
+      padding: const EdgeInsets.all(12),
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         // The header (AWS lock chip / Endpoint danger controls) always renders,
         // even when the table can't be read — so the safety state stays legible
@@ -323,22 +345,53 @@ class _TablePageViewState extends State<TablePageView>
           ],
         ],
       ]),
-    );
+    ));
   }
 
   // AWS mode (no endpoint) is read-only for item writes: the manager can't tell a
   // test account from production. Destructive table lifecycle (recreate / provision
   // / delete) lives entirely in the Endpoint tab, which is endpoint-mode only — this
   // page is just the item browser/editor (AWS-console "Explore items" parity).
-  bool get _awsMode => widget.config.endpoint.trim().isEmpty;
+  bool get _awsMode {
+    final ep = widget.config.endpoint.trim();
+    if (ep.isEmpty) return true; // default AWS resolver
+    final host = (Uri.tryParse(ep)?.host ?? '').toLowerCase();
+    return host == 'amazonaws.com' || host.endsWith('.amazonaws.com'); // explicit AWS host
+  }
+
+  // Browse-any-table: the Endpoint tab can point this tab at another table on the
+  // same endpoint. Then we browse that table (read-only) via a config copy with the
+  // table swapped; the endpoint/creds stay the config's own.
+  bool get _foreignBrowse =>
+      widget.tableOverride != null && widget.tableOverride != widget.config.table;
+  String get _effTable => widget.tableOverride ?? widget.config.table;
+  RedimosConfig get _effCfg =>
+      _foreignBrowse ? (widget.config.copy()..table = widget.tableOverride!) : widget.config;
 
   Widget _headerRow() {
     final scheme = Theme.of(context).colorScheme;
     return Row(children: [
       Icon(Icons.table_chart, size: 18, color: scheme.primary),
       const SizedBox(width: 8),
-      Text(widget.config.table,
-          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
+      Flexible(
+        child: Text(_effTable,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontSize: 15.5, fontWeight: FontWeight.w600)),
+      ),
+      if (_foreignBrowse) ...[
+        const SizedBox(width: 10),
+        const Chip(
+          visualDensity: VisualDensity.compact,
+          avatar: Icon(Icons.visibility_outlined, size: 15),
+          label: Text('Browsing · read-only'),
+        ),
+        const SizedBox(width: 8),
+        TextButton.icon(
+          onPressed: () => widget.onExitBrowse?.call(),
+          icon: const Icon(Icons.arrow_back, size: 16),
+          label: Text('Back to ${widget.config.table}'),
+        ),
+      ],
       const Spacer(),
       OutlinedButton.icon(
         onPressed: _running ? null : () => _meta == null ? _loadMeta() : _run(),
@@ -361,7 +414,7 @@ class _TablePageViewState extends State<TablePageView>
         elevation: 0,
         color: Theme.of(context).colorScheme.surfaceContainerHigh,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        child: Padding(padding: const EdgeInsets.all(16), child: child),
+        child: Padding(padding: const EdgeInsets.all(11), child: child),
       );
 
   Widget _queryCard() => _card(
@@ -372,7 +425,7 @@ class _TablePageViewState extends State<TablePageView>
               Icon(_panelOpen ? Icons.expand_more : Icons.chevron_right, size: 20),
               const SizedBox(width: 4),
               const Text('Scan or query items',
-                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+                  style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600)),
             ]),
           ),
           if (!_panelOpen)
@@ -382,7 +435,7 @@ class _TablePageViewState extends State<TablePageView>
                   style: TextStyle(fontSize: 12, color: Theme.of(context).hintColor)),
             ),
           if (_panelOpen) ...[
-            const SizedBox(height: 14),
+            const SizedBox(height: 10),
             SegmentedButton<bool>(
               segments: const [
                 ButtonSegment(value: false, label: Text('Scan'), icon: Icon(Icons.list, size: 16)),
@@ -391,17 +444,17 @@ class _TablePageViewState extends State<TablePageView>
               selected: {_isQuery},
               onSelectionChanged: (s) => setState(() => _isQuery = s.first),
             ),
-            const SizedBox(height: 14),
+            const SizedBox(height: 9),
             _targetDropdown(),
             const SizedBox(height: 12),
             _projectionRow(),
             if (_isQuery) ...[
-              const SizedBox(height: 16),
+              const SizedBox(height: 10),
               _queryKeys(),
             ],
             const SizedBox(height: 8),
             _filtersSection(),
-            const SizedBox(height: 16),
+            const SizedBox(height: 10),
             Row(children: [
               FilledButton(
                 onPressed: _running ? null : () => _run(),
@@ -565,11 +618,11 @@ class _TablePageViewState extends State<TablePageView>
 
   Widget _filtersSection() {
     final scheme = Theme.of(context).colorScheme;
-    final label = TextStyle(fontSize: 12, color: scheme.onSurfaceVariant);
+    final label = TextStyle(fontSize: 11, color: scheme.onSurfaceVariant);
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       const Divider(height: 24),
       Text.rich(TextSpan(children: [
-        const TextSpan(text: 'Filters', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+        const TextSpan(text: 'Filters', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
         TextSpan(
             text: '  – optional',
             style: TextStyle(fontStyle: FontStyle.italic, fontSize: 13, color: scheme.onSurfaceVariant)),
@@ -697,10 +750,11 @@ class _TablePageViewState extends State<TablePageView>
     return const SizedBox.shrink(); // success shows no banner (AWS parity)
   }
 
-  // Whether item-level writes are offered here (endpoint mode, base table only).
+  // Whether item-level writes are offered here (endpoint mode, base table only,
+  // and not while browsing another table read-only via the Endpoint tab).
   bool get _canWriteItems {
     final t = _target;
-    return !_awsMode && (t == null || t.isTable);
+    return !_awsMode && !_foreignBrowse && (t == null || t.isTable);
   }
 
   Widget _resultsCard() {
@@ -718,7 +772,7 @@ class _TablePageViewState extends State<TablePageView>
           Expanded(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text('Items returned (${p.returned})',
-                  style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+                  style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600)),
               Text(
                 '${t != null && !t.isTable ? 'Index ${t.name} · ' : ''}'
                 'Items scanned: ${p.scanned} · ${(p.efficiency * 100).round()}% · ${p.timeMs} ms'
@@ -802,10 +856,10 @@ class _TablePageViewState extends State<TablePageView>
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             child: DataTable(
-              columnSpacing: 28,
-              headingRowHeight: 40,
-              dataRowMinHeight: 38,
-              dataRowMaxHeight: 44,
+              columnSpacing: 16,
+              headingRowHeight: 30,
+              dataRowMinHeight: 28,
+              dataRowMaxHeight: 34,
               onSelectAll: (v) => setState(() {
                 _checked.clear();
                 if (v == true) _checked.addAll(rows.map((r) => r.ddbJson));
@@ -1209,13 +1263,13 @@ class _TablePageViewState extends State<TablePageView>
         isDense: true,
         hintText: hint,
         border: const OutlineInputBorder(),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
       );
 
   Widget _labeled(String label, Widget field) =>
       Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(label, style: TextStyle(fontSize: 12, color: Theme.of(context).hintColor)),
-        const SizedBox(height: 4),
+        Text(label, style: TextStyle(fontSize: 11, color: Theme.of(context).hintColor)),
+        const SizedBox(height: 3),
         field,
       ]);
 

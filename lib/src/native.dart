@@ -302,6 +302,41 @@ class NativeCore {
     return jsonDecode(raw) as Map<String, dynamic>;
   }
 
+  /// Blast-radius info for a Purge/Delete confirmation on an arbitrary table
+  /// (allowed?, endpoint, loopback, item count/age, bound running dependents).
+  /// Read-only. Never throws — returns {ok:false, error} on failure.
+  Future<Map<String, dynamic>> tableInspect(RedimosConfig c, String table) async {
+    final libPath = _resolveLibraryPath();
+    final arg = jsonEncode({'config': c.toJson(), 'table': table});
+    try {
+      final raw = await Isolate.run(
+          () => _callCoreSymbol(libPath, 'rm_table_inspect', arg));
+      return jsonDecode(raw) as Map<String, dynamic>;
+    } catch (e) {
+      return {'ok': false, 'error': e.toString()};
+    }
+  }
+
+  /// Delete every item from a table (schema kept). Runs on a background isolate
+  /// (a Scan + BatchWriteItem loop can take a while on a large table).
+  Future<Map<String, dynamic>> tablePurge(RedimosConfig c, String table) async {
+    final libPath = _resolveLibraryPath();
+    final arg = jsonEncode({'config': c.toJson(), 'table': table});
+    final raw =
+        await Isolate.run(() => _callCoreSymbol(libPath, 'rm_table_purge', arg));
+    return jsonDecode(raw) as Map<String, dynamic>;
+  }
+
+  /// Drop a table entirely (no recreate); stops bound running configs. Runs on a
+  /// background isolate (the native call sleeps/polls for the delete to settle).
+  Future<Map<String, dynamic>> tableDelete(RedimosConfig c, String table) async {
+    final libPath = _resolveLibraryPath();
+    final arg = jsonEncode({'config': c.toJson(), 'table': table});
+    final raw =
+        await Isolate.run(() => _callCoreSymbol(libPath, 'rm_table_delete', arg));
+    return jsonDecode(raw) as Map<String, dynamic>;
+  }
+
   void _expectOk(String raw) {
     final r = jsonDecode(raw) as Map<String, dynamic>;
     if (r['ok'] != true) throw StateError(r['error']?.toString() ?? 'call failed');
