@@ -27,6 +27,10 @@ class _KeyTab {
   int ttl = -1;
   bool loading = true;
   String? error;
+  // The connection generation this tab's data was loaded under. If the proxy
+  // drops and reconnects (e.g. a table recreate under us), this goes stale vs
+  // _connGen and any write is refused so we can't resurrect deleted values.
+  int loadGen = -1;
 
   // string
   final TextEditingController strCtrl = TextEditingController();
@@ -159,6 +163,20 @@ class _BrowserPageViewState extends State<BrowserPageView>
         _connecting = false;
       });
       _reload();
+      // A reconnect after a drop (the proxy was restarted, e.g. a table recreate)
+      // leaves open key-tabs and any multi-select holding pre-restart data. Refresh
+      // the tabs against the live server and drop stale selection so nothing stale
+      // can be written or batch-deleted. No-op on a first / config-switch connect:
+      // _tabs is empty and selection is already cleared by _resetAll.
+      for (final t in List<_KeyTab>.of(_tabs)) {
+        _loadTab(t);
+      }
+      if (_selectMode || _checked.isNotEmpty) {
+        setState(() {
+          _selectMode = false;
+          _checked.clear();
+        });
+      }
     } catch (e) {
       if (gen != _connGen || !mounted) {
         c.close();
@@ -283,6 +301,7 @@ class _BrowserPageViewState extends State<BrowserPageView>
       t.rows.clear();
       t.cursor = '0';
       t.hasMore = false;
+      t.loadGen = _connGen; // data is fresh as of the current connection
     });
     try {
       final type = await c.type(t.key);
@@ -308,6 +327,10 @@ class _BrowserPageViewState extends State<BrowserPageView>
         case 'zset':
           t.total = await c.zcard(t.key);
           await _zsetPage(t);
+        default: // 'none' — the key no longer exists (e.g. removed by a recreate)
+          if (!_tabs.contains(t)) return;
+          t.strCtrl.text = '';
+          t.error = 'Key no longer exists (it may have been deleted).';
       }
       // Tab may have been closed (and its controller disposed) mid-load.
       if (!mounted || !_tabs.contains(t)) return;
@@ -405,6 +428,18 @@ class _BrowserPageViewState extends State<BrowserPageView>
   /// race (a positional list delete would target a stale, shifted index).
   Future<void> _guard(Future<void> Function() op) async {
     final t = _activeTab;
+    // If the proxy dropped and reconnected under us (a table recreate restarts it),
+    // this tab's cached values predate the current connection. Refuse the write —
+    // issuing it would resurrect stale data into a possibly-emptied table — and
+    // reload the tab against the live server instead.
+    if (t != null && t.loadGen != _connGen) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('Reconnected to the server — reloaded this key. Try again.')));
+      }
+      if (_tabs.contains(t)) await _loadTab(t);
+      return;
+    }
     if (t != null && mounted) setState(() => t.mutating = true);
     try {
       await op();
@@ -465,7 +500,7 @@ class _BrowserPageViewState extends State<BrowserPageView>
   Widget build(BuildContext context) {
     super.build(context);
     if (!widget.running) {
-      return _center(Icons.storage, 'Instance not running',
+      return _center(Icons.play_circle_outline, 'Instance not running',
           'Start this config to browse its keyspace.');
     }
     if (_client == null) {

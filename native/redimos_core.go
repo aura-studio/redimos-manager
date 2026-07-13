@@ -92,6 +92,9 @@ type store struct {
 	// clean quit AND a crash). See autoStartAll.
 	AutoStart    []string `json:"autoStart"`    // config IDs to relaunch on boot
 	DdbAutoStart bool     `json:"ddbAutoStart"` // relaunch Local DynamoDB on boot
+	// The configs that were running when the user last hit the AppBar "Stop all",
+	// persisted so the green "restore" affordance survives an app restart.
+	StopAllSnapshot []string `json:"stopAllSnapshot"`
 }
 
 // ---------------------------------------------------------------------------
@@ -104,8 +107,8 @@ const maxLogLines = 800
 // guard so an always-crashing instance stops retrying instead of spinning forever.
 var restartBackoff = []time.Duration{time.Second, 2 * time.Second, 5 * time.Second, 10 * time.Second, 30 * time.Second}
 
-const crashLoopMax = 5                   // give up after this many failures ...
-const crashLoopWindow = 30 * time.Second // ... within this window
+const crashLoopMax = 5                  // give up after this many consecutive early exits
+const healthyUptime = 20 * time.Second // a child that stays up this long counts as "started OK"
 
 type instance struct {
 	mu         sync.Mutex
@@ -117,7 +120,12 @@ type instance struct {
 	started time.Time
 	status  string // "running" | "restarting" | "stopped" | "error" | "failed"
 	exitMsg string
-	logs    []string
+	// failReason is the real cause of a startup/early failure (redimos's own fatal
+	// line, e.g. the backend startup check), set only on an errored early exit and
+	// cleared on a clean/healthy exit or a successful start — so benign lifecycle
+	// lines ("shutdown complete", "connection closed") are never shown as the cause.
+	failReason string
+	logs       []string
 
 	// Launch spec captured at user-start so the supervisor can re-run it verbatim.
 	bin        string
@@ -137,8 +145,7 @@ type instance struct {
 	autoRestart  bool
 	intendedStop bool        // set by user Stop; suppresses auto-restart
 	restarts     int         // successful supervised restarts so far
-	failCount    int         // failures within the current crash-loop window
-	failWindow   time.Time   // start of the current crash-loop window
+	failCount    int         // consecutive early exits (never stayed up healthyUptime)
 	restartTimer *time.Timer // pending backoff timer; cancelled by terminate()
 
 	// Monitoring (filled by the sampler loop).
@@ -194,6 +201,11 @@ type manager struct {
 	sessionID string   // one id per manager run; tags children (env / -D / docker label)
 	lockFile  *os.File // machine-wide single-instance lock, held for the process lifetime
 	lockErr   error    // non-nil when another instance already holds the lock
+
+	// One-shot "-auto-create-table" injection consumed by the next buildLaunch of
+	// that config id — used by table recreate so redimos rebuilds the table on
+	// restart regardless of the config's persisted AutoCreate setting. Guarded by mu.
+	forceAC map[string]bool
 }
 
 // mgr is populated by init() (a var initializer would reject the newManager →
@@ -379,9 +391,16 @@ func (cfg *Config) argsFor(endpoint, metricsDefault string) []string {
 	a := []string{"-addr", fmt.Sprintf(":%d", cfg.Port), "-table", cfg.Table}
 	if strings.TrimSpace(endpoint) != "" {
 		a = append(a, "-endpoint-url", endpoint)
-	}
-	if strings.TrimSpace(cfg.PartitionID) != "" {
-		a = append(a, "-endpoint-partition-id", cfg.PartitionID)
+		// The partition id only makes sense alongside a custom endpoint URL (a local
+		// DynamoDB). In AWS mode (empty endpoint) it must NOT be passed: redimos
+		// installs its custom endpoint resolver when EITHER -endpoint-url OR
+		// -endpoint-partition-id is set (assembly.go: endpointSet), and a resolver
+		// that returns an empty URL shadows the SDK's default AWS endpoint — every
+		// request then goes to "" ("unsupported protocol scheme"), the startup
+		// backend check fails, and the process crash-loops. So gate it on endpoint.
+		if strings.TrimSpace(cfg.PartitionID) != "" {
+			a = append(a, "-endpoint-partition-id", cfg.PartitionID)
+		}
 	}
 	if strings.TrimSpace(cfg.Region) != "" {
 		a = append(a, "-region", cfg.Region)
@@ -506,13 +525,32 @@ func (cfg *Config) awsCredEnv() []string {
 // name when it runs in docker mode ("" for a plain process). Caller holds m.mu.
 func (m *manager) buildLaunch(cfg *Config) (bin string, args []string, env []string, container string, err error) {
 	if cfg.RunMode == "docker" {
-		return m.buildDockerLaunch(cfg)
+		bin, args, env, container, err = m.buildDockerLaunch(cfg)
+		if err == nil {
+			args = m.applyForceAutoCreate(cfg, args)
+		}
+		return bin, args, env, container, err
 	}
 	bin, err = m.binaryFor(cfg)
 	if err != nil {
 		return "", nil, nil, "", err
 	}
-	return bin, cfg.args(), append(os.Environ(), cfg.awsCredEnv()...), "", nil
+	args = m.applyForceAutoCreate(cfg, cfg.args())
+	return bin, args, append(os.Environ(), cfg.awsCredEnv()...), "", nil
+}
+
+// applyForceAutoCreate consumes a one-shot auto-create injection (set by a table
+// recreate) for EITHER run mode, appending -auto-create-table unless the config
+// already carries it. Caller holds m.mu. Docker mode previously dropped this,
+// which left a recreated table uncreated for an AutoCreate=Off docker config.
+func (m *manager) applyForceAutoCreate(cfg *Config, args []string) []string {
+	if m.forceAC[cfg.ID] {
+		delete(m.forceAC, cfg.ID)
+		if !cfg.AutoCreateTable {
+			args = append(args, "-auto-create-table")
+		}
+	}
+	return args
 }
 
 // dockerLocalhostRewrite rewrites a localhost endpoint to host.docker.internal
@@ -613,6 +651,7 @@ func (in *instance) spawn() error {
 	in.pid = cmd.Process.Pid
 	in.started = time.Now()
 	in.status = "running"
+	in.failReason = "" // fresh start — drop any prior early-failure cause
 	in.adopted = false // a (re)spawned child is fully ours again
 	in.prevBusy = 0
 	in.prevDisk = 0
@@ -646,14 +685,61 @@ func (in *instance) spawn() error {
 
 	go pump(stdout, in)
 	go pump(stderr, in)
-	go func() { in.superviseExit(cmd.Wait()) }()
+	go func(started time.Time) { in.superviseExit(cmd.Wait(), time.Since(started)) }(in.started)
 	return nil
+}
+
+// crashGuard decides the supervisor's response to a child exit. ranFor is how long
+// the child stayed up before exiting; failCount is the running count of consecutive
+// EARLY exits so far (before this one). A child that stayed up past healthyUptime
+// started successfully, so a later exit is a fresh incident — the counter resets and
+// it is restarted. A child that exits sooner never got healthy (e.g. a failing
+// startup backend check that crash-loops), so it is counted, and after crashLoopMax
+// such early exits the supervisor gives up.
+//
+// This is uptime-based on purpose. A wall-clock "N exits within a 30s window" guard
+// is defeated by the growing backoff: once the delay reaches 10s/30s the exits spread
+// out until no five ever land inside one window, so the child would restart forever.
+func crashGuard(failCount int, ranFor time.Duration) (count int, giveUp bool, backoff time.Duration) {
+	if ranFor >= healthyUptime {
+		failCount = 0
+	}
+	failCount++
+	if failCount >= crashLoopMax {
+		return failCount, true, 0
+	}
+	return failCount, false, restartBackoff[min(failCount-1, len(restartBackoff)-1)]
+}
+
+// lastRedimosError returns redimos's startup-failure cause from the log tail, or ""
+// if none is present. It matches ONLY redimos's distinct fatal marker
+// ("redimos: cannot start: …" — its sole log.Fatalf, emitted just before it exits
+// without ever serving), NOT the bare "redimos: " prefix that every benign lifecycle
+// line ("connection … closed", "metrics …", "shutdown …") also carries. So when the
+// real cause is not a redimos-logged startup fatal (an external kill, or a spawn that
+// never ran), this returns "" and the caller falls back to the OS error instead of a
+// misleading benign line.
+func lastRedimosError(logs []string) string {
+	const marker = "redimos: cannot start: "
+	for i := len(logs) - 1; i >= 0; i-- {
+		// Stop at the current incarnation's launch line ("$ <bin> …", written by
+		// spawn) — the log buffer is NOT cleared across restarts, so without this a
+		// stale marker from a prior failed start would be wrongly attributed to an
+		// exit (e.g. an external kill) of a later incarnation that started cleanly.
+		if strings.HasPrefix(logs[i], "$ ") {
+			break
+		}
+		if idx := strings.Index(logs[i], marker); idx >= 0 {
+			return strings.TrimSpace(logs[i][idx+len(marker):])
+		}
+	}
+	return ""
 }
 
 // superviseExit runs when the child exits. On an unexpected exit it restarts the
 // child (with backoff) when auto-restart is on, unless the user asked it to stop
 // or it has crash-looped past the guard.
-func (in *instance) superviseExit(werr error) {
+func (in *instance) superviseExit(werr error, ranFor time.Duration) {
 	in.mu.Lock()
 	if in.intendedStop {
 		in.status = "stopped"
@@ -672,6 +758,21 @@ func (in *instance) superviseExit(werr error) {
 		in.exitMsg = ""
 		in.appendLogLocked("[process exited cleanly]")
 	}
+	// Record the cause only for an errored EARLY exit — a genuine startup failure,
+	// where redimos exits via log.Fatalf before it ever serves, so its own fatal
+	// line is reliably the last "redimos:" line. A clean exit (werr==nil) or a
+	// healthy-then-exited child (ranFor>=healthyUptime) is NOT a startup failure, so
+	// clear the cause: otherwise benign lifecycle lines ("shutdown complete",
+	// "connection … closed") would be surfaced as a misleading failure reason.
+	if werr != nil && ranFor < healthyUptime {
+		if r := lastRedimosError(in.logs); r != "" {
+			in.failReason = r
+		} else {
+			in.failReason = werr.Error()
+		}
+	} else {
+		in.failReason = ""
+	}
 	if !in.autoRestart {
 		in.status = "error"
 		role, pid, cont := in.role, in.pid, in.container
@@ -681,15 +782,16 @@ func (in *instance) superviseExit(werr error) {
 		releaseInstance(in)
 		return
 	}
-	now := time.Now()
-	if in.failWindow.IsZero() || now.Sub(in.failWindow) > crashLoopWindow {
-		in.failCount = 0
-		in.failWindow = now
-	}
-	in.failCount++
-	if in.failCount >= crashLoopMax {
+	var giveUp bool
+	var backoff time.Duration
+	in.failCount, giveUp, backoff = crashGuard(in.failCount, ranFor)
+	if giveUp {
 		in.status = "failed"
-		in.appendLogLocked(fmt.Sprintf("[supervisor: gave up after %d exits within %s]", in.failCount, crashLoopWindow))
+		// Surface WHY: the recorded startup-failure cause beats a bare "exit status 1".
+		if in.failReason != "" {
+			in.exitMsg = in.failReason
+		}
+		in.appendLogLocked(fmt.Sprintf("[supervisor: gave up after %d early exits (never stayed up %s)]", in.failCount, healthyUptime))
 		role, pid, cont := in.role, in.pid, in.container
 		in.mu.Unlock()
 		regRemove(role)
@@ -697,7 +799,6 @@ func (in *instance) superviseExit(werr error) {
 		releaseInstance(in)
 		return
 	}
-	backoff := restartBackoff[min(in.failCount-1, len(restartBackoff)-1)]
 	in.status = "restarting"
 	in.appendLogLocked(fmt.Sprintf("[supervisor: restart #%d in %s]", in.restarts+1, backoff))
 	in.restartTimer = time.AfterFunc(backoff, in.doRestart) // terminate() cancels this
@@ -717,7 +818,10 @@ func (in *instance) doRestart() {
 	in.restarts++
 	in.mu.Unlock()
 	if err := in.spawn(); err != nil {
-		in.superviseExit(err) // Start() itself failed — treat as another exit.
+		// Start() itself failed — the child never ran, so ranFor is 0 (an early
+		// failure that must count toward the crash-loop guard; using the stale
+		// in.started would keep resetting the counter and loop forever).
+		in.superviseExit(err, 0)
 	}
 }
 
@@ -909,6 +1013,64 @@ func (m *manager) stopAll() {
 	wg.Wait()
 }
 
+// stopAllSnapshot is the AppBar "Stop all" action (distinct from the plain
+// stopAll used by app quit). It records which configs are currently running —
+// persisted, so the green "restore" affordance survives an app restart — and
+// clears the boot-restore set, because an explicit Stop all should stay stopped
+// on the next launch (a clean quit, by contrast, keeps AutoStart and resumes).
+// Local DynamoDB is left alone. Returns the snapshot (ids that were running).
+func (m *manager) stopAllSnapshot() []string {
+	m.mu.Lock()
+	snap := make([]string, 0, len(m.running))
+	for i := range m.st.Configs { // stable config order
+		id := m.st.Configs[i].ID
+		in, ok := m.running[id]
+		if !ok {
+			continue
+		}
+		in.mu.Lock()
+		active := in.status == "running" || in.status == "restarting" || in.status == "preparing"
+		in.mu.Unlock()
+		if active {
+			snap = append(snap, id)
+		}
+	}
+	m.st.StopAllSnapshot = append([]string{}, snap...)
+	m.st.AutoStart = nil // explicit Stop all: don't auto-resume configs next boot
+	_ = m.persist()
+	ins := make([]*instance, 0, len(m.running))
+	for _, in := range m.running {
+		ins = append(ins, in)
+	}
+	m.mu.Unlock()
+
+	var wg sync.WaitGroup
+	for _, in := range ins {
+		wg.Add(1)
+		go func(in *instance) { defer wg.Done(); in.terminate() }(in)
+	}
+	wg.Wait()
+	return snap
+}
+
+// restoreAll is the AppBar green "restore" action: start every config recorded by
+// the last Stop all, then clear the snapshot. start() re-adds each to the boot
+// set. Returns the ids actually (re)started (already-running ones are skipped).
+func (m *manager) restoreAll() []string {
+	m.mu.Lock()
+	ids := append([]string{}, m.st.StopAllSnapshot...)
+	m.st.StopAllSnapshot = nil
+	_ = m.persist()
+	m.mu.Unlock()
+	started := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if err := m.start(id); err == nil {
+			started = append(started, id)
+		}
+	}
+	return started
+}
+
 type statusRow struct {
 	ID          string  `json:"id"`
 	Status      string  `json:"status"` // running|restarting|stopped|error|failed
@@ -948,6 +1110,13 @@ func (m *manager) statuses() []statusRow {
 			r.PID = in.pid
 			r.Port = in.port
 			r.ExitMsg = in.exitMsg
+			// For a non-running instance, prefer the recorded startup-failure cause
+			// (a failing backend check, bad creds, missing table, …) over a bare
+			// "exit status 1", so the UI shows why it isn't up. failReason is empty
+			// for clean/healthy exits, so benign lifecycle lines never leak here.
+			if in.status != "running" && in.failReason != "" {
+				r.ExitMsg = in.failReason
+			}
 			r.Restarts = in.restarts
 			r.AutoRestart = in.autoRestart
 			r.Adopted = in.adopted
@@ -1017,9 +1186,10 @@ func rm_load() *C.char {
 	mgr.mu.Lock()
 	defer mgr.mu.Unlock()
 	out := map[string]any{
-		"configs":  mgr.st.Configs,
-		"settings": mgr.st.Settings,
-		"localDdb": mgr.st.LocalDdb,
+		"configs":         mgr.st.Configs,
+		"settings":        mgr.st.Settings,
+		"localDdb":        mgr.st.LocalDdb,
+		"stopAllSnapshot": mgr.st.StopAllSnapshot,
 	}
 	if mgr.lockErr != nil {
 		out["lockError"] = mgr.lockErr.Error()
@@ -1114,8 +1284,15 @@ func rm_stop(in *C.char) *C.char {
 
 //export rm_stop_all
 func rm_stop_all() *C.char {
-	mgr.stopAll()
-	return okJSON(nil)
+	return cjson(map[string]any{"ok": true, "snapshot": mgr.stopAllSnapshot()})
+}
+
+// rm_restore_all starts every config recorded by the last Stop all (the green
+// "restore" affordance) and clears the snapshot.
+//
+//export rm_restore_all
+func rm_restore_all() *C.char {
+	return cjson(map[string]any{"ok": true, "started": mgr.restoreAll()})
 }
 
 // rm_inspect_table peeks at the DynamoDB table a config points at and reports
@@ -1166,6 +1343,80 @@ func rm_partiql(in *C.char) *C.char {
 		return errJSON(err)
 	}
 	return cjson(partiqlExec(&req))
+}
+
+// rm_ep_list_tables lists every table on a config's endpoint (the "Endpoint"
+// tab), with DescribeTable metadata, a redimos-kind inference, the configs that
+// use each table, and ghost rows for bound-but-missing tables. Read-only. Input
+// is a full config JSON (endpoint + creds).
+//
+//export rm_ep_list_tables
+func rm_ep_list_tables(in *C.char) *C.char {
+	var cfg Config
+	if err := json.Unmarshal([]byte(C.GoString(in)), &cfg); err != nil {
+		return errJSON(err)
+	}
+	return cjson(mgr.endpointTables(&cfg))
+}
+
+// rm_table_get_item fetches one full item by key. Input: {config, key}. Read-only.
+//
+//export rm_table_get_item
+func rm_table_get_item(in *C.char) *C.char {
+	var req struct {
+		Config Config         `json:"config"`
+		Key    map[string]any `json:"key"`
+	}
+	if err := json.Unmarshal([]byte(C.GoString(in)), &req); err != nil {
+		return errJSON(err)
+	}
+	return cjson(mgr.getItem(&req.Config, req.Key))
+}
+
+// rm_table_put_item writes (creates/replaces) one item on a config's table.
+// Input: {config, item} where item is DynamoDB-JSON. Endpoint-gated.
+//
+//export rm_table_put_item
+func rm_table_put_item(in *C.char) *C.char {
+	var req struct {
+		Config Config         `json:"config"`
+		Item   map[string]any `json:"item"`
+	}
+	if err := json.Unmarshal([]byte(C.GoString(in)), &req); err != nil {
+		return errJSON(err)
+	}
+	return cjson(mgr.putItem(&req.Config, req.Item))
+}
+
+// rm_table_delete_item removes one item by its key. Input: {config, key}. Endpoint-gated.
+//
+//export rm_table_delete_item
+func rm_table_delete_item(in *C.char) *C.char {
+	var req struct {
+		Config Config         `json:"config"`
+		Key    map[string]any `json:"key"`
+	}
+	if err := json.Unmarshal([]byte(C.GoString(in)), &req); err != nil {
+		return errJSON(err)
+	}
+	return cjson(mgr.deleteItem(&req.Config, req.Key))
+}
+
+// rm_table_precheck returns the info the recreate confirmation dialog needs
+// (allowed?, endpoint, loopback, item count/age, running dependents).
+// Input is the config id string.
+//
+//export rm_table_precheck
+func rm_table_precheck(in *C.char) *C.char {
+	return cjson(mgr.tablePrecheck(C.GoString(in)))
+}
+
+// rm_table_recreate stops dependents, deletes the table, and restarts them with
+// a one-shot auto-create so redimos rebuilds it. Input is the config id.
+//
+//export rm_table_recreate
+func rm_table_recreate(in *C.char) *C.char {
+	return cjson(mgr.recreateTable(C.GoString(in)))
 }
 
 //export rm_status

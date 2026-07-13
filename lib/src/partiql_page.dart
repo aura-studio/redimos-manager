@@ -152,7 +152,7 @@ class _PartiqlPageViewState extends State<PartiqlPageView>
   Widget build(BuildContext context) {
     super.build(context);
     if (!widget.running) {
-      return _center(Icons.code, 'Instance not running',
+      return _center(Icons.play_circle_outline, 'Instance not running',
           'Start this config to run PartiQL statements against its table.');
     }
     if (widget.config.table.trim().isEmpty) {

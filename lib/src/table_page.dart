@@ -1,15 +1,19 @@
-// The "Table" tab — a read-only DynamoDB item browser modelled on the AWS
-// console's Explore-items page, adapted for redimos tables (Binary keys shown as
-// readable UTF-8 text, base64 on hover). Scan / Query with projection, sort-key
-// conditions, filters, DynamoDB-style pagination, column preferences, and a
-// per-item DynamoDB-JSON dialog. All data comes from the Go core's
-// rm_table_meta / rm_table_page over FFI.
+// The "Table" tab — a DynamoDB item browser modelled on the AWS console's
+// Explore-items page, adapted for redimos tables (Binary keys shown as readable
+// UTF-8 text, base64 on hover). Scan / Query with projection, sort-key
+// conditions, filters, DynamoDB-style pagination, column preferences, checkbox
+// multi-select with an Actions menu (Edit / Duplicate / Delete items / Export to
+// CSV), pk links into a full-page Form|JSON item editor, and a Create item
+// button. Item writes are endpoint-mode only and carry the redimos raw-write
+// confirmation. All data comes from the Go core over FFI.
 
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'item_editor.dart';
 import 'models.dart';
 import 'native.dart';
 
@@ -105,6 +109,9 @@ class _TablePageViewState extends State<TablePageView>
   final _hiddenCols = <String>{};
   String? _sortCol;
   bool _sortAsc = true;
+  // Multi-select (AWS Explore items checkboxes), keyed by the row's DynamoDB
+  // JSON — stable for the lifetime of one loaded page.
+  final _checked = <String>{};
 
   @override
   bool get wantKeepAlive => true;
@@ -221,6 +228,7 @@ class _TablePageViewState extends State<TablePageView>
     setState(() {
       _running = true;
       _pageError = null;
+      _checked.clear(); // selection is per loaded page
     });
     await Future.delayed(const Duration(milliseconds: 16));
     final page = widget.core.tablePage(_buildReq(_stack[_pageIdx]));
@@ -272,51 +280,272 @@ class _TablePageViewState extends State<TablePageView>
   Widget build(BuildContext context) {
     super.build(context);
     if (!widget.running) {
-      return _center(Icons.table_chart_outlined, 'Instance not running',
+      return _center(Icons.play_circle_outline, 'Instance not running',
           'Start this config to browse its DynamoDB table.');
     }
     if (widget.config.table.trim().isEmpty) {
       return _center(Icons.table_chart_outlined, 'No table configured',
           'Set a Table name in Configure to browse it.');
     }
-    if (_loadingMeta && _meta == null) {
-      return const Center(child: CircularProgressIndicator());
-    }
-    if (_metaError != null) {
-      return _center(Icons.error_outline, 'Cannot read table', _metaError!,
-          action: FilledButton.icon(
-              onPressed: _loadMeta, icon: const Icon(Icons.refresh), label: const Text('Retry')));
-    }
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        // The header (AWS lock chip / Endpoint danger controls) always renders,
+        // even when the table can't be read — so the safety state stays legible
+        // and a table that was just deleted can still be recreated from here.
         _headerRow(),
         const SizedBox(height: 12),
-        _queryCard(),
-        if (_page != null || _pageError != null) ...[
-          const SizedBox(height: 12),
-          _banner(),
-        ],
-        if (_page != null) ...[
-          const SizedBox(height: 12),
-          _resultsCard(),
+        if (_loadingMeta && _meta == null)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 60),
+            child: Center(child: CircularProgressIndicator()),
+          )
+        else if (_metaError != null)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 48),
+            child: _center(Icons.error_outline, 'Cannot read table', _metaError!,
+                action: FilledButton.icon(
+                    onPressed: _loadMeta,
+                    icon: const Icon(Icons.refresh),
+                    label: const Text('Retry'))),
+          )
+        else ...[
+          _queryCard(),
+          // AWS console shows no success banner — scan stats live in the results
+          // card's caption; only errors get a banner.
+          if (_pageError != null) ...[
+            const SizedBox(height: 12),
+            _banner(),
+          ],
+          if (_page != null) ...[
+            const SizedBox(height: 12),
+            _resultsCard(),
+          ],
         ],
       ]),
     );
   }
 
-  Widget _headerRow() => Row(children: [
-        Icon(Icons.table_chart, size: 18, color: Theme.of(context).colorScheme.primary),
-        const SizedBox(width: 8),
-        Text(widget.config.table,
-            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
-        const Spacer(),
+  // Table lifecycle is only offered against an explicit endpoint. In AWS mode
+  // (no endpoint) the manager can't tell a test account from production, so the
+  // destructive controls don't exist here at all — only a disabled lock chip.
+  bool get _awsMode => widget.config.endpoint.trim().isEmpty;
+
+  Widget _headerRow() {
+    final scheme = Theme.of(context).colorScheme;
+    return Row(children: [
+      Icon(Icons.table_chart, size: 18, color: scheme.primary),
+      const SizedBox(width: 8),
+      Text(widget.config.table,
+          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
+      const Spacer(),
+      if (_awsMode)
+        Tooltip(
+          message: 'Destructive table operations are hard-disabled for AWS targets.\n'
+              'Use the AWS console or CLI.',
+          child: Chip(
+            avatar: Icon(Icons.lock_outline, size: 15, color: scheme.onSurfaceVariant),
+            label: const Text('Table ops — Endpoint mode only'),
+            visualDensity: VisualDensity.compact,
+          ),
+        )
+      else ...[
         OutlinedButton.icon(
-          onPressed: _running ? null : () => _run(),
-          icon: const Icon(Icons.refresh, size: 18),
-          label: const Text('Refresh'),
+          style: OutlinedButton.styleFrom(
+              foregroundColor: scheme.error, side: BorderSide(color: scheme.error)),
+          onPressed: _busy ? null : _dangerFlow,
+          icon: const Icon(Icons.restart_alt, size: 18),
+          label: const Text('Recreate'),
         ),
-      ]);
+        const SizedBox(width: 8),
+      ],
+      OutlinedButton.icon(
+        onPressed: _running ? null : () => _meta == null ? _loadMeta() : _run(),
+        icon: const Icon(Icons.refresh, size: 18),
+        label: const Text('Refresh'),
+      ),
+    ]);
+  }
+
+  bool _busy = false; // a recreate is in flight
+
+  // ---- recreate table ----
+
+  Future<void> _dangerFlow() async {
+    final pre = widget.core.tablePrecheck(widget.config.id);
+    if (pre['ok'] != true) {
+      _toast('${pre['error'] ?? 'precheck failed'}', error: true);
+      return;
+    }
+    if (pre['allowed'] != true) {
+      _toast('${pre['reason'] ?? 'not allowed'}', error: true);
+      return;
+    }
+    final go = await _confirmDialog(pre: pre);
+    if (go != true || !mounted) return;
+
+    setState(() => _busy = true);
+    // Modal barrier while the native orchestration runs. The native call runs on
+    // a background isolate (tableRecreate), so this dialog's spinner animates and
+    // the app stays responsive for the whole ~2–13s rebuild.
+    final progress = showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const AlertDialog(
+        content: Row(mainAxisSize: MainAxisSize.min, children: [
+          SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.5)),
+          SizedBox(width: 16),
+          Text('Recreating table…'),
+        ]),
+      ),
+    );
+    Map<String, dynamic> res;
+    try {
+      res = await widget.core.tableRecreate(widget.config.id);
+    } catch (e) {
+      res = {'ok': false, 'error': '$e'};
+    }
+    if (mounted) Navigator.of(context, rootNavigator: true).maybePop(); // dismiss progress
+    await progress; // ensure closed
+    if (!mounted) return;
+    setState(() => _busy = false);
+
+    if (res['ok'] == true) {
+      final warn = res['warning'];
+      _toast(warn != null ? 'Table recreated — $warn' : 'Table recreated');
+      _run(); // reload the (now empty / recreated) table view
+    } else {
+      _toast('${res['error'] ?? 'operation failed'}', error: true);
+      if (res['restartFailed'] == true) _run();
+    }
+  }
+
+  Future<bool?> _confirmDialog({required Map<String, dynamic> pre}) {
+    final scheme = Theme.of(context).colorScheme;
+    final table = pre['table']?.toString() ?? widget.config.table;
+    final endpoint = pre['endpoint']?.toString() ?? '';
+    final loopback = pre['loopback'] == true;
+    final itemCount = (pre['itemCount'] as num?)?.toInt() ?? -1;
+    final ageDays = (pre['ageDays'] as num?)?.toInt() ?? -1;
+    final version = pre['version']?.toString() ?? '';
+    final deps = ((pre['dependents'] as List?) ?? []).cast<Map>();
+    final runningDeps = deps.where((d) => d['running'] == true).toList();
+
+    // Non-loopback endpoints and large/old tables raise friction.
+    final needsName = !loopback;
+    final bigOrOld = (itemCount > 100000) || (ageDays > 30);
+    final nameCtrl = TextEditingController();
+    var ack = false; // blast-radius acknowledgement (captured across rebuilds)
+
+    final countStr = itemCount < 0 ? 'unknown item count' : '~${_fmt(itemCount)} items';
+
+    return showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(builder: (ctx, setD) {
+        final typedOk = !needsName || nameCtrl.text == table;
+        final enabled = typedOk && (!bigOrOld || ack);
+        return AlertDialog(
+            title: Text('Recreate table "$table"?'),
+            content: SizedBox(
+              width: 460,
+              child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text('Deletes and recreates the DynamoDB table at $endpoint · $countStr. '
+                    'All data in it is permanently lost.'),
+                const SizedBox(height: 10),
+                Text(
+                  runningDeps.isEmpty
+                      ? 'This will start "${deps.isNotEmpty ? deps.first['name'] : widget.config.name}" once so the table is created now, using redimos’s official schema${version.isEmpty ? '' : ' ($version keys)'}.'
+                      : 'This will: stop ${runningDeps.length} running config(s) that use this table → delete the table → restart them. '
+                          'redimos recreates the table on startup with its official schema${version.isEmpty ? '' : ' ($version keys)'}.',
+                  style: TextStyle(fontSize: 13, color: scheme.onSurfaceVariant),
+                ),
+                if (runningDeps.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  Wrap(spacing: 8, runSpacing: 4, children: [
+                    for (final d in runningDeps)
+                      Chip(
+                        visualDensity: VisualDensity.compact,
+                        avatar: const Icon(Icons.circle, size: 10, color: Colors.green),
+                        label: Text('${d['name']}'),
+                      ),
+                  ]),
+                ],
+                if (!loopback) ...[
+                  const SizedBox(height: 12),
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: Colors.orange.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Row(children: [
+                      const Icon(Icons.warning_amber, size: 18, color: Colors.orange),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text('This endpoint is not loopback ($endpoint) — it may be a shared environment.',
+                            style: TextStyle(fontSize: 12.5, color: Colors.orange.shade900)),
+                      ),
+                    ]),
+                  ),
+                  const SizedBox(height: 12),
+                  Text('Type the table name to confirm:', style: TextStyle(fontSize: 13, color: scheme.onSurfaceVariant)),
+                  const SizedBox(height: 6),
+                  TextField(
+                    controller: nameCtrl,
+                    autofocus: true,
+                    decoration: InputDecoration(hintText: table, border: const OutlineInputBorder(), isDense: true),
+                    onChanged: (_) => setD(() {}),
+                  ),
+                ],
+                if (bigOrOld) ...[
+                  const SizedBox(height: 6),
+                  CheckboxListTile(
+                    contentPadding: EdgeInsets.zero,
+                    dense: true,
+                    controlAffinity: ListTileControlAffinity.leading,
+                    value: ack,
+                    onChanged: (v) => setD(() => ack = v ?? false),
+                    title: Text(
+                      'I understand this table has '
+                      '${itemCount < 0 ? 'many' : '~${_fmt(itemCount)}'} items'
+                      '${ageDays > 0 ? ' and was created $ageDays days ago' : ''}.',
+                      style: const TextStyle(fontSize: 12.5),
+                    ),
+                  ),
+                ],
+              ]),
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+              FilledButton(
+                style: FilledButton.styleFrom(backgroundColor: scheme.error),
+                onPressed: enabled ? () => Navigator.pop(ctx, true) : null,
+                child: const Text('Recreate'),
+              ),
+            ],
+          );
+      }),
+    );
+  }
+
+  String _fmt(int n) {
+    final s = n.toString();
+    final b = StringBuffer();
+    for (var i = 0; i < s.length; i++) {
+      if (i > 0 && (s.length - i) % 3 == 0) b.write(',');
+      b.write(s[i]);
+    }
+    return b.toString();
+  }
+
+  void _toast(String msg, {bool error = false}) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(msg),
+      backgroundColor: error ? Colors.red.shade800 : null,
+      duration: const Duration(seconds: 3),
+    ));
+  }
 
   Card _card({required Widget child}) => Card(
         elevation: 0,
@@ -517,12 +746,41 @@ class _TablePageViewState extends State<TablePageView>
     ]);
   }
 
+  // Filters — matches the AWS Explore-items layout verbatim: header "Filters –
+  // optional", one horizontal row per filter under shared column headers, fields
+  // in the order [Attribute name] [Condition] [Type] [Value] [Remove], and an
+  // "Add filter" button.
+  static const _fFlex = [4, 3, 2, 4]; // attribute / condition / type / value
+  static const double _fRemoveW = 104;
+
   Widget _filtersSection() {
+    final scheme = Theme.of(context).colorScheme;
+    final label = TextStyle(fontSize: 12, color: scheme.onSurfaceVariant);
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       const Divider(height: 24),
-      Text('Filters ', style: TextStyle(fontWeight: FontWeight.w600, color: Theme.of(context).colorScheme.primary)),
+      Text.rich(TextSpan(children: [
+        const TextSpan(text: 'Filters', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+        TextSpan(
+            text: '  – optional',
+            style: TextStyle(fontStyle: FontStyle.italic, fontSize: 13, color: scheme.onSurfaceVariant)),
+      ])),
       const SizedBox(height: 10),
-      for (var i = 0; i < _filters.length; i++) _filterRow(i),
+      if (_filters.isNotEmpty) ...[
+        Row(children: [
+          Expanded(flex: _fFlex[0], child: Text('Attribute name', style: label)),
+          const SizedBox(width: 10),
+          Expanded(flex: _fFlex[1], child: Text('Condition', style: label)),
+          const SizedBox(width: 10),
+          Expanded(flex: _fFlex[2], child: Text('Type', style: label)),
+          const SizedBox(width: 10),
+          Expanded(flex: _fFlex[3], child: Text('Value', style: label)),
+          const SizedBox(width: 10),
+          const SizedBox(width: _fRemoveW),
+        ]),
+        const SizedBox(height: 6),
+        for (var i = 0; i < _filters.length; i++) _filterRow(i),
+        const SizedBox(height: 4),
+      ],
       OutlinedButton.icon(
         onPressed: () => setState(() => _filters.add(_FilterRow())),
         icon: const Icon(Icons.add, size: 16),
@@ -534,66 +792,73 @@ class _TablePageViewState extends State<TablePageView>
   Widget _filterRow(int i) {
     final f = _filters[i];
     return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(children: [
-          Expanded(
-            child: _labeled(
-              'Attribute name',
-              TextField(controller: f.attr, decoration: _dec(hint: 'Enter attribute name')),
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Expanded(
+          flex: _fFlex[0],
+          child: TextField(
+            controller: f.attr,
+            decoration: const InputDecoration(
+              isDense: true,
+              prefixIcon: Icon(Icons.search, size: 16),
+              prefixIconConstraints: BoxConstraints(minWidth: 32, minHeight: 32),
+              hintText: 'Enter attribute name',
+              border: OutlineInputBorder(),
+              contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 12),
             ),
           ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: _labeled(
-              'Condition',
-              DropdownButtonFormField<String>(
-                initialValue: f.op,
-                isDense: true,
-                decoration: _dec(),
-                items: [for (final c in _filterConds) DropdownMenuItem(value: c.$1, child: Text(c.$2))],
-                onChanged: (v) => setState(() => f.op = v ?? 'eq'),
-              ),
-            ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          flex: _fFlex[1],
+          child: DropdownButtonFormField<String>(
+            initialValue: f.op,
+            isDense: true,
+            decoration: _dec(),
+            items: [for (final c in _filterConds) DropdownMenuItem(value: c.$1, child: Text(c.$2))],
+            onChanged: (v) => setState(() => f.op = v ?? 'eq'),
           ),
-        ]),
-        const SizedBox(height: 10),
-        Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
-          Expanded(
-            child: _labeled(
-              'Type',
-              DropdownButtonFormField<String>(
-                initialValue: f.type,
-                isDense: true,
-                decoration: _dec(),
-                items: [for (final t in _filterTypes) DropdownMenuItem(value: t.$1, child: Text(t.$2))],
-                onChanged: f.needsValue ? (v) => setState(() => f.type = v ?? 'S') : null,
-              ),
-            ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          flex: _fFlex[2],
+          child: DropdownButtonFormField<String>(
+            initialValue: f.type,
+            isDense: true,
+            decoration: _dec(),
+            items: [for (final t in _filterTypes) DropdownMenuItem(value: t.$1, child: Text(t.$2))],
+            onChanged: f.needsValue ? (v) => setState(() => f.type = v ?? 'S') : null,
           ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: _labeled(
-              'Value',
-              f.needsValue
-                  ? Column(children: [
-                      TextField(controller: f.v1, decoration: _dec(hint: 'Enter attribute value')),
-                      if (f.needsTwo) ...[
-                        const SizedBox(height: 6),
-                        TextField(controller: f.v2, decoration: _dec(hint: 'and')),
-                      ],
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          flex: _fFlex[3],
+          child: !f.needsValue
+              ? TextField(enabled: false, decoration: _dec(hint: 'Not required'))
+              : f.needsTwo
+                  ? Row(children: [
+                      Expanded(child: TextField(controller: f.v1, decoration: _dec(hint: 'Enter attribute value'))),
+                      const Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 8),
+                        child: Text('and'),
+                      ),
+                      Expanded(child: TextField(controller: f.v2, decoration: _dec(hint: 'Enter attribute value'))),
                     ])
-                  : TextField(enabled: false, decoration: _dec(hint: 'Not required')),
+                  : TextField(controller: f.v1, decoration: _dec(hint: 'Enter attribute value')),
+        ),
+        const SizedBox(width: 10),
+        SizedBox(
+          width: _fRemoveW,
+          child: Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: OutlinedButton(
+              onPressed: () => setState(() => _filters.removeAt(i).dispose()),
+              style: OutlinedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 10),
+                minimumSize: const Size(0, 44),
+              ),
+              child: const Text('Remove', maxLines: 1),
             ),
-          ),
-        ]),
-        Align(
-          alignment: Alignment.centerRight,
-          child: OutlinedButton(
-            onPressed: () => setState(() {
-              _filters.removeAt(i).dispose();
-            }),
-            child: const Text('Remove'),
           ),
         ),
       ]),
@@ -619,26 +884,13 @@ class _TablePageViewState extends State<TablePageView>
         ]),
       );
     }
-    final p = _page!;
-    const ok = Color(0xFF2E7D32);
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: ok),
-        color: ok.withValues(alpha: 0.10),
-      ),
-      child: Row(children: [
-        const Icon(Icons.check_circle, color: ok, size: 20),
-        const SizedBox(width: 8),
-        Expanded(
-          child: Text(
-            'Completed · Items returned: ${p.returned} · Items scanned: ${p.scanned} · '
-            'Efficiency: ${(p.efficiency * 100).round()}% · ${p.timeMs} ms',
-          ),
-        ),
-      ]),
-    );
+    return const SizedBox.shrink(); // success shows no banner (AWS parity)
+  }
+
+  // Whether item-level writes are offered here (endpoint mode, base table only).
+  bool get _canWriteItems {
+    final t = _target;
+    return !_awsMode && (t == null || t.isTable);
   }
 
   Widget _resultsCard() {
@@ -646,15 +898,24 @@ class _TablePageViewState extends State<TablePageView>
     final cols = p.cols.where((c) => !_hiddenCols.contains(c)).toList();
     final rows = _sortedRows(p.rows);
     final t = _target;
-    final title = (t != null && !t.isTable)
-        ? 'Index: ${t.name} (${widget.config.table})'
-        : 'Table: ${widget.config.table}';
+    final scheme = Theme.of(context).colorScheme;
+    final selCount = _checked.length;
     return _card(
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        // AWS Explore-items toolbar: "Items returned (N)" left; refresh,
+        // pagination, preferences, Actions and Create item on the right.
         Row(children: [
           Expanded(
-            child: Text('$title — Items returned (${p.returned})',
-                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('Items returned (${p.returned})',
+                  style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+              Text(
+                '${t != null && !t.isTable ? 'Index ${t.name} · ' : ''}'
+                'Items scanned: ${p.scanned} · ${(p.efficiency * 100).round()}% · ${p.timeMs} ms'
+                '${selCount > 0 ? ' · $selCount selected' : ''}',
+                style: TextStyle(fontSize: 11.5, color: scheme.onSurfaceVariant),
+              ),
+            ]),
           ),
           IconButton(
             tooltip: 'Refresh',
@@ -662,25 +923,55 @@ class _TablePageViewState extends State<TablePageView>
             icon: const Icon(Icons.refresh, size: 18),
           ),
           IconButton(
-            tooltip: 'Preferences',
-            onPressed: _openPreferences,
-            icon: const Icon(Icons.settings, size: 18),
-          ),
-        ]),
-        const SizedBox(height: 4),
-        Row(children: [
-          IconButton(
+            visualDensity: VisualDensity.compact,
             onPressed: _pageIdx == 0 || _running ? null : _prevPage,
             icon: const Icon(Icons.chevron_left, size: 20),
           ),
           Text('${_pageIdx + 1}'),
           IconButton(
-            onPressed: p.hasNext && !_running ? null : (p.hasNext ? _nextPage : null),
-            icon: Icon(Icons.chevron_right,
-                size: 20, color: p.hasNext ? null : Theme.of(context).disabledColor),
+            visualDensity: VisualDensity.compact,
+            onPressed: p.hasNext && !_running ? _nextPage : null,
+            icon: const Icon(Icons.chevron_right, size: 20),
           ),
-          if (p.hasNext)
-            TextButton(onPressed: _running ? null : _nextPage, child: const Text('Next page')),
+          IconButton(
+            tooltip: 'Preferences',
+            onPressed: _openPreferences,
+            icon: const Icon(Icons.settings, size: 18),
+          ),
+          if (_canWriteItems) ...[
+            const SizedBox(width: 6),
+            MenuAnchor(
+              builder: (ctx, ctrl, _) => OutlinedButton.icon(
+                onPressed: () => ctrl.isOpen ? ctrl.close() : ctrl.open(),
+                icon: const Icon(Icons.arrow_drop_down, size: 18),
+                label: const Text('Actions'),
+              ),
+              menuChildren: [
+                MenuItemButton(
+                  onPressed: selCount == 1 ? () => _openEditor(from: _selectedItem(rows), isNew: false) : null,
+                  child: const Text('Edit item'),
+                ),
+                MenuItemButton(
+                  onPressed: selCount == 1 ? () => _openEditor(from: _selectedItem(rows), isNew: true) : null,
+                  child: const Text('Duplicate item'),
+                ),
+                MenuItemButton(
+                  onPressed: selCount >= 1 ? () => _deleteSelected(rows) : null,
+                  child: const Text('Delete items'),
+                ),
+                const Divider(height: 4),
+                MenuItemButton(
+                  onPressed: rows.isEmpty ? null : () => _exportCsv(cols, rows),
+                  child: const Text('Export to CSV'),
+                ),
+              ],
+            ),
+            const SizedBox(width: 8),
+            FilledButton(
+              onPressed: () => _openEditor(from: null, isNew: true),
+              child: const Text('Create item'),
+            ),
+          ],
         ]),
         const SizedBox(height: 8),
         if (rows.isEmpty)
@@ -705,6 +996,10 @@ class _TablePageViewState extends State<TablePageView>
               headingRowHeight: 40,
               dataRowMinHeight: 38,
               dataRowMaxHeight: 44,
+              onSelectAll: (v) => setState(() {
+                _checked.clear();
+                if (v == true) _checked.addAll(rows.map((r) => r.ddbJson));
+              }),
               columns: [
                 for (final c in cols)
                   DataColumn(
@@ -722,14 +1017,61 @@ class _TablePageViewState extends State<TablePageView>
               rows: [
                 for (final r in rows)
                   DataRow(
-                    onSelectChanged: (_) => _showItemJson(r),
-                    cells: [for (final c in cols) DataCell(_cellWidget(r.cells[c]))],
+                    selected: _checked.contains(r.ddbJson),
+                    // Checkbox / row click = select (AWS behaviour); the pk cell
+                    // is the link that opens the item.
+                    onSelectChanged: (v) => setState(() {
+                      if (v == true) {
+                        _checked.add(r.ddbJson);
+                      } else {
+                        _checked.remove(r.ddbJson);
+                      }
+                    }),
+                    cells: [
+                      for (final c in cols)
+                        c == t?.pk.name
+                            ? DataCell(
+                                _pkText(r.cells[c]),
+                                // onTap here wins over the row's onSelectChanged,
+                                // so the pk cell is the item link while the rest of
+                                // the row / checkbox handles selection.
+                                onTap: () => _canWriteItems
+                                    ? _openEditor(from: r, isNew: false)
+                                    : _showItemViewer(r),
+                              )
+                            : DataCell(_cellWidget(r.cells[c])),
+                    ],
                   ),
               ],
             ),
           ),
       ]),
     );
+  }
+
+  // The partition-key cell — rendered as a link (the DataCell.onTap opens it).
+  Widget _pkText(AttrCell? cell) {
+    final scheme = Theme.of(context).colorScheme;
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 320),
+      child: Text(
+        cell?.repr ?? '',
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(
+            color: scheme.primary,
+            fontWeight: FontWeight.w600,
+            decoration: TextDecoration.underline,
+            decorationColor: scheme.primary.withValues(alpha: 0.4)),
+      ),
+    );
+  }
+
+  TableItem? _selectedItem(List<TableItem> rows) {
+    for (final r in rows) {
+      if (_checked.contains(r.ddbJson)) return r;
+    }
+    return null;
   }
 
   Widget _colHeader(String c) {
@@ -853,7 +1195,53 @@ class _TablePageViewState extends State<TablePageView>
     );
   }
 
-  void _showItemJson(TableItem r) {
+  // ---- item flows (AWS Explore-items parity) ----
+
+  /// Opens the full-page item editor. Edit and Duplicate first re-fetch the FULL
+  /// item via GetItem — a Save is a PutItem full-replace, so editing the
+  /// (possibly projection-truncated) scan result would silently drop the
+  /// attributes the scan didn't return.
+  Future<void> _openEditor({required TableItem? from, required bool isNew}) async {
+    final t = _target;
+    if (t == null || !_canWriteItems) return;
+    var initial = <String, dynamic>{};
+    if (from != null) {
+      final key = _keyOf(from);
+      if (key == null) {
+        _toast('This result doesn’t include the item’s full key (projection) — '
+            'switch to “All attributes” first.', error: true);
+        return;
+      }
+      final res = widget.core.tableGetItem(widget.config, key);
+      if (res['ok'] == true && res['item'] is Map) {
+        initial = (res['item'] as Map).cast<String, dynamic>();
+      } else {
+        _toast('Couldn’t fetch the full item: ${res['error'] ?? 'error'}', error: true);
+        return;
+      }
+    }
+    if (!mounted) return;
+    final saved = await Navigator.of(context).push<bool>(MaterialPageRoute(
+      fullscreenDialog: true,
+      builder: (_) => ItemEditorPage(
+        table: widget.config.table,
+        target: t,
+        isNew: isNew,
+        initial: initial,
+        onSave: (av) async {
+          if (!await _confirmRawWrite('Write')) return ''; // '' = cancelled
+          final res = widget.core.tablePutItem(widget.config, av);
+          return res['ok'] == true ? null : '${res['error'] ?? 'save failed'}';
+        },
+      ),
+    ));
+    if (!mounted || saved != true) return;
+    _toast(isNew ? 'Item created' : 'Item saved');
+    _run(resetPaging: false);
+  }
+
+  /// Read-only DynamoDB-JSON viewer (AWS mode / index targets).
+  void _showItemViewer(TableItem r) {
     String pretty;
     try {
       pretty = const JsonEncoder.withIndent('  ').convert(jsonDecode(r.ddbJson));
@@ -870,8 +1258,7 @@ class _TablePageViewState extends State<TablePageView>
             icon: const Icon(Icons.copy, size: 18),
             onPressed: () {
               Clipboard.setData(ClipboardData(text: pretty));
-              ScaffoldMessenger.of(context)
-                  .showSnackBar(const SnackBar(content: Text('Copied')));
+              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Copied')));
             },
           ),
         ]),
@@ -885,6 +1272,125 @@ class _TablePageViewState extends State<TablePageView>
         actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close'))],
       ),
     );
+  }
+
+  // Extract the primary-key attribute-value map from an item's DynamoDB-JSON, or
+  // null if the key isn't fully present (e.g. projected away).
+  Map<String, dynamic>? _keyOf(TableItem r) {
+    final t = _target;
+    if (t == null) return null;
+    try {
+      final m = (jsonDecode(r.ddbJson) as Map).cast<String, dynamic>();
+      if (m[t.pk.name] == null) return null;
+      final key = <String, dynamic>{t.pk.name: m[t.pk.name]};
+      if (t.sk != null) {
+        if (m[t.sk!.name] == null) return null;
+        key[t.sk!.name] = m[t.sk!.name];
+      }
+      return key;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Actions → Delete items: bulk-delete every checked row (single merged
+  /// confirmation carrying the redimos raw-write warning).
+  Future<void> _deleteSelected(List<TableItem> rows) async {
+    final items = rows.where((r) => _checked.contains(r.ddbJson)).toList();
+    if (items.isEmpty) return;
+    final keys = <Map<String, dynamic>>[];
+    for (final r in items) {
+      final k = _keyOf(r);
+      if (k == null) {
+        _toast('A selected item is missing its key attributes (projection?)', error: true);
+        return;
+      }
+      keys.add(k);
+    }
+    final scheme = Theme.of(context).colorScheme;
+    final go = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Delete ${keys.length} item(s)?'),
+        content: SizedBox(
+          width: 440,
+          child: Text(
+            'This permanently deletes ${keys.length} item(s) from "${widget.config.table}", '
+            'writing directly to DynamoDB and bypassing redimos’s encoding — for redimos data, '
+            'prefer the Browser or Console tab.',
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: scheme.error),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (go != true || !mounted) return;
+    var failed = 0;
+    for (final k in keys) {
+      final res = widget.core.tableDeleteItem(widget.config, k);
+      if (res['ok'] != true) failed++;
+    }
+    if (!mounted) return;
+    _toast(failed == 0
+        ? 'Deleted ${keys.length} item(s)'
+        : 'Deleted ${keys.length - failed}, $failed failed', error: failed > 0);
+    _run(resetPaging: false);
+  }
+
+  /// Actions → Export to CSV: the current page's visible columns/rows, written
+  /// to ~/Downloads (falls back to the clipboard if the write fails).
+  Future<void> _exportCsv(List<String> cols, List<TableItem> rows) async {
+    String q(String s) => '"${s.replaceAll('"', '""')}"';
+    final buf = StringBuffer()..writeln(cols.map(q).join(','));
+    for (final r in rows) {
+      buf.writeln(cols.map((c) => q(r.cells[c]?.repr ?? '')).join(','));
+    }
+    final csv = buf.toString();
+    try {
+      final home = Platform.environment['HOME'] ?? '';
+      if (home.isEmpty) throw const FileSystemException('no HOME');
+      final ts = DateTime.now().millisecondsSinceEpoch;
+      final path = '$home/Downloads/redimos-${widget.config.table}-$ts.csv';
+      await File(path).writeAsString(csv);
+      _toast('Exported ${rows.length} row(s) → $path');
+    } catch (_) {
+      await Clipboard.setData(ClipboardData(text: csv));
+      _toast('Couldn’t write to Downloads — CSV copied to clipboard instead');
+    }
+  }
+
+  // Strong confirmation before a raw item write on a redimos table.
+  Future<bool> _confirmRawWrite(String verb) async {
+    final scheme = Theme.of(context).colorScheme;
+    final go = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('$verb a raw item on a redimos table?'),
+        content: const SizedBox(
+          width: 430,
+          child: Text(
+            'This writes directly to DynamoDB, bypassing redimos’s key/value encoding. '
+            'An item that doesn’t match redimos’s format can corrupt what the proxy reads — '
+            'for redimos data, prefer the Browser or Console tab. Continue anyway?',
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: scheme.error),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text('$verb anyway'),
+          ),
+        ],
+      ),
+    );
+    return go == true;
   }
 
   // ---- small helpers ----

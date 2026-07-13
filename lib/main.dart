@@ -9,6 +9,7 @@ import 'package:flutter/services.dart';
 
 import 'src/browser_page.dart';
 import 'src/cmd_console.dart';
+import 'src/endpoint_page.dart';
 import 'src/models.dart';
 import 'src/native.dart';
 import 'src/partiql_page.dart';
@@ -188,12 +189,15 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   List<RedimosConfig> _configs = [];
   Map<String, InstanceStatus> _status = {};
   String? _selectedId;
+  // Configs that were running at the last AppBar "Stop all". While non-empty and
+  // nothing is running, the Stop-all button becomes a green "restore" triangle.
+  List<String> _stopAllSnapshot = [];
   Timer? _poll;
   // Lets the parent inspect / save the editor form before leaving it.
   final _editorKey = GlobalKey<_ConfigEditorState>();
-  // Right-pane tabs (Configure / Monitor / Logs / Table / PartiQL / Browser /
-  // Cmd) — owned here so the table-mismatch flow can jump back to Configure.
-  late final TabController _tabs = TabController(length: 7, vsync: this);
+  // Right-pane tabs (Configure / Monitor / Logs / Endpoint / Table / PartiQL /
+  // Console / Browser) — owned here so flows can jump between tabs.
+  late final TabController _tabs = TabController(length: 8, vsync: this);
 
   // Rolling CPU / memory history per config id, fed by the status poll and
   // drawn as sparklines in the monitor panel.
@@ -242,6 +246,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     final data = _core!.load();
     setState(() {
       _configs = data.configs;
+      _stopAllSnapshot = data.stopAllSnapshot;
       _selectedId ??= _configs.isNotEmpty ? _configs.first.id : null;
     });
     _refresh();
@@ -512,14 +517,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
               _themeMenuItem(ThemeMode.system, Icons.brightness_auto_outlined, 'System'),
             ],
           ),
-          IconButton(
-            tooltip: 'Stop all',
-            icon: const Icon(Icons.stop_circle_outlined),
-            onPressed: () {
-              _core?.stopAll();
-              _refresh();
-            },
-          ),
+          _stopAllButton(),
         ],
       ),
       body: Row(
@@ -554,6 +552,51 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
           ),
         ),
       );
+
+  // AppBar action: stop-all / restore toggle. When anything is running it stops
+  // all (recording the running set); when nothing is running but a set was
+  // recorded, it becomes a green triangle that restores exactly that set.
+  Widget _stopAllButton() {
+    final anyRunning =
+        _status.values.any((s) => s.isRunning || s.status == 'restarting');
+    if (anyRunning) {
+      return IconButton(
+        tooltip: 'Stop all',
+        icon: const Icon(Icons.stop_circle_outlined),
+        onPressed: _stopAll,
+      );
+    }
+    if (_stopAllSnapshot.isNotEmpty) {
+      // Default icon colour (matches the outlined stop icon) — not green, so the
+      // AppBar style stays consistent.
+      return IconButton(
+        tooltip: 'Start all — restore ${_stopAllSnapshot.length} config(s)',
+        icon: const Icon(Icons.play_circle_outline),
+        onPressed: _restoreAll,
+      );
+    }
+    return const IconButton(
+      tooltip: 'Stop all',
+      icon: Icon(Icons.stop_circle_outlined),
+      onPressed: null, // nothing running, nothing to restore
+    );
+  }
+
+  void _stopAll() {
+    final snap = _core?.stopAll() ?? [];
+    setState(() => _stopAllSnapshot = snap);
+    _refresh();
+    if (snap.isNotEmpty) {
+      _toast('Stopped ${snap.length} config(s) — tap ▶ to restore');
+    }
+  }
+
+  void _restoreAll() {
+    final started = _core?.restoreAll() ?? [];
+    setState(() => _stopAllSnapshot = []);
+    _refresh();
+    _toast('Restored ${started.length} config(s)');
+  }
 
   Widget _configList() {
     return Column(
@@ -660,7 +703,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
             height: 50,
             child: TabBar(
               controller: _tabs,
-              // Four equal-width tabs sharing the full width.
+              // Eight equal-width tabs sharing the full width.
               labelColor: Theme.of(context).colorScheme.primary,
               unselectedLabelColor: Theme.of(context).textTheme.bodySmall?.color,
               indicatorColor: Theme.of(context).colorScheme.primary,
@@ -671,6 +714,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                 _tab(Icons.tune, 'Configure'),
                 _tab(Icons.insights, 'Monitor'),
                 _tab(Icons.terminal, 'Logs'),
+                _tab(Icons.folder_open, 'Endpoint'),
                 _tab(Icons.table_chart, 'Table'),
                 _tab(Icons.code, 'PartiQL'),
                 _tab(Icons.chevron_right, 'Console'),
@@ -712,6 +756,15 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                   embedded: true,
                   ddb: _usesLocalDdb(c) ? _ddb : null,
                 ),
+                // endpoint — dynamodb-admin-style table list for this config's
+                // endpoint (Name/keys/indexes/count/kind/used-by + recreate)
+                EndpointPageView(
+                  key: ValueKey('endpoint-${c.id}'),
+                  core: _core!,
+                  config: c,
+                  running: st?.isRunning ?? false,
+                  onOpenTable: (_) => _tabs.animateTo(4), // jump to the Table tab
+                ),
                 // table — read-only DynamoDB item browser (Explore-items style)
                 TablePageView(
                   key: ValueKey('table-${c.id}'),
@@ -733,6 +786,17 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                   port: c.port,
                   auth: c.requirepass.isEmpty ? null : c.requirepass,
                   running: st?.isRunning ?? false,
+                  // Surface the crash-loop cause (e.g. a failing startup backend
+                  // check) so a proxy that can't reach its table isn't a silent
+                  // spinner. Only while it's actually down for a known reason.
+                  statusReason: (st != null &&
+                          !st.isRunning &&
+                          st.exitMsg.isNotEmpty &&
+                          (st.status == 'restarting' ||
+                              st.status == 'failed' ||
+                              st.status == 'error'))
+                      ? st.exitMsg
+                      : null,
                 ),
                 // browser — Redis key browser over the proxy (ARDM style)
                 BrowserPageView(

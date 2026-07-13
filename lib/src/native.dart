@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:ffi';
 import 'dart:io';
+import 'dart:isolate';
 
 import 'package:ffi/ffi.dart';
 
@@ -15,14 +16,34 @@ typedef _StrArgDartFn = Pointer<Utf8> Function(Pointer<Utf8>);
 typedef _FreeNativeFn = Void Function(Pointer<Utf8>);
 typedef _FreeDartFn = void Function(Pointer<Utf8>);
 
+/// Invoke a `char* fn(char*)` core symbol from ANY isolate by re-opening the
+/// (process-global, already-loaded) dynamic library and looking the symbol up
+/// there. Used to run the blocking table-recreate off the UI isolate via
+/// [Isolate.run] — the closure captures only the sendable String arguments.
+String _callCoreSymbol(String libPath, String symbol, String arg) {
+  final lib = DynamicLibrary.open(libPath);
+  final fn = lib.lookupFunction<_StrArgNativeFn, _StrArgDartFn>(symbol);
+  final free = lib.lookupFunction<_FreeNativeFn, _FreeDartFn>('rm_free');
+  final a = arg.toNativeUtf8();
+  try {
+    final p = fn(a);
+    final s = p.toDartString();
+    free(p);
+    return s;
+  } finally {
+    malloc.free(a);
+  }
+}
+
 /// Thin Dart wrapper over the Go core dynamic library. All state (configs,
 /// child processes) lives in Go; this just marshals JSON across the boundary.
 class NativeCore {
   late final DynamicLibrary _lib;
-  late final _StrDartFn _version, _load, _status, _stopAll, _shutdown;
+  late final _StrDartFn _version, _load, _status, _stopAll, _restoreAll, _shutdown;
   late final _StrDartFn _ddbGet, _ddbStart, _ddbStop, _ddbLogs;
   late final _StrArgDartFn _saveConfig, _deleteConfig, _setSettings, _start, _stop, _logs;
   late final _StrArgDartFn _ddbSet, _inspectTable, _tableMeta, _tablePage, _partiql;
+  late final _StrArgDartFn _tablePrecheck, _tableGetItem, _tablePutItem, _tableDeleteItem;
   late final _FreeDartFn _free;
 
   NativeCore() {
@@ -31,6 +52,7 @@ class NativeCore {
     _load = _lib.lookupFunction<_StrNativeFn, _StrDartFn>('rm_load');
     _status = _lib.lookupFunction<_StrNativeFn, _StrDartFn>('rm_status');
     _stopAll = _lib.lookupFunction<_StrNativeFn, _StrDartFn>('rm_stop_all');
+    _restoreAll = _lib.lookupFunction<_StrNativeFn, _StrDartFn>('rm_restore_all');
     _shutdown = _lib.lookupFunction<_StrNativeFn, _StrDartFn>('rm_shutdown');
     _saveConfig = _lib.lookupFunction<_StrArgNativeFn, _StrArgDartFn>('rm_save_config');
     _deleteConfig = _lib.lookupFunction<_StrArgNativeFn, _StrArgDartFn>('rm_delete_config');
@@ -47,6 +69,10 @@ class NativeCore {
     _tableMeta = _lib.lookupFunction<_StrArgNativeFn, _StrArgDartFn>('rm_table_meta');
     _tablePage = _lib.lookupFunction<_StrArgNativeFn, _StrArgDartFn>('rm_table_page');
     _partiql = _lib.lookupFunction<_StrArgNativeFn, _StrArgDartFn>('rm_partiql');
+    _tablePrecheck = _lib.lookupFunction<_StrArgNativeFn, _StrArgDartFn>('rm_table_precheck');
+    _tableGetItem = _lib.lookupFunction<_StrArgNativeFn, _StrArgDartFn>('rm_table_get_item');
+    _tablePutItem = _lib.lookupFunction<_StrArgNativeFn, _StrArgDartFn>('rm_table_put_item');
+    _tableDeleteItem = _lib.lookupFunction<_StrArgNativeFn, _StrArgDartFn>('rm_table_delete_item');
     _free = _lib.lookupFunction<_FreeNativeFn, _FreeDartFn>('rm_free');
   }
 
@@ -92,7 +118,7 @@ class NativeCore {
   // ---- typed API ----
   String version() => _call0(_version);
 
-  ({List<RedimosConfig> configs, Settings settings}) load() {
+  ({List<RedimosConfig> configs, Settings settings, List<String> stopAllSnapshot}) load() {
     final j = jsonDecode(_call0(_load)) as Map<String, dynamic>;
     // The core refuses to manage children when another app instance already
     // holds the single-instance lock; surface that instead of a broken UI.
@@ -103,7 +129,10 @@ class NativeCore {
         .toList();
     final settings =
         Settings.fromJson((j['settings'] as Map<String, dynamic>?) ?? {});
-    return (configs: configs, settings: settings);
+    final snap = ((j['stopAllSnapshot'] as List?) ?? [])
+        .map((e) => e.toString())
+        .toList();
+    return (configs: configs, settings: settings, stopAllSnapshot: snap);
   }
 
   Map<String, InstanceStatus> status() {
@@ -172,7 +201,19 @@ class NativeCore {
     }
   }
 
-  void stopAll() => _call0(_stopAll);
+  /// AppBar "Stop all": stop every running config and return the ids that were
+  /// running (recorded natively so the "restore" button survives an app restart).
+  List<String> stopAll() {
+    final j = jsonDecode(_call0(_stopAll)) as Map<String, dynamic>;
+    return ((j['snapshot'] as List?) ?? []).map((e) => e.toString()).toList();
+  }
+
+  /// AppBar green "restore": start every config recorded by the last Stop all;
+  /// returns the ids actually (re)started.
+  List<String> restoreAll() {
+    final j = jsonDecode(_call0(_restoreAll)) as Map<String, dynamic>;
+    return ((j['started'] as List?) ?? []).map((e) => e.toString()).toList();
+  }
 
   /// Terminate every managed child (redimos instances + Local DynamoDB). Call on
   /// app exit so nothing is left orphaned holding a port.
@@ -194,6 +235,71 @@ class NativeCore {
   List<String> ddbLogs() {
     final j = jsonDecode(_call0(_ddbLogs)) as Map<String, dynamic>;
     return ((j['lines'] as List?) ?? []).map((e) => e.toString()).toList();
+  }
+
+  // ---- destructive table lifecycle (Endpoint mode only; native re-guards) ----
+
+  /// Info for the recreate confirmation dialog.
+  Map<String, dynamic> tablePrecheck(String configId) =>
+      jsonDecode(_call1(_tablePrecheck, configId)) as Map<String, dynamic>;
+
+  /// Table tab: fetch one FULL item by [key] (DynamoDB-JSON key map), so the
+  /// editor never edits a projection-truncated item. Returns {ok, item} / {ok:false}.
+  Map<String, dynamic> tableGetItem(RedimosConfig c, Map<String, dynamic> key) {
+    try {
+      return jsonDecode(_call1(_tableGetItem, jsonEncode({'config': c.toJson(), 'key': key})))
+          as Map<String, dynamic>;
+    } catch (e) {
+      return {'ok': false, 'error': e.toString()};
+    }
+  }
+
+  /// Table tab: write (create/replace) one item. [item] is DynamoDB-JSON.
+  /// Endpoint-gated natively. Never throws — returns {ok:false, error}.
+  Map<String, dynamic> tablePutItem(RedimosConfig c, Map<String, dynamic> item) {
+    try {
+      return jsonDecode(_call1(_tablePutItem, jsonEncode({'config': c.toJson(), 'item': item})))
+          as Map<String, dynamic>;
+    } catch (e) {
+      return {'ok': false, 'error': e.toString()};
+    }
+  }
+
+  /// Table tab: delete one item by its [key] (DynamoDB-JSON key map). Endpoint-gated.
+  Map<String, dynamic> tableDeleteItem(RedimosConfig c, Map<String, dynamic> key) {
+    try {
+      return jsonDecode(_call1(_tableDeleteItem, jsonEncode({'config': c.toJson(), 'key': key})))
+          as Map<String, dynamic>;
+    } catch (e) {
+      return {'ok': false, 'error': e.toString()};
+    }
+  }
+
+  /// Endpoint tab: list every table on a config's endpoint (read-only). Runs on
+  /// a background isolate — a ListTables + per-table DescribeTable fan-out (each
+  /// with a 6s timeout) would otherwise freeze the UI on a large AWS account.
+  /// Never throws — returns {ok:false, error} on any failure.
+  Future<Map<String, dynamic>> epListTables(RedimosConfig c) async {
+    final libPath = _resolveLibraryPath();
+    final arg = jsonEncode(c.toJson());
+    try {
+      final raw = await Isolate.run(
+          () => _callCoreSymbol(libPath, 'rm_ep_list_tables', arg));
+      return jsonDecode(raw) as Map<String, dynamic>;
+    } catch (e) {
+      return {'ok': false, 'error': e.toString()};
+    }
+  }
+
+  /// Stop dependents → delete table → restart with one-shot auto-create. Runs on
+  /// a background isolate (the native call sleeps/polls for up to ~13s), so the
+  /// UI stays responsive and the progress dialog animates. The isolate re-opens
+  /// the process-global core library and invokes the same symbol.
+  Future<Map<String, dynamic>> tableRecreate(String configId) async {
+    final libPath = _resolveLibraryPath();
+    final raw = await Isolate.run(
+        () => _callCoreSymbol(libPath, 'rm_table_recreate', configId));
+    return jsonDecode(raw) as Map<String, dynamic>;
   }
 
   void _expectOk(String raw) {

@@ -309,12 +309,17 @@ class CmdConsole extends StatefulWidget {
   final int port;
   final String? auth;
   final bool running;
+  // Failure cause surfaced from the supervisor (e.g. a redimos startup backend
+  // check that keeps failing). Non-null while the instance is restarting/failed;
+  // shown so a crash-loop doesn't look like a silent "Reconnecting…".
+  final String? statusReason;
   const CmdConsole({
     super.key,
     required this.host,
     required this.port,
     required this.running,
     this.auth,
+    this.statusReason,
   });
 
   @override
@@ -527,6 +532,17 @@ class _CmdConsoleState extends State<CmdConsole>
   Widget build(BuildContext context) {
     super.build(context); // AutomaticKeepAliveClientMixin
     if (!widget.running) {
+      final reason = widget.statusReason;
+      if (reason != null && reason.isNotEmpty) {
+        // The proxy is restarting/failed with a known cause — show it instead of
+        // the generic "not running" hint, so the real problem is in front of you.
+        return _placeholder(
+          icon: Icons.error_outline,
+          title: 'Instance failed to start',
+          subtitle: reason,
+          tint: Colors.redAccent,
+        );
+      }
       return _placeholder(
         icon: Icons.play_circle_outline,
         title: 'Instance not running',
@@ -557,28 +573,30 @@ class _CmdConsoleState extends State<CmdConsole>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // scrollback
+          // scrollback — or a terminal-style welcome banner before any command
           Expanded(
-            child: Scrollbar(
-              controller: _scroll,
-              child: ListView.builder(
-                controller: _scroll,
-                padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-                itemCount: _out.length,
-                itemBuilder: (_, i) {
-                  final l = _out[i];
-                  return SelectableText(
-                    l.text.isEmpty ? ' ' : l.text,
-                    style: TextStyle(
-                      fontFamily: 'monospace',
-                      fontSize: 12.5,
-                      height: 1.35,
-                      color: _color(l.kind, dark),
+            child: _out.isEmpty
+                ? _welcome(dark)
+                : Scrollbar(
+                    controller: _scroll,
+                    child: ListView.builder(
+                      controller: _scroll,
+                      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+                      itemCount: _out.length,
+                      itemBuilder: (_, i) {
+                        final l = _out[i];
+                        return SelectableText(
+                          l.text.isEmpty ? ' ' : l.text,
+                          style: TextStyle(
+                            fontFamily: 'monospace',
+                            fontSize: 12.5,
+                            height: 1.35,
+                            color: _color(l.kind, dark),
+                          ),
+                        );
+                      },
                     ),
-                  );
-                },
-              ),
-            ),
+                  ),
           ),
           const Divider(height: 1),
           // input row — fixed height so its top divider lines up with the
@@ -655,6 +673,72 @@ class _CmdConsoleState extends State<CmdConsole>
     );
   }
 
+  // Empty-console welcome: a small redis-cli-style banner + clickable example
+  // commands, so a connected-but-idle console isn't just a blank board.
+  Widget _welcome(bool dark) {
+    final ink = dark ? const Color(0xFFC7D0DC) : const Color(0xFF3A424D);
+    final muted = dark ? const Color(0xFF6B7686) : const Color(0xFF8A93A0);
+    final accent = dark ? const Color(0xFF7FB2E6) : const Color(0xFF2F6FB3);
+    final mono = TextStyle(fontFamily: 'monospace', fontSize: 12.5, height: 1.55, color: muted);
+    const examples = [
+      'PING',
+      'SET greeting "hello"',
+      'GET greeting',
+      'SCAN 0 COUNT 20',
+      'TYPE greeting',
+      'INFO server',
+    ];
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(16, 18, 16, 12),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Icon(Icons.terminal, size: 18, color: accent),
+          const SizedBox(width: 8),
+          Text('redimos-cli',
+              style: TextStyle(
+                  fontFamily: 'monospace', fontSize: 13, fontWeight: FontWeight.w700, color: ink)),
+        ]),
+        const SizedBox(height: 10),
+        Text('Connected to ${widget.host}:${widget.port} — Redis-compatible.', style: mono),
+        Text('Use SCAN (not KEYS) and HMSET for multi-field hashes.', style: mono),
+        const SizedBox(height: 16),
+        Text('Try a command — click to insert, then press Enter:',
+            style: mono.copyWith(color: ink)),
+        const SizedBox(height: 10),
+        Wrap(spacing: 8, runSpacing: 8, children: [
+          for (final c in examples) _cmdChip(c, dark),
+        ]),
+        const SizedBox(height: 18),
+        Text('History: ↑ / ↓   ·   Clear: the ⌫ button on the right',
+            style: mono.copyWith(fontSize: 11.5)),
+      ]),
+    );
+  }
+
+  // A clickable example-command chip: inserts the command into the input.
+  Widget _cmdChip(String cmd, bool dark) {
+    final bg = dark ? const Color(0xFF161B22) : Colors.white;
+    final border = dark ? const Color(0xFF283040) : const Color(0xFFDCE0E6);
+    final fg = dark ? const Color(0xFF9DB8DE) : const Color(0xFF2F6FB3);
+    return InkWell(
+      borderRadius: BorderRadius.circular(6),
+      onTap: () {
+        _input.text = cmd;
+        _input.selection = TextSelection.collapsed(offset: cmd.length);
+        _focus.requestFocus();
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        decoration: BoxDecoration(
+          color: bg,
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(color: border),
+        ),
+        child: Text(cmd, style: TextStyle(fontFamily: 'monospace', fontSize: 12, color: fg)),
+      ),
+    );
+  }
+
   // Centered loading view shown while (re)connecting — mirrors _placeholder's
   // layout but with a spinner. The console stays non-interactive until connected.
   Widget _loadingView() {
@@ -679,19 +763,26 @@ class _CmdConsoleState extends State<CmdConsole>
   }
 
   Widget _placeholder(
-      {required IconData icon, required String title, required String subtitle}) {
+      {required IconData icon,
+      required String title,
+      required String subtitle,
+      Color? tint}) {
     return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 40, color: Colors.grey),
-          const SizedBox(height: 12),
-          Text(title, style: const TextStyle(fontSize: 14)),
-          const SizedBox(height: 6),
-          Text(subtitle,
-              textAlign: TextAlign.center,
-              style: const TextStyle(fontSize: 12, color: Colors.grey)),
-        ],
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 40, color: tint ?? Colors.grey),
+            const SizedBox(height: 12),
+            Text(title, style: const TextStyle(fontSize: 14)),
+            const SizedBox(height: 6),
+            SelectableText(subtitle,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                    fontSize: 12, color: Colors.grey, height: 1.4)),
+          ],
+        ),
       ),
     );
   }

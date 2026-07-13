@@ -95,7 +95,12 @@ func (m *manager) tryAdoptNativeDdb(rec childRec) bool {
 	m.mu.Unlock()
 	rec.Session = m.sessionID
 	regUpsert(rec) // re-owned by this session (re-adoptable if we crash too)
-	watchProcessExit(rec.PID, rec.StartUnixMicro, in.superviseExit)
+	watchProcessExit(rec.PID, rec.StartUnixMicro, func(err error) {
+		// Adopted child: in.started is its original cross-session start, so this is
+		// how long it actually ran — a long-lived adopted proxy that exits reads as
+		// a healthy exit (counter reset), not a startup failure.
+		in.superviseExit(err, time.Since(in.started))
+	})
 	return true
 }
 
@@ -220,16 +225,16 @@ func (m *manager) tryAdoptDocker(rec childRec) bool {
 			code := strings.TrimSpace(string(out))
 			if werr == nil && code != "" {
 				if code == "0" {
-					in.superviseExit(nil)
+					in.superviseExit(nil, time.Since(in.started))
 				} else {
-					in.superviseExit(fmt.Errorf("container exited with status %s", code))
+					in.superviseExit(fmt.Errorf("container exited with status %s", code), time.Since(in.started))
 				}
 				return
 			}
 			// wait failed or returned nothing: only a genuine exit if the
 			// container is actually gone; otherwise a transient CLI/daemon error.
 			if !dockerContainerRunning(docker, rec.Container) {
-				in.superviseExit(nil)
+				in.superviseExit(nil, time.Since(in.started))
 				return
 			}
 			time.Sleep(2 * time.Second) // transient — retry the wait
