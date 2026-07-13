@@ -15,6 +15,17 @@ class RespStatus {
   RespStatus(this.text);
 }
 
+/// A RESP bulk string, kept as its EXACT bytes. Existing helpers read [text]
+/// (lossy UTF-8, as before); the format viewer reads [bytes] so it can decode
+/// binary payloads (gzip / msgpack / protobuf …) that UTF-8 decoding would
+/// corrupt. One representation, two views — so no command path changes shape.
+class RespBulk {
+  final Uint8List bytes;
+  String? _str;
+  RespBulk(this.bytes);
+  String get text => _str ??= utf8.decode(bytes, allowMalformed: true);
+}
+
 class RespError {
   final String message;
   RespError(this.message);
@@ -70,7 +81,8 @@ class RespParser {
         final start = e + 2;
         final endData = start + len;
         if (endData + 2 > _buf.length) return null;
-        return _Parsed(_decode(start, endData), endData + 2);
+        // Keep exact bytes (RespBulk) — helpers still get a String via _s().
+        return _Parsed(RespBulk(Uint8List.fromList(_buf.sublist(start, endData))), endData + 2);
       case 0x2A: // '*' array
         final e = _crlf(i + 1);
         if (e < 0) return null;
@@ -189,7 +201,12 @@ class RedisClient {
 
   // ---- typed helpers ----
 
-  String _s(Object? v) => v is RespStatus ? v.text : (v?.toString() ?? '');
+  String _s(Object? v) => v is RespBulk
+      ? v.text
+      : (v is RespStatus ? v.text : (v?.toString() ?? ''));
+
+  /// The exact bytes of a bulk reply (null for a null reply / non-bulk).
+  Uint8List? _bytes(Object? v) => v is RespBulk ? v.bytes : null;
 
   Future<void> select(int db) => call(['SELECT', '$db']).then((_) {});
 
@@ -210,8 +227,23 @@ class RedisClient {
   Future<void> persist(String key) => call(['PERSIST', key]);
   Future<void> del(String key) => call(['DEL', key]);
 
-  Future<String?> get(String key) async => (await call(['GET', key])) as String?;
+  Future<String?> get(String key) async {
+    final r = await call(['GET', key]);
+    return r == null ? null : _s(r);
+  }
   Future<void> set(String key, String value) => call(['SET', key, value]);
+
+  // ---- raw-bytes value reads (binary-safe, for the format viewer) ----
+  // These return the value's EXACT bytes (not the lossy UTF-8 String the display
+  // helpers use), so the formatter can decode gzip/msgpack/protobuf/… faithfully.
+
+  Future<Uint8List?> getBytes(String key) async => _bytes(await call(['GET', key]));
+
+  Future<Uint8List?> hgetBytes(String key, String field) async =>
+      _bytes(await call(['HGET', key, field]));
+
+  Future<Uint8List?> lindexBytes(String key, int index) async =>
+      _bytes(await call(['LINDEX', key, '$index']));
 
   Future<Map<String, String>> hgetall(String key) async {
     final list = (await call(['HGETALL', key]) as List?) ?? [];

@@ -83,10 +83,23 @@ type Settings struct {
 	RedimosV2Image string `json:"redimosV2Image"`
 }
 
+// Formatter is a user-defined value formatter for the Browser's format dropdown:
+// an external program (Command) invoked with Params (an argv template in which
+// {VALUE}/{HEX}/{KEY}/… are substituted — see rm_format_custom). Name is the
+// dropdown label and the unique id.
+type Formatter struct {
+	Name    string `json:"name"`
+	Command string `json:"command"`
+	Params  string `json:"params"`
+}
+
 type store struct {
 	Configs  []Config       `json:"configs"`
 	Settings Settings       `json:"settings"`
 	LocalDdb LocalDdbConfig `json:"localDdb"`
+	// Custom value formatters for the Browser (persisted independently of
+	// Settings so the settings page can't clobber them).
+	Formatters []Formatter `json:"formatters"`
 	// Session restore: the "desired running" set, updated live on start/stop, so
 	// the next launch relaunches exactly what was running last time (survives a
 	// clean quit AND a crash). See autoStartAll.
@@ -1256,6 +1269,35 @@ func rm_set_settings(in *C.char) *C.char {
 	}
 	mgr.mu.Lock()
 	mgr.st.Settings = s
+	err := mgr.persist()
+	mgr.mu.Unlock()
+	if err != nil {
+		return errJSON(err)
+	}
+	return okJSON(nil)
+}
+
+//export rm_get_formatters
+func rm_get_formatters() *C.char {
+	mgr.mu.Lock()
+	defer mgr.mu.Unlock()
+	fs := mgr.st.Formatters
+	if fs == nil {
+		fs = []Formatter{}
+	}
+	return cjson(map[string]any{"ok": true, "formatters": fs})
+}
+
+//export rm_set_formatters
+func rm_set_formatters(in *C.char) *C.char {
+	var req struct {
+		Formatters []Formatter `json:"formatters"`
+	}
+	if err := json.Unmarshal([]byte(C.GoString(in)), &req); err != nil {
+		return errJSON(err)
+	}
+	mgr.mu.Lock()
+	mgr.st.Formatters = req.Formatters
 	err := mgr.persist()
 	mgr.mu.Unlock()
 	if err != nil {

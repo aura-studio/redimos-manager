@@ -44,6 +44,8 @@ class NativeCore {
   late final _StrArgDartFn _saveConfig, _deleteConfig, _setSettings, _start, _stop, _logs;
   late final _StrArgDartFn _ddbSet, _inspectTable, _tableMeta, _tablePage, _partiql;
   late final _StrArgDartFn _tablePrecheck, _tableGetItem, _tablePutItem, _tableDeleteItem;
+  late final _StrDartFn _getFormatters;
+  late final _StrArgDartFn _setFormatters;
   late final _FreeDartFn _free;
 
   NativeCore() {
@@ -73,6 +75,8 @@ class NativeCore {
     _tableGetItem = _lib.lookupFunction<_StrArgNativeFn, _StrArgDartFn>('rm_table_get_item');
     _tablePutItem = _lib.lookupFunction<_StrArgNativeFn, _StrArgDartFn>('rm_table_put_item');
     _tableDeleteItem = _lib.lookupFunction<_StrArgNativeFn, _StrArgDartFn>('rm_table_delete_item');
+    _getFormatters = _lib.lookupFunction<_StrNativeFn, _StrDartFn>('rm_get_formatters');
+    _setFormatters = _lib.lookupFunction<_StrArgNativeFn, _StrArgDartFn>('rm_set_formatters');
     _free = _lib.lookupFunction<_FreeNativeFn, _FreeDartFn>('rm_free');
   }
 
@@ -335,6 +339,70 @@ class NativeCore {
     final raw =
         await Isolate.run(() => _callCoreSymbol(libPath, 'rm_table_delete', arg));
     return jsonDecode(raw) as Map<String, dynamic>;
+  }
+
+  // ---- value formatter (Browser format dropdown) ----
+
+  /// The persisted custom formatters (empty on any failure).
+  List<CustomFormatter> getFormatters() {
+    try {
+      final j = jsonDecode(_call0(_getFormatters)) as Map<String, dynamic>;
+      return ((j['formatters'] as List?) ?? [])
+          .map((e) => CustomFormatter.fromJson(e as Map<String, dynamic>))
+          .toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  /// Replace the whole custom-formatter list (atomic native persist).
+  void setFormatters(List<CustomFormatter> fs) => _expectOk(
+      _call1(_setFormatters, jsonEncode({'formatters': [for (final f in fs) f.toJson()]})));
+
+  /// Decode [valueB64] (base64 of the value's EXACT bytes) as [format]; pass
+  /// 'Auto' to auto-detect. Runs on a background isolate so decoding a large or
+  /// compressed value never blocks the UI. Never throws — returns {ok:false}.
+  Future<Map<String, dynamic>> formatValue(
+      {required String format, required String valueB64}) async {
+    final libPath = _resolveLibraryPath();
+    final arg = jsonEncode({'format': format, 'valueB64': valueB64});
+    try {
+      final raw = await Isolate.run(() => _callCoreSymbol(libPath, 'rm_format', arg));
+      return jsonDecode(raw) as Map<String, dynamic>;
+    } catch (e) {
+      return {'ok': false, 'error': e.toString()};
+    }
+  }
+
+  /// Run a custom formatter program on a value. Runs on a background isolate
+  /// (spawns an external process). Never throws — returns {ok:false, error}.
+  Future<Map<String, dynamic>> formatCustom({
+    required String command,
+    required String params,
+    required String valueB64,
+    String key = '',
+    String field = '',
+    String score = '',
+    String member = '',
+    int timeoutMs = 5000,
+  }) async {
+    final libPath = _resolveLibraryPath();
+    final arg = jsonEncode({
+      'command': command,
+      'params': params,
+      'valueB64': valueB64,
+      'key': key,
+      'field': field,
+      'score': score,
+      'member': member,
+      'timeoutMs': timeoutMs,
+    });
+    try {
+      final raw = await Isolate.run(() => _callCoreSymbol(libPath, 'rm_format_custom', arg));
+      return jsonDecode(raw) as Map<String, dynamic>;
+    } catch (e) {
+      return {'ok': false, 'error': e.toString()};
+    }
   }
 
   void _expectOk(String raw) {

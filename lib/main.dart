@@ -830,6 +830,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                   key: ValueKey('browser-${c.id}'),
                   config: c,
                   running: st?.isRunning ?? false,
+                  core: _core!,
                 ),
               ],
             ),

@@ -17,7 +17,9 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'format_viewer.dart';
 import 'models.dart';
+import 'native.dart';
 import 'resp_client.dart';
 
 /// Rows loaded so far and the cursor to fetch more. One open key = one tab.
@@ -35,6 +37,9 @@ class _KeyTab {
   // string
   final TextEditingController strCtrl = TextEditingController();
   String strFormat = 'Text';
+  // The string value's EXACT bytes (binary-safe), for the format viewer's
+  // decoders. Null until loaded.
+  Uint8List? strBytes;
 
   // inline TTL editor (ARDM-style: TTL | <input> | reset | apply)
   final TextEditingController ttlCtrl = TextEditingController();
@@ -69,7 +74,9 @@ ThemeData _denseTabTheme(BuildContext context) => Theme.of(context).copyWith(
 class BrowserPageView extends StatefulWidget {
   final RedimosConfig config;
   final bool running;
-  const BrowserPageView({super.key, required this.config, required this.running});
+  final NativeCore core;
+  const BrowserPageView(
+      {super.key, required this.config, required this.running, required this.core});
 
   @override
   State<BrowserPageView> createState() => _BrowserPageViewState();
@@ -99,6 +106,9 @@ class _BrowserPageViewState extends State<BrowserPageView>
   bool _selectMode = false;
   final _checked = <String>{};
 
+  // custom value formatters (persisted natively; shared by every FormatViewer)
+  List<CustomFormatter> _formatters = [];
+
   // right panel — multi-tab key workspace
   final _tabs = <_KeyTab>[];
   int _active = -1;
@@ -112,7 +122,15 @@ class _BrowserPageViewState extends State<BrowserPageView>
   @override
   void initState() {
     super.initState();
+    _formatters = widget.core.getFormatters();
     if (widget.running) _connect();
+  }
+
+  /// Open the custom-formatter manager and adopt the updated list app-wide.
+  Future<List<CustomFormatter>?> _manageFormatters() async {
+    final updated = await showCustomFormatterManager(context, widget.core);
+    if (updated != null && mounted) setState(() => _formatters = updated);
+    return updated ?? _formatters;
   }
 
   @override
@@ -317,9 +335,11 @@ class _BrowserPageViewState extends State<BrowserPageView>
       t.ttlCtrl.text = '$ttl';
       switch (type) {
         case 'string':
+          final bytes = await c.getBytes(t.key);
           final v = (await c.get(t.key)) ?? '';
           if (!_tabs.contains(t)) return; // tab closed mid-load → strCtrl disposed
           t.strCtrl.text = v;
+          t.strBytes = bytes ?? Uint8List(0);
           t.strFormat = 'Text';
         case 'hash':
           t.total = await c.hlen(t.key);
@@ -1019,121 +1039,88 @@ class _BrowserPageViewState extends State<BrowserPageView>
     }
   }
 
-  // -- string --
+  // -- string -- (ARDM-style format viewer over the value's EXACT bytes, so
+  // gzip/msgpack/protobuf/… decode faithfully; Text is the editable format).
   Widget _stringEditor(_KeyTab t) {
-    final raw = t.strCtrl.text;
-    // The RESP layer decodes bulk strings as UTF-8 (lossy) — a replacement char
-    // means the value has non-UTF-8 bytes, so Hex/Size are approximate and a Save
-    // would persist the mojibake. Warn rather than silently corrupt.
-    final binaryish = raw.contains('�');
-    Widget body;
-    if (t.strFormat == 'JSON') {
-      Widget child;
-      if (raw.length > 200000) {
-        child = Text('Value is ${raw.length ~/ 1024} KB — too large to render as a JSON tree. Use Text view.',
-            style: const TextStyle(color: Colors.orange, fontFamily: 'monospace'));
-      } else {
-        Object? decoded;
-        String? err;
-        try {
-          decoded = jsonDecode(raw);
-        } catch (_) {
-          err = 'Not valid JSON';
-        }
-        child = err != null
-            ? Text(err, style: const TextStyle(color: Colors.orange, fontFamily: 'monospace'))
-            : _JsonView(data: decoded);
+    final bytes = t.strBytes ?? Uint8List.fromList(utf8.encode(t.strCtrl.text));
+    return FormatViewer(
+      key: ValueKey('str-${t.key}'),
+      core: widget.core,
+      bytes: bytes,
+      formatters: _formatters,
+      onManage: _manageFormatters,
+      redisKey: t.key,
+      onSave: (text) => _guard(() => _client!.set(t.key, text)),
+    );
+  }
+
+  /// Open a read-only format viewer over one collection value's exact bytes.
+  /// Used by the row "view" action for hash/list values (binary-safe re-fetch)
+  /// and set/zset members (the member text is the value).
+  Future<void> _viewValue(_KeyTab t, List<String> row) async {
+    Uint8List bytes;
+    String field = '', member = '', score = '';
+    try {
+      switch (t.type) {
+        case 'hash':
+          field = row[0];
+          bytes = (await _client!.hgetBytes(t.key, row[0])) ?? Uint8List(0);
+        case 'list':
+          bytes = (await _client!.lindexBytes(t.key, int.parse(row[0]))) ?? Uint8List(0);
+        case 'set':
+          member = row[0];
+          bytes = Uint8List.fromList(utf8.encode(row[0]));
+        case 'zset':
+          member = row[0];
+          score = row[1];
+          bytes = Uint8List.fromList(utf8.encode(row[0]));
+        default:
+          bytes = Uint8List.fromList(utf8.encode(row.length > 1 ? row[1] : row[0]));
       }
-      body = Container(
-        width: double.infinity,
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          border: Border.all(color: Theme.of(context).dividerColor),
-          borderRadius: BorderRadius.circular(6),
-        ),
-        child: SingleChildScrollView(
-            child: Align(alignment: Alignment.topLeft, child: child)),
-      );
-    } else if (t.strFormat == 'Hex') {
-      final hex = utf8
-          .encode(raw)
-          .map((b) => b.toRadixString(16).padLeft(2, '0'))
-          .join(' ');
-      body = Container(
-        width: double.infinity,
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          border: Border.all(color: Theme.of(context).dividerColor),
-          borderRadius: BorderRadius.circular(6),
-        ),
-        child: SingleChildScrollView(
-          child: Align(
-            alignment: Alignment.topLeft,
-            child: SelectableText(hex, style: const TextStyle(fontFamily: 'monospace', fontSize: 13)),
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+      return;
+    }
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => Dialog(
+        child: SizedBox(
+          width: 720,
+          height: 540,
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              Row(children: [
+                Expanded(
+                  child: Text('View · ${t.key}${field.isNotEmpty ? ' · $field' : ''}',
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+                ),
+                IconButton(
+                  tooltip: 'Close',
+                  icon: const Icon(Icons.close, size: 18),
+                  onPressed: () => Navigator.pop(ctx),
+                ),
+              ]),
+              const SizedBox(height: 8),
+              Expanded(
+                child: FormatViewer(
+                  core: widget.core,
+                  bytes: bytes,
+                  formatters: _formatters,
+                  onManage: _manageFormatters,
+                  redisKey: t.key,
+                  field: field,
+                  member: member,
+                  score: score,
+                ),
+              ),
+            ]),
           ),
         ),
-      );
-    } else {
-      // Fill the pane height like ARDM's textarea.
-      body = TextField(
-        controller: t.strCtrl,
-        expands: true,
-        minLines: null,
-        maxLines: null,
-        textAlignVertical: TextAlignVertical.top,
-        style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
-        decoration: const InputDecoration(
-          border: OutlineInputBorder(),
-          contentPadding: EdgeInsets.all(12),
-        ),
-        onChanged: (_) => setState(() {}),
-      );
-    }
-    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      if (binaryish)
-        Padding(
-          padding: const EdgeInsets.only(bottom: 8),
-          child: Row(children: [
-            const Icon(Icons.warning_amber, size: 16, color: Colors.orange),
-            const SizedBox(width: 6),
-            Expanded(
-              child: Text('This value has non-UTF-8 bytes — Hex/Size are approximate and saving may corrupt it.',
-                  style: TextStyle(fontSize: 12, color: Colors.orange.shade800)),
-            ),
-          ]),
-        ),
-      Row(children: [
-        DropdownButton<String>(
-          value: t.strFormat,
-          items: const [
-            DropdownMenuItem(value: 'Text', child: Text('Text')),
-            DropdownMenuItem(value: 'JSON', child: Text('JSON')),
-            DropdownMenuItem(value: 'Hex', child: Text('Hex')),
-          ],
-          onChanged: (v) => setState(() => t.strFormat = v ?? 'Text'),
-        ),
-        const SizedBox(width: 12),
-        Text('Size: ${utf8.encode(raw).length}B',
-            style: TextStyle(fontSize: 12, color: Theme.of(context).hintColor)),
-        const SizedBox(width: 8),
-        TextButton.icon(
-          onPressed: () => _copy(raw, 'Value copied'),
-          icon: const Icon(Icons.copy, size: 14),
-          label: const Text('Copy'),
-        ),
-      ]),
-      const SizedBox(height: 8),
-      Expanded(child: body),
-      const SizedBox(height: 10),
-      // ARDM puts Save below the value area, bottom-right.
-      Align(
-        alignment: Alignment.centerRight,
-        child: FilledButton(
-          onPressed: () => _guard(() => _client!.set(t.key, t.strCtrl.text)),
-          child: const Text('Save'),
-        ),
       ),
-    ]);
+    );
   }
 
   // -- shared collection editor (hash / list / set / zset) --
@@ -1292,9 +1279,6 @@ class _BrowserPageViewState extends State<BrowserPageView>
     final cells = scoreFirst
         ? [row[1], row[0]]
         : (singleColumn ? [row[0]] : [row[0], row[1]]);
-    // What the copy icon yields: the row's VALUE — hash value, list element,
-    // set member, and for zset the MEMBER (row[0]; row[1] is the score).
-    final copyText = scoreFirst || singleColumn ? row[0] : row[1];
     // ARDM renders all four row action icons in the same accent blue.
     final iconColor = disabled ? scheme.outline : const Color(0xFF4A8FE0);
     return DataRow(
@@ -1310,10 +1294,17 @@ class _BrowserPageViewState extends State<BrowserPageView>
           )),
         DataCell(Row(mainAxisSize: MainAxisSize.min, children: [
           IconButton(
-            tooltip: 'Copy',
+            tooltip: 'View / format value',
             visualDensity: VisualDensity.compact,
             icon: Icon(Icons.description_outlined, size: 15, color: iconColor),
-            onPressed: () => _copy(copyText),
+            onPressed: () => _viewValue(t, row),
+          ),
+          IconButton(
+            tooltip: 'Copy value',
+            visualDensity: VisualDensity.compact,
+            icon: Icon(Icons.copy, size: 14, color: iconColor),
+            // The row's VALUE: hash value / list element (row[1]); set/zset member (row[0]).
+            onPressed: () => _copy(scoreFirst || singleColumn ? row[0] : row[1], 'Value copied'),
           ),
           IconButton(
             visualDensity: VisualDensity.compact,
@@ -1768,114 +1759,5 @@ class _FolderState extends State<_Folder> {
       ],
     );
     if (choice == 'delete') widget.onDelete();
-  }
-}
-
-// A compact collapsible, syntax-highlighted JSON tree.
-class _JsonView extends StatelessWidget {
-  final Object? data;
-  const _JsonView({required this.data});
-
-  @override
-  Widget build(BuildContext context) => _JsonNode(label: null, value: data, depth: 0, last: true);
-}
-
-class _JsonNode extends StatefulWidget {
-  final String? label; // object key or list index prefix
-  final Object? value;
-  final int depth;
-  final bool last;
-  const _JsonNode({required this.label, required this.value, required this.depth, required this.last});
-
-  @override
-  State<_JsonNode> createState() => _JsonNodeState();
-}
-
-class _JsonNodeState extends State<_JsonNode> {
-  // Deep levels start collapsed so a huge/deep document doesn't build tens of
-  // thousands of widgets up front; each node also caps how many children it draws.
-  static const int _maxChildren = 500;
-  late bool _open = widget.depth < 3;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    const mono = TextStyle(fontFamily: 'monospace', fontSize: 12.5);
-    final v = widget.value;
-    final keyPrefix = widget.label == null
-        ? const TextSpan(text: '')
-        : TextSpan(text: '"${widget.label}": ', style: mono.copyWith(color: scheme.primary));
-
-    if (v is Map || v is List) {
-      final List<MapEntry<String?, Object?>> entries = v is Map
-          ? v.entries.map((e) => MapEntry<String?, Object?>(e.key.toString(), e.value)).toList()
-          : [for (var i = 0; i < (v as List).length; i++) MapEntry<String?, Object?>(null, v[i])];
-      final isMap = v is Map;
-      final open = isMap ? '{' : '[';
-      final close = isMap ? '}' : ']';
-      return Padding(
-        padding: EdgeInsets.only(left: widget.depth == 0 ? 0 : 14),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          InkWell(
-            onTap: () => setState(() => _open = !_open),
-            child: Row(mainAxisSize: MainAxisSize.min, children: [
-              Icon(_open ? Icons.expand_more : Icons.chevron_right, size: 14, color: scheme.onSurfaceVariant),
-              Flexible(
-                child: RichText(
-                  text: TextSpan(children: [
-                    keyPrefix,
-                    TextSpan(text: _open ? open : '$open … $close${widget.last ? '' : ','}', style: mono),
-                  ]),
-                ),
-              ),
-            ]),
-          ),
-          if (_open) ...[
-            for (var i = 0; i < entries.length && i < _maxChildren; i++)
-              _JsonNode(
-                label: entries[i].key,
-                value: entries[i].value,
-                depth: widget.depth + 1,
-                last: i == entries.length - 1,
-              ),
-            if (entries.length > _maxChildren)
-              Padding(
-                padding: const EdgeInsets.only(left: 14),
-                child: Text('… ${entries.length - _maxChildren} more',
-                    style: mono.copyWith(color: scheme.onSurfaceVariant)),
-              ),
-            Padding(
-              padding: const EdgeInsets.only(left: 14),
-              child: Text('$close${widget.last ? '' : ','}', style: mono),
-            ),
-          ],
-        ]),
-      );
-    }
-
-    // scalar
-    Color c = scheme.onSurface;
-    String text;
-    if (v == null) {
-      text = 'null';
-      c = Colors.grey;
-    } else if (v is String) {
-      text = '"$v"';
-      c = Colors.green.shade600;
-    } else if (v is num || v is bool) {
-      text = '$v';
-      c = Colors.orange.shade700;
-    } else {
-      text = '$v';
-    }
-    return Padding(
-      padding: EdgeInsets.only(left: widget.depth == 0 ? 0 : 14),
-      child: RichText(
-        text: TextSpan(children: [
-          keyPrefix,
-          TextSpan(text: '$text${widget.last ? '' : ','}', style: mono.copyWith(color: c)),
-        ]),
-      ),
-    );
   }
 }

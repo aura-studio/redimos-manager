@@ -163,6 +163,25 @@ class Settings {
       };
 }
 
+/// A user-defined value formatter for the Browser's format dropdown. [command]
+/// is an external program; [params] is an argv template whose {VALUE}/{HEX}/
+/// {KEY}/{FIELD}/{SCORE}/{MEMBER} placeholders are substituted at run time.
+/// [name] is the dropdown label and the unique id.
+class CustomFormatter {
+  final String name;
+  final String command;
+  final String params;
+  const CustomFormatter({required this.name, required this.command, required this.params});
+
+  factory CustomFormatter.fromJson(Map<String, dynamic> j) => CustomFormatter(
+        name: (j['name'] ?? '') as String,
+        command: (j['command'] ?? '') as String,
+        params: (j['params'] ?? '') as String,
+      );
+
+  Map<String, dynamic> toJson() => {'name': name, 'command': command, 'params': params};
+}
+
 // ---------------------------------------------------------------------------
 // Local DynamoDB (the manager-owned local backend)
 // ---------------------------------------------------------------------------
