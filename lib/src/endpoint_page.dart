@@ -462,18 +462,23 @@ class _EndpointPageViewState extends State<EndpointPageView>
     final endpoint = pre['endpoint']?.toString() ?? '';
     final loopback = pre['loopback'] == true;
     final itemCount = (pre['itemCount'] as num?)?.toInt() ?? -1;
+    final ageDays = (pre['ageDays'] as num?)?.toInt() ?? -1;
     final version = pre['version']?.toString() ?? '';
     final deps = ((pre['dependents'] as List?) ?? []).cast<Map>();
     final runningDeps = deps.where((d) => d['running'] == true).toList();
     final needsName = !loopback && !provision;
     final nameCtrl = TextEditingController();
     final countStr = itemCount < 0 ? 'unknown item count' : '~${_fmt(itemCount)} items';
+    // Extra friction when destroying a large or old table — recreate only, since
+    // provision creates an empty table and there is nothing to lose.
+    final bigOrOld = !provision && ((itemCount > 100000) || (ageDays > 30));
+    var ack = false;
 
     try {
       return await showDialog<bool>(
       context: context,
       builder: (ctx) => StatefulBuilder(builder: (ctx, setD) {
-        final ok = !needsName || nameCtrl.text == table;
+        final ok = (!needsName || nameCtrl.text == table) && (!bigOrOld || ack);
         return AlertDialog(
           title: Text(provision ? 'Provision table "$table"?' : 'Recreate table "$table"?'),
           content: SizedBox(
@@ -524,6 +529,22 @@ class _EndpointPageViewState extends State<EndpointPageView>
                   autofocus: true,
                   decoration: InputDecoration(hintText: table, border: const OutlineInputBorder(), isDense: true),
                   onChanged: (_) => setD(() {}),
+                ),
+              ],
+              if (bigOrOld) ...[
+                const SizedBox(height: 6),
+                CheckboxListTile(
+                  contentPadding: EdgeInsets.zero,
+                  dense: true,
+                  controlAffinity: ListTileControlAffinity.leading,
+                  value: ack,
+                  onChanged: (v) => setD(() => ack = v ?? false),
+                  title: Text(
+                    'I understand this table has '
+                    '${itemCount < 0 ? 'many' : '~${_fmt(itemCount)}'} items'
+                    '${ageDays > 0 ? ' and was created $ageDays days ago' : ''}.',
+                    style: const TextStyle(fontSize: 12.5),
+                  ),
                 ),
               ],
             ]),

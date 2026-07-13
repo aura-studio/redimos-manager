@@ -326,9 +326,10 @@ class _TablePageViewState extends State<TablePageView>
     );
   }
 
-  // Table lifecycle is only offered against an explicit endpoint. In AWS mode
-  // (no endpoint) the manager can't tell a test account from production, so the
-  // destructive controls don't exist here at all — only a disabled lock chip.
+  // AWS mode (no endpoint) is read-only for item writes: the manager can't tell a
+  // test account from production. Destructive table lifecycle (recreate / provision
+  // / delete) lives entirely in the Endpoint tab, which is endpoint-mode only — this
+  // page is just the item browser/editor (AWS-console "Explore items" parity).
   bool get _awsMode => widget.config.endpoint.trim().isEmpty;
 
   Widget _headerRow() {
@@ -339,203 +340,12 @@ class _TablePageViewState extends State<TablePageView>
       Text(widget.config.table,
           style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
       const Spacer(),
-      if (_awsMode)
-        Tooltip(
-          message: 'Destructive table operations are hard-disabled for AWS targets.\n'
-              'Use the AWS console or CLI.',
-          child: Chip(
-            avatar: Icon(Icons.lock_outline, size: 15, color: scheme.onSurfaceVariant),
-            label: const Text('Table ops — Endpoint mode only'),
-            visualDensity: VisualDensity.compact,
-          ),
-        )
-      else ...[
-        OutlinedButton.icon(
-          style: OutlinedButton.styleFrom(
-              foregroundColor: scheme.error, side: BorderSide(color: scheme.error)),
-          onPressed: _busy ? null : _dangerFlow,
-          icon: const Icon(Icons.restart_alt, size: 18),
-          label: const Text('Recreate'),
-        ),
-        const SizedBox(width: 8),
-      ],
       OutlinedButton.icon(
         onPressed: _running ? null : () => _meta == null ? _loadMeta() : _run(),
         icon: const Icon(Icons.refresh, size: 18),
         label: const Text('Refresh'),
       ),
     ]);
-  }
-
-  bool _busy = false; // a recreate is in flight
-
-  // ---- recreate table ----
-
-  Future<void> _dangerFlow() async {
-    final pre = widget.core.tablePrecheck(widget.config.id);
-    if (pre['ok'] != true) {
-      _toast('${pre['error'] ?? 'precheck failed'}', error: true);
-      return;
-    }
-    if (pre['allowed'] != true) {
-      _toast('${pre['reason'] ?? 'not allowed'}', error: true);
-      return;
-    }
-    final go = await _confirmDialog(pre: pre);
-    if (go != true || !mounted) return;
-
-    setState(() => _busy = true);
-    // Modal barrier while the native orchestration runs. The native call runs on
-    // a background isolate (tableRecreate), so this dialog's spinner animates and
-    // the app stays responsive for the whole ~2–13s rebuild.
-    final progress = showDialog<void>(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => const AlertDialog(
-        content: Row(mainAxisSize: MainAxisSize.min, children: [
-          SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.5)),
-          SizedBox(width: 16),
-          Text('Recreating table…'),
-        ]),
-      ),
-    );
-    Map<String, dynamic> res;
-    try {
-      res = await widget.core.tableRecreate(widget.config.id);
-    } catch (e) {
-      res = {'ok': false, 'error': '$e'};
-    }
-    if (mounted) Navigator.of(context, rootNavigator: true).maybePop(); // dismiss progress
-    await progress; // ensure closed
-    if (!mounted) return;
-    setState(() => _busy = false);
-
-    if (res['ok'] == true) {
-      final warn = res['warning'];
-      _toast(warn != null ? 'Table recreated — $warn' : 'Table recreated');
-      _run(); // reload the (now empty / recreated) table view
-    } else {
-      _toast('${res['error'] ?? 'operation failed'}', error: true);
-      if (res['restartFailed'] == true) _run();
-    }
-  }
-
-  Future<bool?> _confirmDialog({required Map<String, dynamic> pre}) {
-    final scheme = Theme.of(context).colorScheme;
-    final table = pre['table']?.toString() ?? widget.config.table;
-    final endpoint = pre['endpoint']?.toString() ?? '';
-    final loopback = pre['loopback'] == true;
-    final itemCount = (pre['itemCount'] as num?)?.toInt() ?? -1;
-    final ageDays = (pre['ageDays'] as num?)?.toInt() ?? -1;
-    final version = pre['version']?.toString() ?? '';
-    final deps = ((pre['dependents'] as List?) ?? []).cast<Map>();
-    final runningDeps = deps.where((d) => d['running'] == true).toList();
-
-    // Non-loopback endpoints and large/old tables raise friction.
-    final needsName = !loopback;
-    final bigOrOld = (itemCount > 100000) || (ageDays > 30);
-    final nameCtrl = TextEditingController();
-    var ack = false; // blast-radius acknowledgement (captured across rebuilds)
-
-    final countStr = itemCount < 0 ? 'unknown item count' : '~${_fmt(itemCount)} items';
-
-    return showDialog<bool>(
-      context: context,
-      builder: (ctx) => StatefulBuilder(builder: (ctx, setD) {
-        final typedOk = !needsName || nameCtrl.text == table;
-        final enabled = typedOk && (!bigOrOld || ack);
-        return AlertDialog(
-            title: Text('Recreate table "$table"?'),
-            content: SizedBox(
-              width: 460,
-              child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text('Deletes and recreates the DynamoDB table at $endpoint · $countStr. '
-                    'All data in it is permanently lost.'),
-                const SizedBox(height: 10),
-                Text(
-                  runningDeps.isEmpty
-                      ? 'This will start "${deps.isNotEmpty ? deps.first['name'] : widget.config.name}" once so the table is created now, using redimos’s official schema${version.isEmpty ? '' : ' ($version keys)'}.'
-                      : 'This will: stop ${runningDeps.length} running config(s) that use this table → delete the table → restart them. '
-                          'redimos recreates the table on startup with its official schema${version.isEmpty ? '' : ' ($version keys)'}.',
-                  style: TextStyle(fontSize: 13, color: scheme.onSurfaceVariant),
-                ),
-                if (runningDeps.isNotEmpty) ...[
-                  const SizedBox(height: 8),
-                  Wrap(spacing: 8, runSpacing: 4, children: [
-                    for (final d in runningDeps)
-                      Chip(
-                        visualDensity: VisualDensity.compact,
-                        avatar: const Icon(Icons.circle, size: 10, color: Colors.green),
-                        label: Text('${d['name']}'),
-                      ),
-                  ]),
-                ],
-                if (!loopback) ...[
-                  const SizedBox(height: 12),
-                  Container(
-                    padding: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(
-                      color: Colors.orange.withValues(alpha: 0.12),
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: Row(children: [
-                      const Icon(Icons.warning_amber, size: 18, color: Colors.orange),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text('This endpoint is not loopback ($endpoint) — it may be a shared environment.',
-                            style: TextStyle(fontSize: 12.5, color: Colors.orange.shade900)),
-                      ),
-                    ]),
-                  ),
-                  const SizedBox(height: 12),
-                  Text('Type the table name to confirm:', style: TextStyle(fontSize: 13, color: scheme.onSurfaceVariant)),
-                  const SizedBox(height: 6),
-                  TextField(
-                    controller: nameCtrl,
-                    autofocus: true,
-                    decoration: InputDecoration(hintText: table, border: const OutlineInputBorder(), isDense: true),
-                    onChanged: (_) => setD(() {}),
-                  ),
-                ],
-                if (bigOrOld) ...[
-                  const SizedBox(height: 6),
-                  CheckboxListTile(
-                    contentPadding: EdgeInsets.zero,
-                    dense: true,
-                    controlAffinity: ListTileControlAffinity.leading,
-                    value: ack,
-                    onChanged: (v) => setD(() => ack = v ?? false),
-                    title: Text(
-                      'I understand this table has '
-                      '${itemCount < 0 ? 'many' : '~${_fmt(itemCount)}'} items'
-                      '${ageDays > 0 ? ' and was created $ageDays days ago' : ''}.',
-                      style: const TextStyle(fontSize: 12.5),
-                    ),
-                  ),
-                ],
-              ]),
-            ),
-            actions: [
-              TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-              FilledButton(
-                style: FilledButton.styleFrom(backgroundColor: scheme.error),
-                onPressed: enabled ? () => Navigator.pop(ctx, true) : null,
-                child: const Text('Recreate'),
-              ),
-            ],
-          );
-      }),
-    );
-  }
-
-  String _fmt(int n) {
-    final s = n.toString();
-    final b = StringBuffer();
-    for (var i = 0; i < s.length; i++) {
-      if (i > 0 && (s.length - i) % 3 == 0) b.write(',');
-      b.write(s[i]);
-    }
-    return b.toString();
   }
 
   void _toast(String msg, {bool error = false}) {
