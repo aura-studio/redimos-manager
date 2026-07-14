@@ -1391,7 +1391,7 @@ class _BrowserPageViewState extends State<BrowserPageView>
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text(tr('br.deleteWholeFolder')),
-        content: Text('Scan and delete every key under "$prefix:" ? This cannot be undone.'),
+        content: Text(trp('br.deleteFolderBody', {'prefix': prefix})),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(tr('br.cancel'))),
           FilledButton(

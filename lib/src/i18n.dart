@@ -52,6 +52,14 @@ String tr(String key) {
   return row[appLang.value] ?? row[AppLang.en] ?? key;
 }
 
+/// tr() with `{name}` placeholder substitution, for strings that interpolate
+/// runtime values (endpoint, table name, counts…). Template holds `{name}`.
+String trp(String key, Map<String, String> vars) {
+  var s = tr(key);
+  vars.forEach((k, v) => s = s.replaceAll('{$k}', v));
+  return s;
+}
+
 // The translation table. Extraction is incremental — the most visible strings
 // (top bar, tabs, common actions) are done first; the rest migrate over time.
 // Product names (PartiQL, DynamoDB, Redis, redimos) intentionally stay as-is.
@@ -75,6 +83,83 @@ const Map<String, Map<AppLang, String>> _strings = {
   'tab.console': {AppLang.en: 'Console', AppLang.zh: '命令行'},
   'tab.browser': {AppLang.en: 'Browser', AppLang.zh: '浏览器'},
   'tab.playground': {AppLang.en: 'Playground', AppLang.zh: '脚本台'},
+  'tab.overview': {AppLang.en: 'Overview', AppLang.zh: '概览'},
+
+  // --- v1.2 endpoint Overview tab ---
+  'ep.ovBackend': {AppLang.en: 'Backend', AppLang.zh: '后端'},
+  'ep.ovEndpoint': {AppLang.en: 'Endpoint', AppLang.zh: '端点地址'},
+  'ep.ovRegion': {AppLang.en: 'Region', AppLang.zh: '区域'},
+  'ep.ovAwsDefault': {
+    AppLang.en: 'AWS default resolver',
+    AppLang.zh: 'AWS 默认解析'
+  },
+  'ep.ovReachability': {AppLang.en: 'Reachability', AppLang.zh: '连通性'},
+  'ep.ovChecking': {AppLang.en: 'Checking…', AppLang.zh: '检测中…'},
+  'ep.ovReachable': {AppLang.en: 'Reachable', AppLang.zh: '可达'},
+  'ep.ovUnreachable': {AppLang.en: 'Unreachable', AppLang.zh: '不可达'},
+  'ep.ovTablesCount': {AppLang.en: 'tables', AppLang.zh: '张表'},
+  'ep.ovRecheck': {AppLang.en: 'Re-check', AppLang.zh: '重新检测'},
+  'ep.ovReadOnlyNote': {
+    AppLang.en: 'AWS endpoint — writes are disabled everywhere (read-only).',
+    AppLang.zh: 'AWS 端点 —— 所有写操作均被禁用(只读)。'
+  },
+  'ep.ovNoProcessNote': {
+    AppLang.en:
+        'An endpoint is a storage backend, not a managed process — CPU/memory monitoring and process logs live on the Instances that proxy it.',
+    AppLang.zh:
+        '端点是存储后端而非受管进程 —— CPU/内存监控与进程日志在代理它的「实例」上。'
+  },
+
+  // --- danger/confirm dialog bodies (interpolated via trp) ---
+  'danger.deleteTableBody': {
+    AppLang.en:
+        'Permanently deletes the table at {endpoint} · {count}. It is NOT recreated — the table and all its data are gone.',
+    AppLang.zh: '将永久删除 {endpoint} · {count} 处的表。不会重建 —— 表及其全部数据都会消失。'
+  },
+  'danger.provisionTableBody': {
+    AppLang.en:
+        'Creates the table at {endpoint} with redimos’s official schema{version}, empty.',
+    AppLang.zh: '将在 {endpoint} 处按 redimos 官方 schema{version} 建一张空表。'
+  },
+  'danger.recreateTableBody': {
+    AppLang.en:
+        'Deletes and recreates the table at {endpoint} · {count}. All data in it is permanently lost.',
+    AppLang.zh: '将删除并重建 {endpoint} · {count} 处的表。其中的全部数据都会永久丢失。'
+  },
+  'danger.purgeItemsBody': {
+    AppLang.en:
+        'Deletes every item ({count}) from the table at {endpoint}. The table and its schema stay. This cannot be undone.',
+    AppLang.zh: '将删除 {endpoint} 处表中的全部条目({count})。表与其 schema 保留。此操作不可撤销。'
+  },
+  'danger.deleteStopsConfigs': {
+    AppLang.en:
+        'This stops {n} running config(s) that use this table and leaves them stopped.',
+    AppLang.zh: '这会停止使用该表的 {n} 个正在运行的配置，并让它们保持停止。'
+  },
+  'danger.sharedEnvWarning': {
+    AppLang.en:
+        'This endpoint is not loopback ({endpoint}) — it may be a shared environment.',
+    AppLang.zh: '该端点不是回环地址({endpoint})—— 可能是共享环境。'
+  },
+  'danger.versionKeys': {AppLang.en: ' ({version} keys)', AppLang.zh: '({version} 键)'},
+  'danger.provisionStepsBody': {
+    AppLang.en:
+        'This will: stop {n} running config(s) that use this table → create it → restart them.',
+    AppLang.zh: '这会:停止使用该表的 {n} 个运行中的配置 → 建表 → 再重启它们。'
+  },
+  'danger.recreateStepsBody': {
+    AppLang.en:
+        'This will: stop {n} running config(s) that use this table → delete and recreate it → restart them.',
+    AppLang.zh: '这会:停止使用该表的 {n} 个运行中的配置 → 删除并重建 → 再重启它们。'
+  },
+  'pq.modifyDataWarning': {
+    AppLang.en: 'This statement can modify data in "{table}".\n\n{stmt}',
+    AppLang.zh: '该语句可能修改 "{table}" 中的数据。\n\n{stmt}'
+  },
+  'br.deleteFolderBody': {
+    AppLang.en: 'Scan and delete every key under "{prefix}:" ? This cannot be undone.',
+    AppLang.zh: '扫描并删除 "{prefix}:" 下的所有键？此操作不可撤销。'
+  },
 
   // --- config sidebar ---
   'config.new': {AppLang.en: 'New config', AppLang.zh: '新建配置'},

@@ -24,8 +24,9 @@
       (8-agent workflow, 397 keys, product/brand names left as-is).
 - [x] 1.5 **TEST**: `flutter analyze` clean; launch with `locale=zh` → tabs and
       Configure form render in Chinese (verified via screenshot).
-- [ ] 1.6 Extract the remaining mid-sentence interpolations the workflow left
-      (Purged N items / delete-confirm bodies / stats caption). *(polish, deferred)*
+- [x] 1.6 Extract the remaining mid-sentence interpolations (delete/recreate/
+      purge confirm bodies, shared-env warning, PartiQL/folder-delete confirms) via
+      the new `trp()` placeholder helper. *(done in P6.2)*
 
 ## Phase 2 — Data model split + migration  · commit `5288fa7`  · DONE
 
@@ -126,9 +127,15 @@
 
 ## Phase 6 — Finishing
 
-- [ ] 6.1 Endpoint Monitor/Logs for AWS (client-side call metrics / API log) —
-      minimal or clearly-labeled placeholder.
-- [ ] 6.2 i18n completion: sweep new views; 1.6 leftovers.
+- [x] 6.1 Endpoint **Overview** tab (`_EndpointOverview` in `endpoint_detail.dart`)
+      instead of a fake CPU Monitor: backend kind/endpoint/region + a live
+      reachability probe (times `epListTables` → Reachable ✓ N tables · Xms / ✗
+      error, Re-check button) + an honest note that an endpoint is storage, not a
+      managed process (CPU/logs live on the Instances). AWS shows a read-only note.
+- [x] 6.2 i18n completion: all remaining danger/confirm dialog bodies (delete/
+      recreate/provision table, shared-env warning, PartiQL write, folder delete)
+      moved to `tr()`/new `trp()` placeholder helper; the only literals left are
+      product/tech identifiers (Java/Docker/LocalStack). `1.6` leftovers done.
 - [~] 6.3 Adversarial review of the Playground native code. Two real findings
       fixed + verified on the shipped dylib:
       (a) **Read-only bypass** — `ddb.call("ExecuteStatement"/"ExecuteTransaction"/
@@ -161,6 +168,8 @@ runtime (5.1–5.4) is independent of P3/P4 and can be built in parallel; its UI
 - 2026-07-13 P5 native runtime (5.1–5.4): goja(JS)+yaegi(Go) sandboxed Playground
   engine + redis/ddb/console hosts + 10 go tests (incl. live read-only) all green.
   Committed `14e00e8`.
+- 2026-07-14 P6.1 endpoint Overview (reachability probe) + P6.2 i18n completion
+  (danger/confirm dialog bodies via `trp()`). analyze clean; app rebuilt.
 - 2026-07-14 P5 UI (5.5–5.8) + P4 endpoint tab set (4.1–4.5): `PlaygroundView`
   (JS/Go toggle + 10 samples), `EndpointDetailView` (Tables·Explorer·PartiQL·
   Playground), `playgroundRun` FFI, `pg.*` i18n. yaegi limits mapped empirically

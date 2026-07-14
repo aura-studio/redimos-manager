@@ -115,8 +115,8 @@ class _PartiqlPageViewState extends State<PartiqlPageView>
         context: context,
         builder: (ctx) => AlertDialog(
           title: Text(tr('pq.runWriteTitle')),
-          content: Text(
-              'This statement can modify data in "${widget.config.table}".\n\n$stmt'),
+          content: Text(trp('pq.modifyDataWarning',
+              {'table': widget.config.table, 'stmt': stmt})),
           actions: [
             TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(tr('pq.cancel'))),
             FilledButton(onPressed: () => Navigator.pop(ctx, true), child: Text(tr('pq.run'))),

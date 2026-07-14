@@ -575,13 +575,16 @@ class _EndpointPageViewState extends State<EndpointPageView>
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(isDelete
-                        ? 'Permanently deletes the table at $endpoint · $countStr. It is NOT recreated — the table and all its data are gone.'
-                        : 'Deletes every item ($countStr) from the table at $endpoint. The table and its schema stay. This cannot be undone.'),
+                        ? trp('danger.deleteTableBody',
+                            {'endpoint': endpoint, 'count': countStr})
+                        : trp('danger.purgeItemsBody',
+                            {'endpoint': endpoint, 'count': countStr})),
                     if (runningDeps.isNotEmpty) ...[
                       const SizedBox(height: 10),
                       Text(
                         isDelete
-                            ? 'This stops ${runningDeps.length} running config(s) that use this table and leaves them stopped.'
+                            ? trp('danger.deleteStopsConfigs',
+                                {'n': '${runningDeps.length}'})
                             : '${runningDeps.length} ${tr('ep.runningConfigsStayUp')}',
                         style: TextStyle(fontSize: 13, color: scheme.onSurfaceVariant),
                       ),
@@ -609,7 +612,7 @@ class _EndpointPageViewState extends State<EndpointPageView>
                             const SizedBox(width: 8),
                             Expanded(
                               child: Text(
-                                  'This endpoint is not loopback ($endpoint) — it may be a shared environment.',
+                                  trp('danger.sharedEnvWarning', {'endpoint': endpoint}),
                                   style: TextStyle(
                                       fontSize: 12.5, color: Colors.orange.shade900)),
                             ),
@@ -742,13 +745,19 @@ class _EndpointPageViewState extends State<EndpointPageView>
             width: 460,
             child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text(provision
-                  ? 'Creates the table at $endpoint with redimos’s official schema${version.isEmpty ? '' : ' ($version keys)'}, empty.'
-                  : 'Deletes and recreates the table at $endpoint · $countStr. All data in it is permanently lost.'),
+                  ? trp('danger.provisionTableBody', {
+                      'endpoint': endpoint,
+                      'version': version.isEmpty
+                          ? ''
+                          : trp('danger.versionKeys', {'version': version}),
+                    })
+                  : trp('danger.recreateTableBody',
+                      {'endpoint': endpoint, 'count': countStr})),
               if (runningDeps.isNotEmpty) ...[
                 const SizedBox(height: 10),
                 Text(
-                  'This will: stop ${runningDeps.length} running config(s) that use this table → '
-                  '${provision ? 'create' : 'delete and recreate'} it → restart them.',
+                  trp(provision ? 'danger.provisionStepsBody' : 'danger.recreateStepsBody',
+                      {'n': '${runningDeps.length}'}),
                   style: TextStyle(fontSize: 13, color: scheme.onSurfaceVariant),
                 ),
                 const SizedBox(height: 8),
@@ -773,7 +782,7 @@ class _EndpointPageViewState extends State<EndpointPageView>
                     const Icon(Icons.warning_amber, size: 18, color: Colors.orange),
                     const SizedBox(width: 8),
                     Expanded(
-                      child: Text('This endpoint is not loopback ($endpoint) — it may be a shared environment.',
+                      child: Text(trp('danger.sharedEnvWarning', {'endpoint': endpoint}),
                           style: TextStyle(fontSize: 12.5, color: Colors.orange.shade900)),
                     ),
                   ]),
