@@ -32,6 +32,15 @@ func (r *respConn) close() {
 	}
 }
 
+// setDeadline bounds all subsequent reads/writes on the connection with an
+// absolute deadline `d` from now. Used by the Playground so a stalled proxy
+// can't hang a host call (which an interpreter interrupt can't cancel).
+func (r *respConn) setDeadline(d time.Duration) {
+	if r.c != nil {
+		_ = r.c.SetDeadline(time.Now().Add(d))
+	}
+}
+
 // cmd sends one command (all args as bulk strings) and returns the parsed reply:
 // string | int64 | nil | []interface{}, or an error for a -ERR reply / transport
 // failure.

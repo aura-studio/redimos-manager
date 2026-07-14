@@ -282,7 +282,12 @@ func (h *ddbHost) Call(op string, payload map[string]interface{}) (interface{}, 
 func isDdbWriteOp(op string) bool {
 	switch op {
 	case "PutItem", "DeleteItem", "UpdateItem", "BatchWriteItem", "CreateTable",
-		"DeleteTable", "UpdateTable", "TransactWriteItems":
+		"DeleteTable", "UpdateTable", "TransactWriteItems",
+		// PartiQL ops can mutate (DELETE/UPDATE/INSERT); ddb.call must treat them
+		// as writes so an AWS endpoint stays read-only (the dedicated ddb.partiql
+		// path already allows SELECT-only). Without these, a
+		// call("ExecuteStatement", {Statement:"DELETE …"}) would bypass the guard.
+		"ExecuteStatement", "ExecuteTransaction", "BatchExecuteStatement":
 		return true
 	}
 	return false
@@ -529,6 +534,11 @@ func rm_playground_run(in *C.char) (ret *C.char) {
 		return pgJSON(map[string]any{"ok": false, "error": err.Error()})
 	}
 
+	timeout := time.Duration(req.TimeoutMs) * time.Millisecond
+	if timeout <= 0 {
+		timeout = 5 * time.Second
+	}
+
 	con := &playConsole{}
 	var redisH *redisHost
 	var ddbH *ddbHost
@@ -538,6 +548,11 @@ func rm_playground_run(in *C.char) (ret *C.char) {
 			return pgJSON(map[string]any{"ok": false, "error": "connect: " + err.Error()})
 		}
 		defer conn.close()
+		// A goja/yaegi interrupt can't cancel a blocked syscall inside a host
+		// call, so bound ALL redis I/O with an absolute deadline (run timeout +
+		// slack). A proxy that accepts then stalls mid-reply then fails the read
+		// instead of hanging the run (and its Dart isolate) forever.
+		conn.setDeadline(timeout + 3*time.Second)
 		if strings.TrimSpace(req.Auth) != "" {
 			if _, err := conn.cmd("AUTH", req.Auth); err != nil {
 				return pgJSON(map[string]any{"ok": false, "error": "auth: " + err.Error()})
@@ -547,11 +562,6 @@ func rm_playground_run(in *C.char) (ret *C.char) {
 	} else {
 		cfg := req.Config
 		ddbH = &ddbHost{cfg: &cfg}
-	}
-
-	timeout := time.Duration(req.TimeoutMs) * time.Millisecond
-	if timeout <= 0 {
-		timeout = 5 * time.Second
 	}
 
 	start := time.Now()

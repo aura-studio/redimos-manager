@@ -129,8 +129,16 @@
 - [ ] 6.1 Endpoint Monitor/Logs for AWS (client-side call metrics / API log) —
       minimal or clearly-labeled placeholder.
 - [ ] 6.2 i18n completion: sweep new views; 1.6 leftovers.
-- [ ] 6.3 Adversarial review (workflow) of native additions (Playground sandbox,
-      model split edges); fix confirmed findings.
+- [~] 6.3 Adversarial review of the Playground native code. Two real findings
+      fixed + verified on the shipped dylib:
+      (a) **Read-only bypass** — `ddb.call("ExecuteStatement"/"ExecuteTransaction"/
+      "BatchExecuteStatement", …)` mutated an AWS (read-only) endpoint because
+      `isDdbWriteOp` omitted the PartiQL ops. Added them; `TestDdbReadOnlyGuard`
+      now covers every write path incl. the Call escape hatch.
+      (b) **Unbounded hang** — `respConn` had a dial timeout but no read deadline,
+      so a proxy that stalled mid-reply hung the run (goja/yaegi can't interrupt a
+      blocked syscall) and leaked the Dart isolate. Added `setDeadline(timeout+3s)`.
+      (Sandbox escape, timeout kill, model-split edges already covered by tests.)
 - [ ] 6.4 **TEST**: full `flutter analyze` + `go vet` + `go test ./native/...`
       green; migration + playground tests green.
 - [ ] 6.5 Bump pubspec to 1.2.0; build macOS DMG; VM build Windows setup.exe+zip;

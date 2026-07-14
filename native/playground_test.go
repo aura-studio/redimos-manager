@@ -118,6 +118,46 @@ func TestJSResultExport(t *testing.T) {
 	}
 }
 
+// --- AWS read-only guard: every write path (incl. the ddb.call escape hatch) ---
+
+func TestDdbReadOnlyGuard(t *testing.T) {
+	// An empty endpoint means the AWS default resolver → must be read-only.
+	aws := &ddbHost{cfg: &Config{}}
+	if !aws.readOnly() {
+		t.Fatal("empty (AWS) endpoint must be read-only")
+	}
+	// The raw Call escape hatch must refuse every write op — including the PartiQL
+	// ops, which could otherwise DELETE/UPDATE past the guard.
+	writeOps := []string{
+		"PutItem", "DeleteItem", "UpdateItem", "BatchWriteItem",
+		"CreateTable", "DeleteTable", "UpdateTable", "TransactWriteItems",
+		"ExecuteStatement", "ExecuteTransaction", "BatchExecuteStatement",
+	}
+	for _, op := range writeOps {
+		if _, err := aws.Call(op, map[string]interface{}{}); err == nil {
+			t.Errorf("Call(%q) must be refused on a read-only endpoint", op)
+		}
+	}
+	// Typed write helpers refused (before any network).
+	if _, err := aws.PutItem("t", map[string]interface{}{"pk": "1"}); err == nil {
+		t.Error("PutItem must be refused on a read-only endpoint")
+	}
+	if _, err := aws.DeleteItem("t", map[string]interface{}{"pk": "1"}); err == nil {
+		t.Error("DeleteItem must be refused on a read-only endpoint")
+	}
+	// A non-SELECT PartiQL is refused; a SELECT is allowed through (reaches the
+	// network, which we don't exercise here).
+	if _, err := aws.PartiQL(`DELETE FROM "t" WHERE pk='1'`, nil); err == nil {
+		t.Error("non-SELECT PartiQL must be refused on a read-only endpoint")
+	}
+
+	// A local/custom endpoint is NOT read-only.
+	local := &ddbHost{cfg: &Config{Endpoint: "http://127.0.0.1:8000"}}
+	if local.readOnly() {
+		t.Fatal("a local endpoint must not be read-only")
+	}
+}
+
 // --- live read-only check against a running proxy on :6379 (skipped if down) ---
 
 func TestLiveRedisReadOnly(t *testing.T) {
