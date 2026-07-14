@@ -81,14 +81,18 @@
 
 ## Phase 5 — Playground (JS + Go)
 
-- [ ] 5.1 native `go.mod`: add `goja` + `yaegi` (pure Go, offline cache); pre-warm.
-- [ ] 5.2 `native/playground.go`: `//export rm_playground_run`; host objects
-      `redis` (RESP to instance port) / `ddb` (SigV4, reuse ddbtable) / `console`;
-      dispatch by `lang` (js→goja, go→yaegi).
-- [ ] 5.3 Sandbox: no fs/net beyond the client; `vm.Interrupt` on `timeoutMs`;
-      writes re-check the AWS read-only guard; external exec argv-only.
-- [ ] 5.4 `native/playground_test.go`: JS sample + Go sample decode a value; a
-      long loop is killed by timeout; an AWS write is refused.
+- [x] 5.1 Pre-warm `goja` (dop251) + `yaegi` (traefik v0.16.1) into the offline
+      module cache (both pure Go, c-shared-safe). *(go.mod require added when 5.2 lands.)*
+- [x] 5.2 `native/playground.go` (`//export rm_playground_run`) + `native/resp_min.go`
+      (minimal RESP client): host objects `redis` (RESP to instance port) / `ddb`
+      (SigV4 via `ddbCall` + AV marshaling) / `console`; dispatch by `lang`
+      (js→goja lowercase API, go→yaegi Go API). AV plain↔attribute-value both ways.
+- [x] 5.3 Sandbox: goja has no require/process/fs, yaegi injects only redis/ddb/
+      console (no stdlib), so `import "os"` fails; `vm.Interrupt`/`EvalWithContext`
+      kill a runaway loop on `timeoutMs`; ddb writes re-check the AWS read-only guard.
+- [x] 5.4 `native/playground_test.go` (10 tests, all pass): console/sandbox/timeout
+      for JS **and** Go, AV round-trip, result export, and a live read-only check
+      against the running `:6379` proxy. Full native suite + offline build + vet green.
 - [ ] 5.5 Dart: `native.dart playgroundRun(...)`; `PlaygroundView` (editor +
       output + JS/Go toggle + sample dropdown); reused for instance/endpoint.
 - [ ] 5.6 Sample sets (JS + Go): redis (prefix stats / hash export / TTL audit /
@@ -123,3 +127,6 @@ runtime (5.1–5.4) is independent of P3/P4 and can be built in parallel; its UI
 - 2026-07-13 P0, P1 (`a2f7cb1`), P2 (`5288fa7`) complete & pushed on `feat/v1.2`.
 - 2026-07-13 P3 (two-section sidebar + collapsible rail + endpoint detail) —
   analyze clean, two-section render verified via screenshot; 3.5/3.6 deferred to P4.
+- 2026-07-13 P5 native runtime (5.1–5.4): goja(JS)+yaegi(Go) sandboxed Playground
+  engine + redis/ddb/console hosts + 10 go tests (incl. live read-only) all green.
+  UI (5.5–5.7) still to do.
