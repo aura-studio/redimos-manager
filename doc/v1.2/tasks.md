@@ -143,7 +143,8 @@
       green; migration + playground tests green.
 - [ ] 6.5 Bump pubspec to 1.2.0; build macOS DMG; VM build Windows setup.exe+zip;
       `gh release create v1.2.0` with 3 assets (mirror v1.1.0).
-- [ ] 6.6 Update memory (redimos-manager-project) with the v1.2 rework + recipe.
+- [x] 6.6 Updated memory (redimos-manager-project) with the v1.2 rework + the
+      yaegi/goja Playground constraints + the P6.3 fixes.
 
 ---
 
