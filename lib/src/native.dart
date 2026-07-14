@@ -122,7 +122,13 @@ class NativeCore {
   // ---- typed API ----
   String version() => _call0(_version);
 
-  ({List<RedimosConfig> configs, Settings settings, List<String> stopAllSnapshot}) load() {
+  ({
+    List<RedimosConfig> configs,
+    List<DdbEndpoint> endpoints,
+    List<ProxyInstance> instances,
+    Settings settings,
+    List<String> stopAllSnapshot,
+  }) load() {
     final j = jsonDecode(_call0(_load)) as Map<String, dynamic>;
     // The core refuses to manage children when another app instance already
     // holds the single-instance lock; surface that instead of a broken UI.
@@ -131,12 +137,25 @@ class NativeCore {
     final configs = ((j['configs'] as List?) ?? [])
         .map((e) => RedimosConfig.fromJson(e as Map<String, dynamic>))
         .toList();
+    // v1.2 split view of the same configs, grouped by backend.
+    final endpoints = ((j['endpoints'] as List?) ?? [])
+        .map((e) => DdbEndpoint.fromJson(e as Map<String, dynamic>))
+        .toList();
+    final instances = ((j['instances'] as List?) ?? [])
+        .map((e) => ProxyInstance.fromJson(e as Map<String, dynamic>))
+        .toList();
     final settings =
         Settings.fromJson((j['settings'] as Map<String, dynamic>?) ?? {});
     final snap = ((j['stopAllSnapshot'] as List?) ?? [])
         .map((e) => e.toString())
         .toList();
-    return (configs: configs, settings: settings, stopAllSnapshot: snap);
+    return (
+      configs: configs,
+      endpoints: endpoints,
+      instances: instances,
+      settings: settings,
+      stopAllSnapshot: snap,
+    );
   }
 
   Map<String, InstanceStatus> status() {

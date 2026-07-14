@@ -58,6 +58,31 @@ void _saveThemeMode(ThemeMode m) {
   } catch (_) {}
 }
 
+// Root sidebar collapse state, persisted next to the theme/locale in ~/.redimos.
+File? _navFile() {
+  final home = Platform.environment['HOME'] ?? Platform.environment['USERPROFILE'];
+  if (home == null || home.isEmpty) return null;
+  return File('$home${Platform.pathSeparator}.redimos${Platform.pathSeparator}nav');
+}
+
+bool _loadNavCollapsed() {
+  try {
+    final f = _navFile();
+    return f != null && f.existsSync() && f.readAsStringSync().trim() == 'collapsed';
+  } catch (_) {
+    return false;
+  }
+}
+
+void _saveNavCollapsed(bool collapsed) {
+  try {
+    final f = _navFile();
+    if (f == null) return;
+    f.parent.createSync(recursive: true);
+    f.writeAsStringSync(collapsed ? 'collapsed' : 'expanded');
+  } catch (_) {}
+}
+
 ThemeData _appTheme(Brightness b) => ThemeData(
       useMaterial3: true,
       colorSchemeSeed: const Color(0xFF3B6EA5),
@@ -190,9 +215,16 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   NativeCore? _core;
   String? _loadError;
 
-  List<RedimosConfig> _configs = [];
+  List<RedimosConfig> _configs = []; // the Instances section (each config = one instance)
+  // v1.2: endpoints grouped by backend (from the core's split view).
+  List<DdbEndpoint> _endpoints = [];
   Map<String, InstanceStatus> _status = {};
   String? _selectedId;
+  // When an endpoint (not an instance) is selected, this holds its id and the
+  // right pane shows the endpoint's storage views instead of the instance tabs.
+  String? _selEndpointId;
+  // Root sidebar collapse (v1.2): a ~200px panel ↔ a 52px rail. Persisted.
+  bool _navCollapsed = _loadNavCollapsed();
   // Endpoint tab "Browse" on a table that isn't the config's own points the Table
   // tab at it (read-only). Keyed by config id so switching configs drops the override
   // without a manual clear at every selection site.
@@ -255,8 +287,11 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     final data = _core!.load();
     setState(() {
       _configs = data.configs;
+      _endpoints = data.endpoints;
       _stopAllSnapshot = data.stopAllSnapshot;
-      _selectedId ??= _configs.isNotEmpty ? _configs.first.id : null;
+      if (_selectedId == null && _selEndpointId == null && _configs.isNotEmpty) {
+        _selectedId = _configs.first.id;
+      }
     });
     _refresh();
   }
@@ -544,7 +579,10 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       body: Row(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          SizedBox(width: 320, child: _configList()),
+          SizedBox(
+            width: _navCollapsed ? 58 : 232,
+            child: _navCollapsed ? _navRail() : _configList(),
+          ),
           const VerticalDivider(width: 1),
           Expanded(child: _detail()),
         ],
@@ -618,35 +656,56 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     _toast('${tr('home.restored')} ${started.length} ${tr('home.configsSuffix')}');
   }
 
+  void _toggleNav() {
+    setState(() => _navCollapsed = !_navCollapsed);
+    _saveNavCollapsed(_navCollapsed);
+  }
+
+  void _selectEndpoint(String id) {
+    setState(() {
+      _selEndpointId = id;
+      _selectedId = null;
+    });
+  }
+
   Widget _configList() {
     return Column(
       children: [
-        // Fixed 50px header — same explicit height as the tab bar, so the thin
-        // rule below lines up with the tab bar's rule across the split.
+        // Header: New config + collapse toggle. 50px so the rule below lines up
+        // with the tab bar's rule across the split.
         SizedBox(
           height: 50,
           child: Padding(
-            // Keep the outer box 50px so the rule below stays aligned with the
-            // tab bar's rule, but inset the button asymmetrically (a little on
-            // top, more below) so it shrinks slightly and a small gap opens
-            // beneath it before the config list.
             padding: const EdgeInsets.fromLTRB(8, 3, 8, 9),
-            child: FilledButton.icon(
-              onPressed: _newConfig,
-              icon: const Icon(Icons.add),
-              label: Text(tr('config.new')),
-              style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(38)),
-            ),
+            child: Row(children: [
+              Expanded(
+                child: FilledButton.icon(
+                  onPressed: _newConfig,
+                  icon: const Icon(Icons.add),
+                  label: Text(tr('config.new')),
+                  style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(38)),
+                ),
+              ),
+              const SizedBox(width: 4),
+              IconButton(
+                tooltip: tr('nav.collapse'),
+                visualDensity: VisualDensity.compact,
+                icon: const Icon(Icons.chevron_left, size: 20),
+                onPressed: _toggleNav,
+              ),
+            ]),
           ),
         ),
-        const Divider(height: 1), // thin sidebar rule
+        const Divider(height: 1),
         Expanded(
-          child: _configs.isEmpty
-              ? Center(child: Text(tr('config.none')))
-              : ListView.builder(
-                  itemCount: _configs.length,
-                  itemBuilder: (_, i) => _configTile(_configs[i]),
-                ),
+          child: (_configs.isEmpty && _endpoints.isEmpty)
+              ? Center(child: Text(tr('nav.noneYet')))
+              : ListView(children: [
+                  _navSection(tr('nav.instances'), const Color(0xFFB26A12)),
+                  for (final c in _configs) _configTile(c),
+                  _navSection(tr('nav.endpoints'), const Color(0xFF0E7F86)),
+                  for (final e in _endpoints) _endpointTile(e),
+                ]),
         ),
         const Divider(height: 1),
         LocalDdbPanel(
@@ -656,6 +715,125 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
         ),
       ],
     );
+  }
+
+  // A small colored section header in the sidebar (Instances / Endpoints).
+  Widget _navSection(String label, Color color) => Padding(
+        padding: const EdgeInsets.fromLTRB(14, 12, 12, 4),
+        child: Row(children: [
+          Container(width: 7, height: 7, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
+          const SizedBox(width: 7),
+          Text(label.toUpperCase(),
+              style: TextStyle(
+                  fontSize: 10, letterSpacing: 1.2, fontWeight: FontWeight.w600,
+                  color: Theme.of(context).textTheme.bodySmall?.color)),
+        ]),
+      );
+
+  Widget _endpointTile(DdbEndpoint e) {
+    final sel = e.id == _selEndpointId;
+    final (badge, badgeColor) = switch (e.kind) {
+      'local' => ('LOCAL', const Color(0xFF0E7F86)),
+      'aws' => ('AWS', const Color(0xFFB26A12)),
+      _ => ('URL', Theme.of(context).colorScheme.primary),
+    };
+    final sub = switch (e.kind) {
+      'aws' => e.region.isEmpty ? 'AWS' : 'AWS · ${e.region}',
+      'local' => 'Local · ${_hostOf(e.endpoint)}',
+      _ => e.endpoint,
+    };
+    return Material(
+      color: sel ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.15) : Colors.transparent,
+      child: ListTile(
+        dense: true,
+        leading: Container(width: 12, height: 12,
+            decoration: const BoxDecoration(color: Color(0xFF0E7F86), shape: BoxShape.circle)),
+        title: Text(e.name.isEmpty ? tr('config.unnamed') : e.name, overflow: TextOverflow.ellipsis),
+        subtitle: Text(sub, style: const TextStyle(fontSize: 11), overflow: TextOverflow.ellipsis),
+        trailing: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+          decoration: BoxDecoration(color: badgeColor, borderRadius: BorderRadius.circular(4)),
+          child: Text(badge, style: const TextStyle(fontSize: 8.5, color: Colors.white, fontWeight: FontWeight.w700)),
+        ),
+        onTap: () => _selectEndpoint(e.id),
+      ),
+    );
+  }
+
+  String _hostOf(String url) {
+    final u = Uri.tryParse(url);
+    return (u != null && u.host.isNotEmpty) ? (u.hasPort ? '${u.host}:${u.port}' : u.host) : url;
+  }
+
+  // Collapsed sidebar: a narrow rail of status dots with an expand toggle.
+  Widget _navRail() {
+    Widget item({required Color dot, required String label, required bool selected, required VoidCallback onTap}) =>
+        Tooltip(
+          message: label,
+          waitDuration: const Duration(milliseconds: 300),
+          child: InkWell(
+            onTap: onTap,
+            borderRadius: BorderRadius.circular(9),
+            child: Container(
+              margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              height: 34,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(9),
+                border: selected
+                    ? Border.all(color: Theme.of(context).colorScheme.primary, width: 2)
+                    : Border.all(color: Colors.transparent, width: 2),
+                color: selected ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.10) : null,
+              ),
+              alignment: Alignment.center,
+              child: Container(width: 10, height: 10, decoration: BoxDecoration(color: dot, shape: BoxShape.circle)),
+            ),
+          ),
+        );
+    return Column(children: [
+      SizedBox(
+        height: 50,
+        child: Center(
+          child: IconButton(
+            tooltip: tr('nav.expand'),
+            visualDensity: VisualDensity.compact,
+            icon: const Icon(Icons.chevron_right, size: 20),
+            onPressed: _toggleNav,
+          ),
+        ),
+      ),
+      const Divider(height: 1),
+      Expanded(
+        child: ListView(children: [
+          const SizedBox(height: 4),
+          Container(height: 2, margin: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+              color: const Color(0xFFB26A12).withValues(alpha: 0.6)),
+          for (final c in _configs)
+            item(
+              dot: _statusColor(_status[c.id]?.status ?? 'stopped'),
+              label: c.name.isEmpty ? tr('config.unnamed') : c.name,
+              selected: c.id == _selectedId,
+              onTap: () async {
+                if (c.id == _selectedId) return;
+                if (await _confirmLeaveEditor()) {
+                  setState(() {
+                    _selectedId = c.id;
+                    _selEndpointId = null;
+                  });
+                }
+              },
+            ),
+          Container(height: 2, margin: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+              color: const Color(0xFF0E7F86).withValues(alpha: 0.6)),
+          for (final e in _endpoints)
+            item(
+              dot: const Color(0xFF0E7F86),
+              label: e.name.isEmpty ? tr('config.unnamed') : e.name,
+              selected: e.id == _selEndpointId,
+              onTap: () => _selectEndpoint(e.id),
+            ),
+        ]),
+      ),
+    ]);
   }
 
   Widget _configTile(RedimosConfig c) {
@@ -686,25 +864,77 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
         ),
         onTap: () async {
           if (c.id == _selectedId) return;
-          if (await _confirmLeaveEditor()) setState(() => _selectedId = c.id);
+          if (await _confirmLeaveEditor()) {
+            setState(() {
+              _selectedId = c.id;
+              _selEndpointId = null;
+            });
+          }
         },
       ),
     );
   }
 
-  Widget _statusDot(String status) {
-    final color = switch (status) {
-      'running' => goGreen(context),
-      'restarting' => Colors.amberAccent,
-      'error' => Colors.redAccent,
-      'failed' => Colors.redAccent,
-      'exited' => Colors.orangeAccent,
-      _ => Colors.grey,
+  Color _statusColor(String status) => switch (status) {
+        'running' => goGreen(context),
+        'restarting' => Colors.amberAccent,
+        'error' => Colors.redAccent,
+        'failed' => Colors.redAccent,
+        'exited' => Colors.orangeAccent,
+        _ => Colors.grey,
+      };
+
+  Widget _statusDot(String status) => Container(
+      width: 12, height: 12,
+      decoration: BoxDecoration(color: _statusColor(status), shape: BoxShape.circle));
+
+  // Right pane for a selected endpoint: a header + its DynamoDB table list /
+  // lifecycle ops (over a synthesized storage config). P4 will expand this into
+  // the merged Browser (Tables sidebar + Explorer) + PartiQL.
+  Widget _endpointDetail(DdbEndpoint e) {
+    final scheme = Theme.of(context).colorScheme;
+    final cfg = e.toStorageConfig();
+    final kindLabel = switch (e.kind) {
+      'aws' => e.region.isEmpty ? 'AWS' : 'AWS · ${e.region}',
+      'local' => 'Local DynamoDB · ${_hostOf(e.endpoint)}',
+      _ => e.endpoint,
     };
-    return Container(width: 12, height: 12, decoration: BoxDecoration(color: color, shape: BoxShape.circle));
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      SizedBox(
+        height: 50,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Row(children: [
+            Icon(Icons.dns_outlined, size: 18, color: scheme.primary),
+            const SizedBox(width: 9),
+            Text(e.name.isEmpty ? tr('config.unnamed') : e.name,
+                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+            const SizedBox(width: 10),
+            Text(kindLabel,
+                style: TextStyle(fontSize: 12, color: Theme.of(context).textTheme.bodySmall?.color)),
+          ]),
+        ),
+      ),
+      const Divider(height: 1),
+      Expanded(
+        child: EndpointPageView(
+          key: ValueKey('endpoint-detail-${e.id}'),
+          core: _core!,
+          config: cfg,
+          running: true, // storage views connect to DynamoDB directly, no proxy
+          onOpenTable: (_) {}, // P4: jump into the merged Browser
+        ),
+      ),
+    ]);
   }
 
   Widget _detail() {
+    // Endpoint selected → its storage views (see _endpointDetail).
+    if (_selEndpointId != null) {
+      for (final e in _endpoints) {
+        if (e.id == _selEndpointId) return _endpointDetail(e);
+      }
+    }
     final c = _selected;
     if (c == null) {
       return Center(child: Text(tr('config.pick')));

@@ -1230,8 +1230,14 @@ func rm_free(p *C.char) { C.free(unsafe.Pointer(p)) }
 func rm_load() *C.char {
 	mgr.mu.Lock()
 	defer mgr.mu.Unlock()
+	// endpoints[] + instances[] are the v1.2 split view of configs[] (same data,
+	// grouped by backend). configs[] is still returned for any code path that
+	// hasn't migrated to the split model yet.
+	eps, insts := splitConfigs(mgr.st.Configs)
 	out := map[string]any{
 		"configs":         mgr.st.Configs,
+		"endpoints":       eps,
+		"instances":       insts,
 		"settings":        mgr.st.Settings,
 		"localDdb":        mgr.st.LocalDdb,
 		"stopAllSnapshot": mgr.st.StopAllSnapshot,

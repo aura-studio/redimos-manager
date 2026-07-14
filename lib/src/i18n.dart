@@ -83,6 +83,13 @@ const Map<String, Map<AppLang, String>> _strings = {
   'config.start': {AppLang.en: 'Start', AppLang.zh: '启动'},
   'config.stop': {AppLang.en: 'Stop', AppLang.zh: '停止'},
 
+  // --- v1.2 nav (instances / endpoints sidebar) ---
+  'nav.instances': {AppLang.en: 'Instances', AppLang.zh: '实例'},
+  'nav.endpoints': {AppLang.en: 'Endpoints', AppLang.zh: '端点'},
+  'nav.collapse': {AppLang.en: 'Collapse sidebar', AppLang.zh: '收起侧栏'},
+  'nav.expand': {AppLang.en: 'Expand sidebar', AppLang.zh: '展开侧栏'},
+  'nav.noneYet': {AppLang.en: 'No instances or endpoints yet', AppLang.zh: '暂无实例或端点'},
+
   // --- extracted from page files (workflow, phase 1 cont.) ---
   'home.accessKeyId': {AppLang.en: 'AccessKeyID', AppLang.zh: '访问密钥 ID'},
   'home.addFlag': {AppLang.en: 'Add flag', AppLang.zh: '添加参数'},

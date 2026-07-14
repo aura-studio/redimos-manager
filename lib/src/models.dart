@@ -131,6 +131,108 @@ class TableInspect {
       );
 }
 
+/// A DynamoDB backend (the connection + credentials half of a former config),
+/// shared by instances that target it. kind ∈ {local, aws, url}. Mirrors the Go
+/// Endpoint struct; derived from configs by the core.
+class DdbEndpoint {
+  final String id;
+  final String name;
+  final String kind; // "local" | "aws" | "url"
+  final String endpoint;
+  final String partitionID;
+  final String region;
+  final String accessKeyId;
+  final String secretKey;
+  final String sessionToken;
+  final String source;
+  const DdbEndpoint({
+    this.id = '',
+    this.name = '',
+    this.kind = 'aws',
+    this.endpoint = '',
+    this.partitionID = '',
+    this.region = '',
+    this.accessKeyId = '',
+    this.secretKey = '',
+    this.sessionToken = '',
+    this.source = '',
+  });
+  factory DdbEndpoint.fromJson(Map<String, dynamic> j) => DdbEndpoint(
+        id: (j['id'] ?? '') as String,
+        name: (j['name'] ?? '') as String,
+        kind: (j['kind'] ?? 'aws') as String,
+        endpoint: (j['endpoint'] ?? '') as String,
+        partitionID: (j['partitionID'] ?? '') as String,
+        region: (j['region'] ?? '') as String,
+        accessKeyId: (j['accessKeyId'] ?? '') as String,
+        secretKey: (j['secretKey'] ?? '') as String,
+        sessionToken: (j['sessionToken'] ?? '') as String,
+        source: (j['source'] ?? '') as String,
+      );
+
+  /// Synthesize a config that points a storage view at this endpoint (no proxy /
+  /// table). Table pages take a RedimosConfig, so this bridges an endpoint to them.
+  RedimosConfig toStorageConfig() => RedimosConfig(
+        id: 'endpoint:$id',
+        name: name,
+        table: '',
+        endpoint: endpoint,
+        partitionID: partitionID.isEmpty ? 'aws' : partitionID,
+        region: region,
+        accessKeyId: accessKeyId,
+        secretKey: secretKey,
+        sessionToken: sessionToken,
+        source: source,
+      );
+}
+
+/// A redimos proxy (the process/redis half of a former config): the table it
+/// serves + a reference to the endpoint it targets. Mirrors the Go Instance.
+class ProxyInstance {
+  final String id;
+  final String name;
+  final String version;
+  final int port;
+  final String table;
+  final String endpointId;
+  final bool multiDb;
+  final bool autoCreateTable;
+  final bool autoRestart;
+  final String runMode;
+  final String requirepass;
+  final List<FlagKV> extraFlags;
+  const ProxyInstance({
+    this.id = '',
+    this.name = '',
+    this.version = 'v2',
+    this.port = 6379,
+    this.table = '',
+    this.endpointId = '',
+    this.multiDb = false,
+    this.autoCreateTable = false,
+    this.autoRestart = true,
+    this.runMode = 'native',
+    this.requirepass = '',
+    this.extraFlags = const [],
+  });
+  factory ProxyInstance.fromJson(Map<String, dynamic> j) => ProxyInstance(
+        id: (j['id'] ?? '') as String,
+        name: (j['name'] ?? '') as String,
+        version: (j['version'] ?? 'v2') as String,
+        port: (j['port'] ?? 6379) as int,
+        table: (j['table'] ?? '') as String,
+        endpointId: (j['endpointId'] ?? '') as String,
+        multiDb: (j['multiDb'] ?? false) as bool,
+        autoCreateTable: (j['autoCreateTable'] ?? false) as bool,
+        autoRestart: (j['autoRestart'] ?? true) as bool,
+        runMode: (j['runMode'] ?? 'native') as String,
+        requirepass: (j['requirepass'] ?? '') as String,
+        extraFlags: (((j['extraFlags'] as List?) ?? const [])
+            .map((e) => FlagKV.fromJson(e as Map<String, dynamic>))
+            .toList()),
+      );
+}
+
 class Settings {
   String redimosV1Path;
   String redimosV2Path;
