@@ -13,33 +13,35 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'i18n.dart';
 import 'item_editor.dart';
 import 'models.dart';
 import 'native.dart';
 
+// The second tuple element is an i18n key (translated at render), not display text.
 const _skConds = [
-  ('eq', 'Equal to'),
-  ('le', 'Less than or equal to'),
-  ('lt', 'Less than'),
-  ('ge', 'Greater than or equal to'),
-  ('gt', 'Greater than'),
-  ('between', 'Between'),
-  ('begins_with', 'Begins with'),
+  ('eq', 'tbl.condEq'),
+  ('le', 'tbl.condLe'),
+  ('lt', 'tbl.condLt'),
+  ('ge', 'tbl.condGe'),
+  ('gt', 'tbl.condGt'),
+  ('between', 'tbl.condBetween'),
+  ('begins_with', 'tbl.condBeginsWith'),
 ];
 
 const _filterConds = [
-  ('eq', 'Equal to'),
-  ('ne', 'Not equal to'),
-  ('le', 'Less than or equal to'),
-  ('lt', 'Less than'),
-  ('ge', 'Greater than or equal to'),
-  ('gt', 'Greater than'),
-  ('between', 'Between'),
-  ('exists', 'Exists'),
-  ('not_exists', 'Not exists'),
-  ('contains', 'Contains'),
-  ('not_contains', 'Not contains'),
-  ('begins_with', 'Begins with'),
+  ('eq', 'tbl.condEq'),
+  ('ne', 'tbl.condNe'),
+  ('le', 'tbl.condLe'),
+  ('lt', 'tbl.condLt'),
+  ('ge', 'tbl.condGe'),
+  ('gt', 'tbl.condGt'),
+  ('between', 'tbl.condBetween'),
+  ('exists', 'tbl.condExists'),
+  ('not_exists', 'tbl.condNotExists'),
+  ('contains', 'tbl.condContains'),
+  ('not_contains', 'tbl.condNotContains'),
+  ('begins_with', 'tbl.condBeginsWith'),
 ];
 
 const _filterTypes = [
@@ -205,7 +207,7 @@ class _TablePageViewState extends State<TablePageView>
         _metaError = null;
       } else {
         _meta = null;
-        _metaError = m.error ?? 'failed to describe table';
+        _metaError = m.error ?? tr('tbl.failedDescribeTable');
       }
     });
     if (m.ok) _run(); // auto-scan on open, like the console's Autopreview
@@ -260,7 +262,7 @@ class _TablePageViewState extends State<TablePageView>
         _pageError = null;
         _sortCol = null;
       } else {
-        _pageError = page.error ?? 'query failed';
+        _pageError = page.error ?? tr('tbl.queryFailed');
       }
     });
   }
@@ -300,12 +302,12 @@ class _TablePageViewState extends State<TablePageView>
   Widget build(BuildContext context) {
     super.build(context);
     if (!widget.running) {
-      return _center(Icons.play_circle_outline, 'Instance not running',
-          'Start this config to browse its DynamoDB table.');
+      return _center(Icons.play_circle_outline, tr('tbl.instanceNotRunning'),
+          tr('tbl.startToBrowseTable'));
     }
     if (widget.config.table.trim().isEmpty) {
-      return _center(Icons.table_chart_outlined, 'No table configured',
-          'Set a Table name in Configure to browse it.');
+      return _center(Icons.table_chart_outlined, tr('tbl.noTableConfigured'),
+          tr('tbl.setTableNameToBrowse'));
     }
     return Theme(
       data: _denseTabTheme(context),
@@ -325,11 +327,11 @@ class _TablePageViewState extends State<TablePageView>
         else if (_metaError != null)
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 48),
-            child: _center(Icons.error_outline, 'Cannot read table', _metaError!,
+            child: _center(Icons.error_outline, tr('tbl.cannotReadTable'), _metaError!,
                 action: FilledButton.icon(
                     onPressed: _loadMeta,
                     icon: const Icon(Icons.refresh),
-                    label: const Text('Retry'))),
+                    label: Text(tr('tbl.retry')))),
           )
         else ...[
           _queryCard(),
@@ -380,23 +382,23 @@ class _TablePageViewState extends State<TablePageView>
       ),
       if (_foreignBrowse) ...[
         const SizedBox(width: 10),
-        const Chip(
+        Chip(
           visualDensity: VisualDensity.compact,
-          avatar: Icon(Icons.visibility_outlined, size: 15),
-          label: Text('Browsing · read-only'),
+          avatar: const Icon(Icons.visibility_outlined, size: 15),
+          label: Text(tr('tbl.browsingReadOnly')),
         ),
         const SizedBox(width: 8),
         TextButton.icon(
           onPressed: () => widget.onExitBrowse?.call(),
           icon: const Icon(Icons.arrow_back, size: 16),
-          label: Text('Back to ${widget.config.table}'),
+          label: Text('${tr('tbl.backTo')} ${widget.config.table}'),
         ),
       ],
       const Spacer(),
       OutlinedButton.icon(
         onPressed: _running ? null : () => _meta == null ? _loadMeta() : _run(),
         icon: const Icon(Icons.refresh, size: 18),
-        label: const Text('Refresh'),
+        label: Text(tr('tbl.refresh')),
       ),
     ]);
   }
@@ -424,22 +426,22 @@ class _TablePageViewState extends State<TablePageView>
             child: Row(children: [
               Icon(_panelOpen ? Icons.expand_more : Icons.chevron_right, size: 20),
               const SizedBox(width: 4),
-              const Text('Scan or query items',
-                  style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600)),
+              Text(tr('tbl.scanOrQueryItems'),
+                  style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600)),
             ]),
           ),
           if (!_panelOpen)
             Padding(
               padding: const EdgeInsets.only(left: 24, top: 2),
-              child: Text('Expand to query or scan items.',
+              child: Text(tr('tbl.expandToQueryOrScan'),
                   style: TextStyle(fontSize: 12, color: Theme.of(context).hintColor)),
             ),
           if (_panelOpen) ...[
             const SizedBox(height: 10),
             SegmentedButton<bool>(
-              segments: const [
-                ButtonSegment(value: false, label: Text('Scan'), icon: Icon(Icons.list, size: 16)),
-                ButtonSegment(value: true, label: Text('Query'), icon: Icon(Icons.search, size: 16)),
+              segments: [
+                ButtonSegment(value: false, label: Text(tr('tbl.scan')), icon: const Icon(Icons.list, size: 16)),
+                ButtonSegment(value: true, label: Text(tr('tbl.query')), icon: const Icon(Icons.search, size: 16)),
               ],
               selected: {_isQuery},
               onSelectionChanged: (s) => setState(() => _isQuery = s.first),
@@ -461,10 +463,10 @@ class _TablePageViewState extends State<TablePageView>
                 child: _running
                     ? const SizedBox(
                         width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-                    : const Text('Run'),
+                    : Text(tr('tbl.run')),
               ),
               const SizedBox(width: 12),
-              TextButton(onPressed: _reset, child: const Text('Reset')),
+              TextButton(onPressed: _reset, child: Text(tr('tbl.reset'))),
             ]),
           ],
         ]),
@@ -473,7 +475,7 @@ class _TablePageViewState extends State<TablePageView>
   Widget _targetDropdown() {
     final targets = _meta!.targets;
     return _labeled(
-      'Select a table or index',
+      tr('tbl.selectTableOrIndex'),
       DropdownButtonFormField<int>(
         initialValue: _targetIdx,
         isDense: true,
@@ -483,8 +485,8 @@ class _TablePageViewState extends State<TablePageView>
             DropdownMenuItem(
               value: i,
               child: Text(targets[i].isTable
-                  ? 'Table - ${targets[i].name}'
-                  : 'Index - ${targets[i].name}'),
+                  ? '${tr('tbl.tableLabel')} - ${targets[i].name}'
+                  : '${tr('tbl.indexLabel')} - ${targets[i].name}'),
             ),
         ],
         onChanged: (v) => setState(() {
@@ -498,14 +500,14 @@ class _TablePageViewState extends State<TablePageView>
   Widget _projectionRow() {
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       _labeled(
-        'Select attribute projection',
+        tr('tbl.selectAttributeProjection'),
         DropdownButtonFormField<String>(
           initialValue: _projection,
           isDense: true,
           decoration: _dec(),
-          items: const [
-            DropdownMenuItem(value: 'all', child: Text('All attributes')),
-            DropdownMenuItem(value: 'specific', child: Text('Specific attributes')),
+          items: [
+            DropdownMenuItem(value: 'all', child: Text(tr('tbl.allAttributes'))),
+            DropdownMenuItem(value: 'specific', child: Text(tr('tbl.specificAttributes'))),
           ],
           onChanged: (v) => setState(() => _projection = v ?? 'all'),
         ),
@@ -516,12 +518,12 @@ class _TablePageViewState extends State<TablePageView>
           Expanded(
             child: TextField(
               controller: _projectInput,
-              decoration: _dec(hint: 'Enter attribute name'),
+              decoration: _dec(hint: tr('tbl.enterAttributeName')),
               onSubmitted: (_) => _addProjectAttr(),
             ),
           ),
           const SizedBox(width: 8),
-          OutlinedButton(onPressed: _addProjectAttr, child: const Text('Add attribute')),
+          OutlinedButton(onPressed: _addProjectAttr, child: Text(tr('tbl.addAttribute'))),
         ]),
         if (_projectAttrs.isNotEmpty) ...[
           const SizedBox(height: 8),
@@ -555,19 +557,19 @@ class _TablePageViewState extends State<TablePageView>
     final t = _target;
     if (t == null) return const SizedBox.shrink();
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      const Text('Partition key', style: TextStyle(fontWeight: FontWeight.w600)),
+      Text(tr('tbl.partitionKey'), style: const TextStyle(fontWeight: FontWeight.w600)),
       const SizedBox(height: 6),
       Row(children: [
         Expanded(flex: 2, child: _readonlyAttr(t.pk.name)),
         const SizedBox(width: 12),
         Expanded(
           flex: 5,
-          child: TextField(controller: _pk, decoration: _dec(hint: 'Enter attribute value')),
+          child: TextField(controller: _pk, decoration: _dec(hint: tr('tbl.enterAttributeValue'))),
         ),
       ]),
       if (t.sk != null) ...[
         const SizedBox(height: 16),
-        const Text('Sort key ', style: TextStyle(fontWeight: FontWeight.w600)),
+        Text(tr('tbl.sortKey'), style: const TextStyle(fontWeight: FontWeight.w600)),
         const SizedBox(height: 6),
         Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Expanded(flex: 2, child: _readonlyAttr(t.sk!.name)),
@@ -579,7 +581,7 @@ class _TablePageViewState extends State<TablePageView>
               isDense: true,
               decoration: _dec(),
               items: [
-                for (final c in _skConds) DropdownMenuItem(value: c.$1, child: Text(c.$2)),
+                for (final c in _skConds) DropdownMenuItem(value: c.$1, child: Text(tr(c.$2))),
               ],
               onChanged: (v) => setState(() => _skOp = v ?? 'eq'),
             ),
@@ -588,10 +590,10 @@ class _TablePageViewState extends State<TablePageView>
           Expanded(
             flex: 3,
             child: Column(children: [
-              TextField(controller: _skV1, decoration: _dec(hint: 'Enter attribute value')),
+              TextField(controller: _skV1, decoration: _dec(hint: tr('tbl.enterAttributeValue'))),
               if (_skOp == 'between') ...[
                 const SizedBox(height: 6),
-                TextField(controller: _skV2, decoration: _dec(hint: 'and')),
+                TextField(controller: _skV2, decoration: _dec(hint: tr('tbl.and'))),
               ],
             ]),
           ),
@@ -603,7 +605,7 @@ class _TablePageViewState extends State<TablePageView>
             onChanged: (v) => setState(() => _sortDesc = v ?? false),
             visualDensity: VisualDensity.compact,
           ),
-          const Text('Sort descending'),
+          Text(tr('tbl.sortDescending')),
         ]),
       ],
     ]);
@@ -622,21 +624,21 @@ class _TablePageViewState extends State<TablePageView>
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       const Divider(height: 24),
       Text.rich(TextSpan(children: [
-        const TextSpan(text: 'Filters', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+        TextSpan(text: tr('tbl.filters'), style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
         TextSpan(
-            text: '  – optional',
+            text: tr('tbl.optional'),
             style: TextStyle(fontStyle: FontStyle.italic, fontSize: 13, color: scheme.onSurfaceVariant)),
       ])),
       const SizedBox(height: 10),
       if (_filters.isNotEmpty) ...[
         Row(children: [
-          Expanded(flex: _fFlex[0], child: Text('Attribute name', style: label)),
+          Expanded(flex: _fFlex[0], child: Text(tr('tbl.attributeName'), style: label)),
           const SizedBox(width: 10),
-          Expanded(flex: _fFlex[1], child: Text('Condition', style: label)),
+          Expanded(flex: _fFlex[1], child: Text(tr('tbl.condition'), style: label)),
           const SizedBox(width: 10),
-          Expanded(flex: _fFlex[2], child: Text('Type', style: label)),
+          Expanded(flex: _fFlex[2], child: Text(tr('tbl.type'), style: label)),
           const SizedBox(width: 10),
-          Expanded(flex: _fFlex[3], child: Text('Value', style: label)),
+          Expanded(flex: _fFlex[3], child: Text(tr('tbl.value'), style: label)),
           const SizedBox(width: 10),
           const SizedBox(width: _fRemoveW),
         ]),
@@ -647,7 +649,7 @@ class _TablePageViewState extends State<TablePageView>
       OutlinedButton.icon(
         onPressed: () => setState(() => _filters.add(_FilterRow())),
         icon: const Icon(Icons.add, size: 16),
-        label: const Text('Add filter'),
+        label: Text(tr('tbl.addFilter')),
       ),
     ]);
   }
@@ -661,13 +663,13 @@ class _TablePageViewState extends State<TablePageView>
           flex: _fFlex[0],
           child: TextField(
             controller: f.attr,
-            decoration: const InputDecoration(
+            decoration: InputDecoration(
               isDense: true,
-              prefixIcon: Icon(Icons.search, size: 16),
-              prefixIconConstraints: BoxConstraints(minWidth: 32, minHeight: 32),
-              hintText: 'Enter attribute name',
-              border: OutlineInputBorder(),
-              contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+              prefixIcon: const Icon(Icons.search, size: 16),
+              prefixIconConstraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+              hintText: tr('tbl.enterAttributeName'),
+              border: const OutlineInputBorder(),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
             ),
           ),
         ),
@@ -678,7 +680,7 @@ class _TablePageViewState extends State<TablePageView>
             initialValue: f.op,
             isDense: true,
             decoration: _dec(),
-            items: [for (final c in _filterConds) DropdownMenuItem(value: c.$1, child: Text(c.$2))],
+            items: [for (final c in _filterConds) DropdownMenuItem(value: c.$1, child: Text(tr(c.$2)))],
             onChanged: (v) => setState(() => f.op = v ?? 'eq'),
           ),
         ),
@@ -697,17 +699,17 @@ class _TablePageViewState extends State<TablePageView>
         Expanded(
           flex: _fFlex[3],
           child: !f.needsValue
-              ? TextField(enabled: false, decoration: _dec(hint: 'Not required'))
+              ? TextField(enabled: false, decoration: _dec(hint: tr('tbl.notRequired')))
               : f.needsTwo
                   ? Row(children: [
-                      Expanded(child: TextField(controller: f.v1, decoration: _dec(hint: 'Enter attribute value'))),
-                      const Padding(
-                        padding: EdgeInsets.symmetric(horizontal: 8),
-                        child: Text('and'),
+                      Expanded(child: TextField(controller: f.v1, decoration: _dec(hint: tr('tbl.enterAttributeValue')))),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                        child: Text(tr('tbl.and')),
                       ),
-                      Expanded(child: TextField(controller: f.v2, decoration: _dec(hint: 'Enter attribute value'))),
+                      Expanded(child: TextField(controller: f.v2, decoration: _dec(hint: tr('tbl.enterAttributeValue')))),
                     ])
-                  : TextField(controller: f.v1, decoration: _dec(hint: 'Enter attribute value')),
+                  : TextField(controller: f.v1, decoration: _dec(hint: tr('tbl.enterAttributeValue'))),
         ),
         const SizedBox(width: 10),
         SizedBox(
@@ -720,7 +722,7 @@ class _TablePageViewState extends State<TablePageView>
                 padding: const EdgeInsets.symmetric(horizontal: 10),
                 minimumSize: const Size(0, 44),
               ),
-              child: const Text('Remove', maxLines: 1),
+              child: Text(tr('tbl.remove'), maxLines: 1),
             ),
           ),
         ),
@@ -771,7 +773,7 @@ class _TablePageViewState extends State<TablePageView>
         Row(children: [
           Expanded(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text('Items returned (${p.returned})',
+              Text('${tr('tbl.itemsReturned')} (${p.returned})',
                   style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600)),
               Text(
                 '${t != null && !t.isTable ? 'Index ${t.name} · ' : ''}'
@@ -782,7 +784,7 @@ class _TablePageViewState extends State<TablePageView>
             ]),
           ),
           IconButton(
-            tooltip: 'Refresh',
+            tooltip: tr('tbl.refresh'),
             onPressed: _running ? null : () => _run(),
             icon: const Icon(Icons.refresh, size: 18),
           ),
@@ -798,7 +800,7 @@ class _TablePageViewState extends State<TablePageView>
             icon: const Icon(Icons.chevron_right, size: 20),
           ),
           IconButton(
-            tooltip: 'Preferences',
+            tooltip: tr('tbl.preferences'),
             onPressed: _openPreferences,
             icon: const Icon(Icons.settings, size: 18),
           ),
@@ -808,32 +810,32 @@ class _TablePageViewState extends State<TablePageView>
               builder: (ctx, ctrl, _) => OutlinedButton.icon(
                 onPressed: () => ctrl.isOpen ? ctrl.close() : ctrl.open(),
                 icon: const Icon(Icons.arrow_drop_down, size: 18),
-                label: const Text('Actions'),
+                label: Text(tr('tbl.actions')),
               ),
               menuChildren: [
                 MenuItemButton(
                   onPressed: selCount == 1 ? () => _openEditor(from: _selectedItem(rows), isNew: false) : null,
-                  child: const Text('Edit item'),
+                  child: Text(tr('tbl.editItem')),
                 ),
                 MenuItemButton(
                   onPressed: selCount == 1 ? () => _openEditor(from: _selectedItem(rows), isNew: true) : null,
-                  child: const Text('Duplicate item'),
+                  child: Text(tr('tbl.duplicateItem')),
                 ),
                 MenuItemButton(
                   onPressed: selCount >= 1 ? () => _deleteSelected(rows) : null,
-                  child: const Text('Delete items'),
+                  child: Text(tr('tbl.deleteItems')),
                 ),
                 const Divider(height: 4),
                 MenuItemButton(
                   onPressed: rows.isEmpty ? null : () => _exportCsv(cols, rows),
-                  child: const Text('Export to CSV'),
+                  child: Text(tr('tbl.exportToCsv')),
                 ),
               ],
             ),
             const SizedBox(width: 8),
             FilledButton(
               onPressed: () => _openEditor(from: null, isNew: true),
-              child: const Text('Create item'),
+              child: Text(tr('tbl.createItem')),
             ),
           ],
         ]),
@@ -845,9 +847,9 @@ class _TablePageViewState extends State<TablePageView>
               child: Column(children: [
                 Icon(Icons.inbox_outlined, size: 36, color: Theme.of(context).hintColor),
                 const SizedBox(height: 8),
-                const Text('No items'),
+                Text(tr('tbl.noItems')),
                 const SizedBox(height: 4),
-                Text('No items to display. Adjust the scan or query above.',
+                Text(tr('tbl.noItemsToDisplay'),
                     style: TextStyle(fontSize: 12, color: Theme.of(context).hintColor)),
               ]),
             ),
@@ -995,13 +997,13 @@ class _TablePageViewState extends State<TablePageView>
         final hidden = {..._hiddenCols};
         return StatefulBuilder(builder: (ctx, setD) {
           return AlertDialog(
-            title: const Text('Preferences'),
+            title: Text(tr('tbl.preferences')),
             content: SizedBox(
               width: 460,
               child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Expanded(
                   child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
-                    const Text('Page size', style: TextStyle(fontWeight: FontWeight.w600)),
+                    Text(tr('tbl.pageSize'), style: const TextStyle(fontWeight: FontWeight.w600)),
                     RadioGroup<int>(
                       groupValue: size,
                       onChanged: (v) => setD(() => size = v ?? size),
@@ -1009,7 +1011,7 @@ class _TablePageViewState extends State<TablePageView>
                         for (final s in _pageSizes)
                           RadioListTile<int>(
                             value: s,
-                            title: Text('$s items'),
+                            title: Text('$s ${tr('tbl.itemsWord')}'),
                             dense: true,
                             contentPadding: EdgeInsets.zero,
                           ),
@@ -1021,8 +1023,8 @@ class _TablePageViewState extends State<TablePageView>
                 Expanded(
                   child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
                     Row(children: [
-                      TextButton(onPressed: () => setD(() => hidden.clear()), child: const Text('Select all')),
-                      TextButton(onPressed: () => setD(() => hidden.addAll(cols)), child: const Text('Deselect all')),
+                      TextButton(onPressed: () => setD(() => hidden.clear()), child: Text(tr('tbl.selectAll'))),
+                      TextButton(onPressed: () => setD(() => hidden.addAll(cols)), child: Text(tr('tbl.deselectAll'))),
                     ]),
                     for (final c in cols)
                       SwitchListTile(
@@ -1037,7 +1039,7 @@ class _TablePageViewState extends State<TablePageView>
               ]),
             ),
             actions: [
-              TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+              TextButton(onPressed: () => Navigator.pop(ctx), child: Text(tr('tbl.cancel'))),
               FilledButton(
                 onPressed: () {
                   Navigator.pop(ctx);
@@ -1050,7 +1052,7 @@ class _TablePageViewState extends State<TablePageView>
                   });
                   if (resize) _run();
                 },
-                child: const Text('Save changes'),
+                child: Text(tr('tbl.saveChanges')),
               ),
             ],
           );
@@ -1072,15 +1074,14 @@ class _TablePageViewState extends State<TablePageView>
     if (from != null) {
       final key = _keyOf(from);
       if (key == null) {
-        _toast('This result doesn’t include the item’s full key (projection) — '
-            'switch to “All attributes” first.', error: true);
+        _toast(tr('tbl.projectionKeyMissing'), error: true);
         return;
       }
       final res = widget.core.tableGetItem(widget.config, key);
       if (res['ok'] == true && res['item'] is Map) {
         initial = (res['item'] as Map).cast<String, dynamic>();
       } else {
-        _toast('Couldn’t fetch the full item: ${res['error'] ?? 'error'}', error: true);
+        _toast('${tr('tbl.couldntFetchItem')}: ${res['error'] ?? 'error'}', error: true);
         return;
       }
     }
@@ -1095,12 +1096,12 @@ class _TablePageViewState extends State<TablePageView>
         onSave: (av) async {
           if (!await _confirmRawWrite('Write')) return ''; // '' = cancelled
           final res = widget.core.tablePutItem(widget.config, av);
-          return res['ok'] == true ? null : '${res['error'] ?? 'save failed'}';
+          return res['ok'] == true ? null : '${res['error'] ?? tr('tbl.saveFailed')}';
         },
       ),
     ));
     if (!mounted || saved != true) return;
-    _toast(isNew ? 'Item created' : 'Item saved');
+    _toast(isNew ? tr('tbl.itemCreated') : tr('tbl.itemSaved'));
     _run(resetPaging: false);
   }
 
@@ -1116,13 +1117,13 @@ class _TablePageViewState extends State<TablePageView>
       context: context,
       builder: (ctx) => AlertDialog(
         title: Row(children: [
-          const Expanded(child: Text('Item (DynamoDB JSON)')),
+          Expanded(child: Text(tr('tbl.itemDdbJson'))),
           IconButton(
-            tooltip: 'Copy',
+            tooltip: tr('tbl.copy'),
             icon: const Icon(Icons.copy, size: 18),
             onPressed: () {
               Clipboard.setData(ClipboardData(text: pretty));
-              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Copied')));
+              ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(tr('tbl.copied'))));
             },
           ),
         ]),
@@ -1133,7 +1134,7 @@ class _TablePageViewState extends State<TablePageView>
                 style: const TextStyle(fontFamily: 'monospace', fontSize: 12.5)),
           ),
         ),
-        actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close'))],
+        actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: Text(tr('tbl.close')))],
       ),
     );
   }
@@ -1166,7 +1167,7 @@ class _TablePageViewState extends State<TablePageView>
     for (final r in items) {
       final k = _keyOf(r);
       if (k == null) {
-        _toast('A selected item is missing its key attributes (projection?)', error: true);
+        _toast(tr('tbl.missingKeyAttrs'), error: true);
         return;
       }
       keys.add(k);
@@ -1175,7 +1176,7 @@ class _TablePageViewState extends State<TablePageView>
     final go = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text('Delete ${keys.length} item(s)?'),
+        title: Text('${tr('tbl.delete')} ${keys.length} ${tr('tbl.itemsParen')}?'),
         content: SizedBox(
           width: 440,
           child: Text(
@@ -1185,11 +1186,11 @@ class _TablePageViewState extends State<TablePageView>
           ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(tr('tbl.cancel'))),
           FilledButton(
             style: FilledButton.styleFrom(backgroundColor: scheme.error),
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Delete'),
+            child: Text(tr('tbl.delete')),
           ),
         ],
       ),
@@ -1202,8 +1203,8 @@ class _TablePageViewState extends State<TablePageView>
     }
     if (!mounted) return;
     _toast(failed == 0
-        ? 'Deleted ${keys.length} item(s)'
-        : 'Deleted ${keys.length - failed}, $failed failed', error: failed > 0);
+        ? '${tr('tbl.deleted')} ${keys.length} ${tr('tbl.itemsParen')}'
+        : '${tr('tbl.deleted')} ${keys.length - failed}, $failed ${tr('tbl.failed')}', error: failed > 0);
     _run(resetPaging: false);
   }
 
@@ -1222,10 +1223,10 @@ class _TablePageViewState extends State<TablePageView>
       final ts = DateTime.now().millisecondsSinceEpoch;
       final path = '$home/Downloads/redimos-${widget.config.table}-$ts.csv';
       await File(path).writeAsString(csv);
-      _toast('Exported ${rows.length} row(s) → $path');
+      _toast('${tr('tbl.exported')} ${rows.length} ${tr('tbl.rowsSuffix')} → $path');
     } catch (_) {
       await Clipboard.setData(ClipboardData(text: csv));
-      _toast('Couldn’t write to Downloads — CSV copied to clipboard instead');
+      _toast(tr('tbl.csvClipboardFallback'));
     }
   }
 
@@ -1236,16 +1237,12 @@ class _TablePageViewState extends State<TablePageView>
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text('$verb a raw item on a redimos table?'),
-        content: const SizedBox(
+        content: SizedBox(
           width: 430,
-          child: Text(
-            'This writes directly to DynamoDB, bypassing redimos’s key/value encoding. '
-            'An item that doesn’t match redimos’s format can corrupt what the proxy reads — '
-            'for redimos data, prefer the Browser or Console tab. Continue anyway?',
-          ),
+          child: Text(tr('tbl.rawWriteBody')),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(tr('tbl.cancel'))),
           FilledButton(
             style: FilledButton.styleFrom(backgroundColor: scheme.error),
             onPressed: () => Navigator.pop(ctx, true),

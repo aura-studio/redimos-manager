@@ -15,6 +15,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'i18n.dart';
 import 'models.dart';
 import 'native.dart';
 
@@ -275,8 +276,8 @@ class _FormatViewerState extends State<FormatViewer> {
     final text = _editableText ? _edit.text : _decoded;
     await Clipboard.setData(ClipboardData(text: text));
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Copied'), duration: Duration(milliseconds: 900)));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(tr('fmt.copied')), duration: const Duration(milliseconds: 900)));
     }
   }
 
@@ -294,7 +295,7 @@ class _FormatViewerState extends State<FormatViewer> {
           child: FilledButton(
             // Only Text edits are saved (other formats are read-only decoded views).
             onPressed: _editableText ? () => widget.onSave!(_edit.text) : null,
-            child: const Text('Save'),
+            child: Text(tr('fmt.save')),
           ),
         ),
       ],
@@ -310,12 +311,12 @@ class _FormatViewerState extends State<FormatViewer> {
       for (final f in kBuiltinFormats) DropdownMenuItem(value: f, child: Text(f)),
       for (final f in _formatters)
         if (seen.add(f.name)) DropdownMenuItem(value: f.name, child: Text(f.name)),
-      const DropdownMenuItem(
+      DropdownMenuItem(
         value: _kCustomizeSentinel,
         child: Row(mainAxisSize: MainAxisSize.min, children: [
-          Icon(Icons.edit_outlined, size: 14),
-          SizedBox(width: 4),
-          Text('Customize'),
+          const Icon(Icons.edit_outlined, size: 14),
+          const SizedBox(width: 4),
+          Text(tr('fmt.customize')),
         ]),
       ),
     ];
@@ -340,12 +341,12 @@ class _FormatViewerState extends State<FormatViewer> {
           padding: const EdgeInsets.only(right: 8),
           child: _tag('[Hex]', scheme),
         ),
-      _tag('Size: $_sizeHuman', scheme),
+      _tag('${tr('fmt.size')}: $_sizeHuman', scheme),
       const SizedBox(width: 8),
       TextButton.icon(
         onPressed: _copy,
         icon: const Icon(Icons.copy, size: 14),
-        label: const Text('Copy'),
+        label: Text(tr('fmt.copy')),
         style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
       ),
       if (_loading) ...[
@@ -446,7 +447,7 @@ class _CustomFormatterManagerState extends State<_CustomFormatterManager> {
       _dirty = true;
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Save failed: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${tr('fmt.saveFailed')}: $e')));
       }
     }
   }
@@ -483,7 +484,7 @@ class _CustomFormatterManagerState extends State<_CustomFormatterManager> {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return AlertDialog(
-      title: const Text('Custom Formatter'),
+      title: Text(tr('fmt.customFormatter')),
       content: SizedBox(
         width: 640,
         child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -492,20 +493,20 @@ class _CustomFormatterManagerState extends State<_CustomFormatterManager> {
             child: OutlinedButton.icon(
               onPressed: () => _editOrNew(),
               icon: const Icon(Icons.add, size: 16),
-              label: const Text('New'),
+              label: Text(tr('fmt.new')),
             ),
           ),
           const SizedBox(height: 12),
-          const Row(children: [
-            SizedBox(width: 140, child: Text('Name', style: TextStyle(fontWeight: FontWeight.w600))),
-            Expanded(child: Text('Formatter', style: TextStyle(fontWeight: FontWeight.w600))),
-            SizedBox(width: 90, child: Text('Operation', style: TextStyle(fontWeight: FontWeight.w600))),
+          Row(children: [
+            SizedBox(width: 140, child: Text(tr('fmt.name'), style: const TextStyle(fontWeight: FontWeight.w600))),
+            Expanded(child: Text(tr('fmt.formatter'), style: const TextStyle(fontWeight: FontWeight.w600))),
+            SizedBox(width: 90, child: Text(tr('fmt.operation'), style: const TextStyle(fontWeight: FontWeight.w600))),
           ]),
           const Divider(),
           if (_list.isEmpty)
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 24),
-              child: Center(child: Text('No Data', style: TextStyle(color: Colors.grey))),
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 24),
+              child: Center(child: Text(tr('fmt.noData'), style: const TextStyle(color: Colors.grey))),
             )
           else
             ConstrainedBox(
@@ -527,13 +528,13 @@ class _CustomFormatterManagerState extends State<_CustomFormatterManager> {
                       width: 90,
                       child: Row(children: [
                         IconButton(
-                          tooltip: 'Edit',
+                          tooltip: tr('fmt.edit'),
                           visualDensity: VisualDensity.compact,
                           icon: const Icon(Icons.edit, size: 16),
                           onPressed: () => _editOrNew(existing: f, index: i),
                         ),
                         IconButton(
-                          tooltip: 'Delete',
+                          tooltip: tr('fmt.delete'),
                           visualDensity: VisualDensity.compact,
                           icon: Icon(Icons.delete_outline, size: 16, color: scheme.error),
                           onPressed: () => _delete(i),
@@ -549,7 +550,7 @@ class _CustomFormatterManagerState extends State<_CustomFormatterManager> {
       actions: [
         FilledButton(
           onPressed: () => Navigator.pop(context, _dirty ? _list : null),
-          child: const Text('Close'),
+          child: Text(tr('fmt.close')),
         ),
       ],
     );
@@ -587,11 +588,11 @@ class _FormatterEditDialogState extends State<_FormatterEditDialog> {
     final name = _name.text.trim();
     final command = _command.text.trim();
     if (name.isEmpty || command.isEmpty) {
-      setState(() => _err = 'Name and Command are required.');
+      setState(() => _err = tr('fmt.nameCommandRequired'));
       return;
     }
     if (widget.reserved.contains(name)) {
-      setState(() => _err = 'Name collides with a built-in format or another formatter.');
+      setState(() => _err = tr('fmt.nameCollides'));
       return;
     }
     Navigator.pop(context, CustomFormatter(name: name, command: command, params: _params.text));
@@ -600,11 +601,11 @@ class _FormatterEditDialogState extends State<_FormatterEditDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: Text(widget.existing == null ? 'New' : 'Edit'),
+      title: Text(widget.existing == null ? tr('fmt.new') : tr('fmt.edit')),
       content: SizedBox(
         width: 520,
         child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-          const Text('* Name', style: TextStyle(fontWeight: FontWeight.w600)),
+          Text(tr('fmt.nameLabel'), style: const TextStyle(fontWeight: FontWeight.w600)),
           const SizedBox(height: 4),
           TextField(
             controller: _name,
@@ -613,7 +614,7 @@ class _FormatterEditDialogState extends State<_FormatterEditDialog> {
             decoration: const InputDecoration(isDense: true, border: OutlineInputBorder()),
           ),
           const SizedBox(height: 14),
-          const Text('* Command', style: TextStyle(fontWeight: FontWeight.w600)),
+          Text(tr('fmt.commandLabel'), style: const TextStyle(fontWeight: FontWeight.w600)),
           const SizedBox(height: 4),
           TextField(
             controller: _command,
@@ -624,7 +625,7 @@ class _FormatterEditDialogState extends State<_FormatterEditDialog> {
             ),
           ),
           const SizedBox(height: 14),
-          const Text('Params', style: TextStyle(fontWeight: FontWeight.w600)),
+          Text(tr('fmt.params'), style: const TextStyle(fontWeight: FontWeight.w600)),
           const SizedBox(height: 4),
           TextField(
             controller: _params,
@@ -648,8 +649,8 @@ class _FormatterEditDialogState extends State<_FormatterEditDialog> {
         ]),
       ),
       actions: [
-        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-        FilledButton(onPressed: _submit, child: const Text('OK')),
+        TextButton(onPressed: () => Navigator.pop(context), child: Text(tr('fmt.cancel'))),
+        FilledButton(onPressed: _submit, child: Text(tr('fmt.ok'))),
       ],
     );
   }

@@ -12,6 +12,7 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 
+import 'i18n.dart';
 import 'models.dart';
 
 /// AWS console attribute types offered by "Add new attribute".
@@ -132,7 +133,7 @@ class _ItemEditorPageState extends State<ItemEditorPage> {
     for (final a in _attrs) {
       final name = a.name.text.trim();
       if (name.isEmpty) {
-        throw const FormatException('an attribute is missing its name');
+        throw FormatException(tr('item.attrMissingName'));
       }
       if (out.containsKey(name)) {
         throw FormatException('duplicate attribute "$name"');
@@ -209,7 +210,7 @@ class _ItemEditorPageState extends State<ItemEditorPage> {
     try {
       if (fromForm) return _avFromAttrs();
       final decoded = jsonDecode(_json.text);
-      if (decoded is! Map) throw const FormatException('top level must be an object');
+      if (decoded is! Map) throw FormatException(tr('item.topLevelMustBeObject'));
       final m = decoded.cast<String, dynamic>();
       if (_ddbJson) return m;
       return m.map((k, v) => MapEntry(k, _simpleToAv(v)));
@@ -290,22 +291,22 @@ class _ItemEditorPageState extends State<ItemEditorPage> {
               ),
               const SizedBox(width: 4),
               Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(widget.isNew ? 'Create item' : 'Edit item',
+                Text(widget.isNew ? tr('item.createItem') : tr('item.editItem'),
                     style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
                 Text(widget.table,
                     style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant)),
               ]),
               const Spacer(),
               if (!_formView) ...[
-                const Text('View DynamoDB JSON', style: TextStyle(fontSize: 12.5)),
+                Text(tr('item.viewDdbJson'), style: const TextStyle(fontSize: 12.5)),
                 const SizedBox(width: 6),
                 Switch(value: _ddbJson, onChanged: _switchDdbJson),
                 const SizedBox(width: 16),
               ],
               SegmentedButton<bool>(
-                segments: const [
-                  ButtonSegment(value: true, label: Text('Form')),
-                  ButtonSegment(value: false, label: Text('JSON')),
+                segments: [
+                  ButtonSegment(value: true, label: Text(tr('item.formTab'))),
+                  const ButtonSegment(value: false, label: Text('JSON')),
                 ],
                 selected: {_formView},
                 onSelectionChanged: (s) => _switchView(s.first),
@@ -320,7 +321,7 @@ class _ItemEditorPageState extends State<ItemEditorPage> {
             child: Row(mainAxisAlignment: MainAxisAlignment.end, children: [
               TextButton(
                 onPressed: _saving ? null : () => Navigator.of(context).pop(false),
-                child: const Text('Cancel'),
+                child: Text(tr('item.cancel')),
               ),
               const SizedBox(width: 10),
               FilledButton(
@@ -328,7 +329,7 @@ class _ItemEditorPageState extends State<ItemEditorPage> {
                 child: _saving
                     ? const SizedBox(
                         width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-                    : Text(widget.isNew ? 'Create item' : 'Save changes'),
+                    : Text(widget.isNew ? tr('item.createItem') : tr('item.saveChanges')),
               ),
             ]),
           ),
@@ -354,15 +355,15 @@ class _ItemEditorPageState extends State<ItemEditorPage> {
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
       children: [
-        Text('Attributes', style: TextStyle(fontWeight: FontWeight.w700, color: scheme.primary)),
+        Text(tr('item.attributes'), style: TextStyle(fontWeight: FontWeight.w700, color: scheme.primary)),
         const SizedBox(height: 4),
-        const Row(children: [
-          Expanded(flex: 3, child: Text('Attribute name', style: TextStyle(fontSize: 12))),
-          SizedBox(width: 10),
-          Expanded(flex: 2, child: Text('Type', style: TextStyle(fontSize: 12))),
-          SizedBox(width: 10),
-          Expanded(flex: 4, child: Text('Value', style: TextStyle(fontSize: 12))),
-          SizedBox(width: 40),
+        Row(children: [
+          Expanded(flex: 3, child: Text(tr('item.attributeName'), style: const TextStyle(fontSize: 12))),
+          const SizedBox(width: 10),
+          Expanded(flex: 2, child: Text(tr('item.type'), style: const TextStyle(fontSize: 12))),
+          const SizedBox(width: 10),
+          Expanded(flex: 4, child: Text(tr('item.value'), style: const TextStyle(fontSize: 12))),
+          const SizedBox(width: 40),
         ]),
         const SizedBox(height: 6),
         for (var i = 0; i < _attrs.length; i++) _attrRow(i),
@@ -373,7 +374,7 @@ class _ItemEditorPageState extends State<ItemEditorPage> {
             builder: (ctx, ctrl, _) => OutlinedButton.icon(
               onPressed: () => ctrl.isOpen ? ctrl.close() : ctrl.open(),
               icon: const Icon(Icons.add, size: 16),
-              label: const Text('Add new attribute'),
+              label: Text(tr('item.addNewAttribute')),
             ),
             menuChildren: [
               for (final t in _attrTypes)
@@ -406,10 +407,10 @@ class _ItemEditorPageState extends State<ItemEditorPage> {
             controller: a.name,
             enabled: !a.isKey, // key names come from the schema
             decoration: _dec(
-              hint: 'Attribute name',
+              hint: tr('item.attributeName'),
               suffix: a.isKey
                   ? Tooltip(
-                      message: a == _attrs.first ? 'Partition key' : 'Sort key',
+                      message: a == _attrs.first ? tr('item.partitionKey') : tr('item.sortKey'),
                       child: Icon(Icons.key, size: 14, color: scheme.primary))
                   : null,
             ),
@@ -436,7 +437,7 @@ class _ItemEditorPageState extends State<ItemEditorPage> {
           child: a.isKey
               ? const SizedBox.shrink()
               : IconButton(
-                  tooltip: 'Remove',
+                  tooltip: tr('item.remove'),
                   icon: const Icon(Icons.close, size: 16),
                   onPressed: () => setState(() => _attrs.removeAt(i).dispose()),
                 ),
@@ -473,7 +474,7 @@ class _ItemEditorPageState extends State<ItemEditorPage> {
             'L' => '[{"S": "value"}]',
             'SS' => '["a", "b"]',
             'NS' => '["1", "2"]',
-            _ => 'Value',
+            _ => tr('item.value'),
           }),
         );
     }

@@ -12,6 +12,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'i18n.dart';
 import 'models.dart';
 import 'native.dart';
 
@@ -82,12 +83,12 @@ class _PartiqlPageViewState extends State<PartiqlPageView>
   String get _q => '"${widget.config.table}"';
 
   List<(String, String)> get _templates => [
-        ('Scan table', 'SELECT * FROM $_q'),
-        ('Query by partition key', "SELECT * FROM $_q WHERE pk = ?"),
-        ('Count items', 'SELECT COUNT(*) FROM $_q'),
-        ('Insert item', "INSERT INTO $_q VALUE {'pk': ?, 'sk': ?}"),
-        ('Update item', "UPDATE $_q SET attr = ? WHERE pk = ? AND sk = ?"),
-        ('Delete item', 'DELETE FROM $_q WHERE pk = ? AND sk = ?'),
+        (tr('pq.tplScanTable'), 'SELECT * FROM $_q'),
+        (tr('pq.tplQueryByPk'), "SELECT * FROM $_q WHERE pk = ?"),
+        (tr('pq.tplCountItems'), 'SELECT COUNT(*) FROM $_q'),
+        (tr('pq.tplInsertItem'), "INSERT INTO $_q VALUE {'pk': ?, 'sk': ?}"),
+        (tr('pq.tplUpdateItem'), "UPDATE $_q SET attr = ? WHERE pk = ? AND sk = ?"),
+        (tr('pq.tplDeleteItem'), 'DELETE FROM $_q WHERE pk = ? AND sk = ?'),
       ];
 
   bool get _isSelect =>
@@ -102,12 +103,12 @@ class _PartiqlPageViewState extends State<PartiqlPageView>
       final ok = await showDialog<bool>(
         context: context,
         builder: (ctx) => AlertDialog(
-          title: const Text('Run write statement?'),
+          title: Text(tr('pq.runWriteTitle')),
           content: Text(
               'This statement can modify data in "${widget.config.table}".\n\n$stmt'),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-            FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Run')),
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(tr('pq.cancel'))),
+            FilledButton(onPressed: () => Navigator.pop(ctx, true), child: Text(tr('pq.run'))),
           ],
         ),
       );
@@ -158,12 +159,12 @@ class _PartiqlPageViewState extends State<PartiqlPageView>
   Widget build(BuildContext context) {
     super.build(context);
     if (!widget.running) {
-      return _center(Icons.play_circle_outline, 'Instance not running',
-          'Start this config to run PartiQL statements against its table.');
+      return _center(Icons.play_circle_outline, tr('pq.instanceNotRunning'),
+          tr('pq.instanceNotRunningSub'));
     }
     if (widget.config.table.trim().isEmpty) {
-      return _center(Icons.code, 'No table configured',
-          'Set a Table name in Configure to run PartiQL statements.');
+      return _center(Icons.code, tr('pq.noTableConfigured'),
+          tr('pq.noTableConfiguredSub'));
     }
     return Theme(
       data: _denseTabTheme(context),
@@ -194,13 +195,13 @@ class _PartiqlPageViewState extends State<PartiqlPageView>
     return Row(children: [
       Icon(Icons.code, size: 18, color: scheme.primary),
       const SizedBox(width: 8),
-      const Text('PartiQL editor', style: TextStyle(fontSize: 15.5, fontWeight: FontWeight.w600)),
+      Text(tr('pq.partiqlEditor'), style: const TextStyle(fontSize: 15.5, fontWeight: FontWeight.w600)),
       const SizedBox(width: 12),
       Text(widget.config.table,
           style: TextStyle(fontSize: 13, color: Theme.of(context).hintColor)),
       const Spacer(),
       PopupMenuButton<String>(
-        tooltip: 'Statement templates',
+        tooltip: tr('pq.statementTemplates'),
         onSelected: (s) => setState(() => _stmt.text = s),
         itemBuilder: (_) => [
           for (final t in _templates) PopupMenuItem(value: t.$2, child: Text(t.$1)),
@@ -208,7 +209,7 @@ class _PartiqlPageViewState extends State<PartiqlPageView>
         child: OutlinedButton.icon(
           onPressed: null,
           icon: const Icon(Icons.description_outlined, size: 18),
-          label: const Text('Templates'),
+          label: Text(tr('pq.templates')),
           style: OutlinedButton.styleFrom(
             disabledForegroundColor: scheme.primary,
           ),
@@ -232,7 +233,7 @@ class _PartiqlPageViewState extends State<PartiqlPageView>
             maxLines: 8,
             style: const TextStyle(fontFamily: 'monospace', fontSize: 13.5),
             decoration: InputDecoration(
-              hintText: 'SELECT * FROM "${widget.config.table}" — type a PartiQL statement',
+              hintText: 'SELECT * FROM "${widget.config.table}" — ${tr('pq.typeStatement')}',
               hintStyle: const TextStyle(fontFamily: 'monospace', fontSize: 13),
               border: const OutlineInputBorder(),
               contentPadding: const EdgeInsets.all(10),
@@ -246,20 +247,20 @@ class _PartiqlPageViewState extends State<PartiqlPageView>
               child: _running
                   ? const SizedBox(
                       width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-                  : const Text('Run'),
+                  : Text(tr('pq.run')),
             ),
             const SizedBox(width: 12),
             OutlinedButton(
               onPressed: () => setState(() {
                 _stmt.clear();
               }),
-              child: const Text('Clear'),
+              child: Text(tr('pq.clear')),
             ),
             const Spacer(),
             SegmentedButton<bool>(
-              segments: const [
-                ButtonSegment(value: false, label: Text('Table view')),
-                ButtonSegment(value: true, label: Text('JSON view')),
+              segments: [
+                ButtonSegment(value: false, label: Text(tr('pq.tableView'))),
+                ButtonSegment(value: true, label: Text(tr('pq.jsonView'))),
               ],
               selected: {_jsonView},
               onSelectionChanged: (s) => setState(() => _jsonView = s.first),
@@ -284,14 +285,14 @@ class _PartiqlPageViewState extends State<PartiqlPageView>
       Row(children: [
         Icon(failed ? Icons.cancel : Icons.check_circle, size: 18, color: color),
         const SizedBox(width: 6),
-        Text(failed ? 'Failed' : 'Completed',
+        Text(failed ? tr('pq.failed') : tr('pq.completed'),
             style: TextStyle(fontWeight: FontWeight.w600, color: color)),
       ]),
       if (_startedAt != null)
         Padding(
           padding: const EdgeInsets.only(top: 4),
-          child: Text('Started on ${_fmtTs(_startedAt!)}'
-              '${ms != null ? '   ·   Elapsed time ${ms}ms' : ''}'),
+          child: Text('${tr('pq.startedOn')} ${_fmtTs(_startedAt!)}'
+              '${ms != null ? '   ·   ${tr('pq.elapsedTime')} ${ms}ms' : ''}'),
         ),
     ]);
   }
@@ -310,8 +311,8 @@ class _PartiqlPageViewState extends State<PartiqlPageView>
         const SizedBox(width: 8),
         Expanded(
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            const Text('An error occurred during the execution of the command.',
-                style: TextStyle(fontWeight: FontWeight.w600)),
+            Text(tr('pq.errorOccurred'),
+                style: const TextStyle(fontWeight: FontWeight.w600)),
             const SizedBox(height: 2),
             SelectableText(_error!, style: const TextStyle(fontSize: 12.5)),
           ]),
@@ -347,11 +348,11 @@ class _PartiqlPageViewState extends State<PartiqlPageView>
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
           Expanded(
-            child: Text('Items returned (${r.returned})',
+            child: Text('${tr('pq.itemsReturned')} (${r.returned})',
                 style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600)),
           ),
           IconButton(
-            tooltip: 'Preferences',
+            tooltip: tr('pq.preferences'),
             onPressed: _openPreferences,
             icon: const Icon(Icons.settings, size: 18),
           ),
@@ -362,7 +363,7 @@ class _PartiqlPageViewState extends State<PartiqlPageView>
           decoration: InputDecoration(
             isDense: true,
             prefixIcon: const Icon(Icons.search, size: 18),
-            hintText: 'Find items',
+            hintText: tr('pq.findItems'),
             border: const OutlineInputBorder(),
             contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
             suffixIcon: _find.text.isEmpty
@@ -386,7 +387,7 @@ class _PartiqlPageViewState extends State<PartiqlPageView>
             icon: const Icon(Icons.chevron_right, size: 20),
           ),
           if (r.hasNext)
-            TextButton(onPressed: _running ? null : _nextPage, child: const Text('Next page')),
+            TextButton(onPressed: _running ? null : _nextPage, child: Text(tr('pq.nextPage'))),
         ]),
         const SizedBox(height: 8),
         if (rows.isEmpty)
@@ -396,12 +397,12 @@ class _PartiqlPageViewState extends State<PartiqlPageView>
               child: Column(children: [
                 Icon(Icons.inbox_outlined, size: 36, color: Theme.of(context).hintColor),
                 const SizedBox(height: 8),
-                const Text('No items'),
+                Text(tr('pq.noItems')),
                 const SizedBox(height: 4),
                 Text(
                     _find.text.isEmpty
-                        ? 'The statement returned no items.'
-                        : 'No items match the filter.',
+                        ? tr('pq.noItemsFromStatement')
+                        : tr('pq.noItemsMatchFilter'),
                     style: TextStyle(fontSize: 12, color: Theme.of(context).hintColor)),
               ]),
             ),
@@ -470,16 +471,16 @@ class _PartiqlPageViewState extends State<PartiqlPageView>
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
           Expanded(
-            child: Text('Items returned (${_res!.returned})',
+            child: Text('${tr('pq.itemsReturned')} (${_res!.returned})',
                 style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600)),
           ),
           IconButton(
-            tooltip: 'Copy',
+            tooltip: tr('pq.copy'),
             icon: const Icon(Icons.copy, size: 18),
             onPressed: () {
               Clipboard.setData(ClipboardData(text: pretty));
               ScaffoldMessenger.of(context)
-                  .showSnackBar(const SnackBar(content: Text('Copied')));
+                  .showSnackBar(SnackBar(content: Text(tr('pq.copied'))));
             },
           ),
         ]),
@@ -498,13 +499,13 @@ class _PartiqlPageViewState extends State<PartiqlPageView>
         final hidden = {..._hiddenCols};
         return StatefulBuilder(builder: (ctx, setD) {
           return AlertDialog(
-            title: const Text('Preferences'),
+            title: Text(tr('pq.preferences')),
             content: SizedBox(
               width: 320,
               child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Row(children: [
-                  TextButton(onPressed: () => setD(() => hidden.clear()), child: const Text('Select all')),
-                  TextButton(onPressed: () => setD(() => hidden.addAll(cols)), child: const Text('Deselect all')),
+                  TextButton(onPressed: () => setD(() => hidden.clear()), child: Text(tr('pq.selectAll'))),
+                  TextButton(onPressed: () => setD(() => hidden.addAll(cols)), child: Text(tr('pq.deselectAll'))),
                 ]),
                 for (final c in cols)
                   SwitchListTile(
@@ -517,7 +518,7 @@ class _PartiqlPageViewState extends State<PartiqlPageView>
               ]),
             ),
             actions: [
-              TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+              TextButton(onPressed: () => Navigator.pop(ctx), child: Text(tr('pq.cancel'))),
               FilledButton(
                 onPressed: () {
                   Navigator.pop(ctx);
@@ -527,7 +528,7 @@ class _PartiqlPageViewState extends State<PartiqlPageView>
                       ..addAll(hidden);
                   });
                 },
-                child: const Text('Save changes'),
+                child: Text(tr('pq.saveChanges')),
               ),
             ],
           );
@@ -547,14 +548,14 @@ class _PartiqlPageViewState extends State<PartiqlPageView>
       context: context,
       builder: (ctx) => AlertDialog(
         title: Row(children: [
-          const Expanded(child: Text('Item (DynamoDB JSON)')),
+          Expanded(child: Text(tr('pq.itemDdbJson'))),
           IconButton(
-            tooltip: 'Copy',
+            tooltip: tr('pq.copy'),
             icon: const Icon(Icons.copy, size: 18),
             onPressed: () {
               Clipboard.setData(ClipboardData(text: pretty));
               ScaffoldMessenger.of(context)
-                  .showSnackBar(const SnackBar(content: Text('Copied')));
+                  .showSnackBar(SnackBar(content: Text(tr('pq.copied'))));
             },
           ),
         ]),
@@ -565,7 +566,7 @@ class _PartiqlPageViewState extends State<PartiqlPageView>
                 style: const TextStyle(fontFamily: 'monospace', fontSize: 12.5)),
           ),
         ),
-        actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close'))],
+        actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: Text(tr('pq.close')))],
       ),
     );
   }

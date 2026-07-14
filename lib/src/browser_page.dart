@@ -18,6 +18,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'format_viewer.dart';
+import 'i18n.dart';
 import 'models.dart';
 import 'native.dart';
 import 'resp_client.dart';
@@ -356,7 +357,7 @@ class _BrowserPageViewState extends State<BrowserPageView>
         default: // 'none' — the key no longer exists (e.g. removed by a recreate)
           if (!_tabs.contains(t)) return;
           t.strCtrl.text = '';
-          t.error = 'Key no longer exists (it may have been deleted).';
+          t.error = tr('br.keyNoLongerExists');
       }
       // Tab may have been closed (and its controller disposed) mid-load.
       if (!mounted || !_tabs.contains(t)) return;
@@ -460,8 +461,8 @@ class _BrowserPageViewState extends State<BrowserPageView>
     // reload the tab against the live server instead.
     if (t != null && t.loadGen != _connGen) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text('Reconnected to the server — reloaded this key. Try again.')));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(tr('br.reconnectedReloaded'))));
       }
       if (_tabs.contains(t)) await _loadTab(t);
       return;
@@ -486,11 +487,11 @@ class _BrowserPageViewState extends State<BrowserPageView>
     await _client!.lrem(key, 1, sentinel);
   }
 
-  Future<void> _copy(String text, [String label = 'Copied']) async {
+  Future<void> _copy(String text, [String? label]) async {
     await Clipboard.setData(ClipboardData(text: text));
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(label), duration: const Duration(milliseconds: 900)),
+        SnackBar(content: Text(label ?? tr('br.copied')), duration: const Duration(milliseconds: 900)),
       );
     }
   }
@@ -526,15 +527,15 @@ class _BrowserPageViewState extends State<BrowserPageView>
   Widget build(BuildContext context) {
     super.build(context);
     if (!widget.running) {
-      return _center(Icons.play_circle_outline, 'Instance not running',
-          'Start this config to browse its keyspace.');
+      return _center(Icons.play_circle_outline, tr('br.instanceNotRunning'),
+          tr('br.startToBrowse'));
     }
     if (_client == null) {
       return Center(
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           const SizedBox(width: 34, height: 34, child: CircularProgressIndicator(strokeWidth: 3)),
           const SizedBox(height: 16),
-          Text(_connError ?? 'Connecting…'),
+          Text(_connError ?? tr('br.connecting')),
           Text('127.0.0.1:${widget.config.port}',
               style: const TextStyle(fontSize: 12, color: Colors.grey)),
         ]),
@@ -560,8 +561,8 @@ class _BrowserPageViewState extends State<BrowserPageView>
         child: Row(children: [
           Tooltip(
             message: widget.config.multiDb
-                ? 'Select database (SELECT)'
-                : 'MultiDB is off for this config — SELECT has no effect (every DB maps to db0)',
+                ? tr('br.selectDatabase')
+                : tr('br.multiDbOff'),
             child: DropdownButton<int>(
               value: _db,
               underline: const SizedBox.shrink(),
@@ -580,7 +581,7 @@ class _BrowserPageViewState extends State<BrowserPageView>
             child: FilledButton.icon(
               onPressed: _newKeyDialog,
               icon: const Icon(Icons.add, size: 18),
-              label: const Text('New Key'),
+              label: Text(tr('br.newKey')),
               style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(36)),
             ),
           ),
@@ -597,7 +598,7 @@ class _BrowserPageViewState extends State<BrowserPageView>
             border: const OutlineInputBorder(),
             contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
             suffixIcon: IconButton(
-              tooltip: 'Search',
+              tooltip: tr('br.search'),
               icon: const Icon(Icons.arrow_forward, size: 18),
               onPressed: _reload,
             ),
@@ -608,11 +609,11 @@ class _BrowserPageViewState extends State<BrowserPageView>
       Padding(
         padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
         child: Row(children: [
-          Text('${_keys.length} keys${_scanDone ? '' : '+'}',
+          Text('${_keys.length} ${tr('br.keysUnit')}${_scanDone ? '' : '+'}',
               style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant)),
           const Spacer(),
           IconButton(
-            tooltip: _selectMode ? 'Exit select' : 'Select multiple',
+            tooltip: _selectMode ? tr('br.exitSelect') : tr('br.selectMultiple'),
             visualDensity: VisualDensity.compact,
             isSelected: _selectMode,
             icon: Icon(_selectMode ? Icons.check_box : Icons.check_box_outlined, size: 18),
@@ -622,13 +623,13 @@ class _BrowserPageViewState extends State<BrowserPageView>
             }),
           ),
           IconButton(
-            tooltip: _tree ? 'Flat view' : 'Tree view',
+            tooltip: _tree ? tr('br.flatView') : tr('br.treeView'),
             visualDensity: VisualDensity.compact,
             icon: Icon(_tree ? Icons.account_tree : Icons.list, size: 18),
             onPressed: () => setState(() => _tree = !_tree),
           ),
           IconButton(
-            tooltip: 'Refresh',
+            tooltip: tr('br.refresh'),
             visualDensity: VisualDensity.compact,
             icon: const Icon(Icons.refresh, size: 18),
             onPressed: _reload,
@@ -639,7 +640,7 @@ class _BrowserPageViewState extends State<BrowserPageView>
       Expanded(
         child: _keys.isEmpty
             ? Center(
-                child: Text(_scanning ? 'Scanning…' : 'No keys',
+                child: Text(_scanning ? tr('br.scanning') : tr('br.noKeys'),
                     style: const TextStyle(color: Colors.grey)))
             : ListView(children: _tree ? _treeNodes() : _flatNodes()),
       ),
@@ -648,17 +649,17 @@ class _BrowserPageViewState extends State<BrowserPageView>
           color: scheme.errorContainer,
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
           child: Row(children: [
-            Text('${_checked.length} selected', style: TextStyle(color: scheme.onErrorContainer)),
+            Text('${_checked.length} ${tr('br.selected')}', style: TextStyle(color: scheme.onErrorContainer)),
             const Spacer(),
             TextButton(
               onPressed: () => setState(_checked.clear),
-              child: const Text('Clear'),
+              child: Text(tr('br.clear')),
             ),
             FilledButton.icon(
               style: FilledButton.styleFrom(backgroundColor: scheme.error),
               onPressed: _batchDelete,
               icon: const Icon(Icons.delete_outline, size: 16),
-              label: const Text('Delete'),
+              label: Text(tr('br.delete')),
             ),
           ]),
         ),
@@ -671,7 +672,7 @@ class _BrowserPageViewState extends State<BrowserPageView>
                 onPressed: _scanning ? null : _scanMore,
                 child: _scanning
                     ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-                    : const Text('Load more'),
+                    : Text(tr('br.loadMore')),
               ),
             ),
             const SizedBox(width: 8),
@@ -680,7 +681,7 @@ class _BrowserPageViewState extends State<BrowserPageView>
               style: FilledButton.styleFrom(
                   backgroundColor: scheme.error, foregroundColor: scheme.onError),
               onPressed: _scanning ? null : _loadAllConfirm,
-              child: const Text('Load all'),
+              child: Text(tr('br.loadAll')),
             ),
           ]),
         ),
@@ -729,17 +730,17 @@ class _BrowserPageViewState extends State<BrowserPageView>
     final choice = await showMenu<String>(
       context: context,
       position: RelativeRect.fromLTRB(pos.dx, pos.dy, overlay.size.width - pos.dx, 0),
-      items: const [
-        PopupMenuItem(value: 'open', child: Text('Open')),
-        PopupMenuItem(value: 'copy', child: Text('Copy name')),
-        PopupMenuItem(value: 'delete', child: Text('Delete')),
+      items: [
+        PopupMenuItem(value: 'open', child: Text(tr('br.open'))),
+        PopupMenuItem(value: 'copy', child: Text(tr('br.copyName'))),
+        PopupMenuItem(value: 'delete', child: Text(tr('br.delete'))),
       ],
     );
     switch (choice) {
       case 'open':
         _openKey(key);
       case 'copy':
-        await _copy(key, 'Key name copied');
+        await _copy(key, tr('br.keyNameCopied'));
       case 'delete':
         await _deleteKeys([key]);
     }
@@ -801,7 +802,7 @@ class _BrowserPageViewState extends State<BrowserPageView>
 
   Widget _rightPanel() {
     if (_tabs.isEmpty) {
-      return _center(Icons.vpn_key, 'No key selected', 'Pick a key on the left to view it.');
+      return _center(Icons.vpn_key, tr('br.noKeySelected'), tr('br.pickKey'));
     }
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       _tabStrip(),
@@ -840,7 +841,7 @@ class _BrowserPageViewState extends State<BrowserPageView>
                       style: TextStyle(fontSize: 12.5, fontWeight: active ? FontWeight.w600 : FontWeight.w400)),
                 ),
                 IconButton(
-                  tooltip: 'Close',
+                  tooltip: tr('br.close'),
                   visualDensity: VisualDensity.compact,
                   iconSize: 14,
                   icon: const Icon(Icons.close),
@@ -856,7 +857,7 @@ class _BrowserPageViewState extends State<BrowserPageView>
 
   Widget _detail(_KeyTab t) {
     if (t.loading) return const Center(child: CircularProgressIndicator());
-    if (t.error != null) return _center(Icons.error_outline, 'Cannot read key', t.error!);
+    if (t.error != null) return _center(Icons.error_outline, tr('br.cannotReadKey'), t.error!);
     // The string editor fills the pane height (ARDM's textarea does), so it
     // lays out without an outer scroll; collection tables keep the scroll.
     if (t.type == 'string') {
@@ -929,16 +930,16 @@ class _BrowserPageViewState extends State<BrowserPageView>
               const SizedBox(width: 10),
               Expanded(
                 child: Tooltip(
-                  message: 'redimos does not support RENAME — key names are read-only here',
+                  message: tr('br.renameNotSupported'),
                   child: Text(t.key,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
                 ),
               ),
               IconButton(
-                tooltip: 'Copy key name',
+                tooltip: tr('br.copyKeyName'),
                 visualDensity: VisualDensity.compact,
-                onPressed: () => _copy(t.key, 'Key name copied'),
+                onPressed: () => _copy(t.key, tr('br.keyNameCopied')),
                 icon: Icon(Icons.copy, size: 14, color: scheme.onSurfaceVariant),
               ),
             ]),
@@ -967,13 +968,13 @@ class _BrowserPageViewState extends State<BrowserPageView>
               ),
             ),
             IconButton(
-              tooltip: 'Reset',
+              tooltip: tr('br.reset'),
               visualDensity: VisualDensity.compact,
               onPressed: () => setState(() => t.ttlCtrl.text = '${t.ttl}'),
               icon: Icon(Icons.history, size: 15, color: scheme.onSurfaceVariant),
             ),
             IconButton(
-              tooltip: 'Apply TTL (≤0 = persist)',
+              tooltip: tr('br.applyTtl'),
               visualDensity: VisualDensity.compact,
               onPressed: applyTtl,
               icon: Icon(Icons.check, size: 16, color: scheme.primary),
@@ -981,12 +982,12 @@ class _BrowserPageViewState extends State<BrowserPageView>
           ]),
         ),
         const SizedBox(width: 10),
-        squareBtn(const Color(0xFFE25B5B), Icons.delete_outline, 'Delete key', () => _deleteKeys([t.key])),
+        squareBtn(const Color(0xFFE25B5B), Icons.delete_outline, tr('br.deleteKey'), () => _deleteKeys([t.key])),
         const SizedBox(width: 6),
-        squareBtn(const Color(0xFF57B36A), Icons.refresh, 'Refresh', _refreshTab),
+        squareBtn(const Color(0xFF57B36A), Icons.refresh, tr('br.refresh'), _refreshTab),
         const SizedBox(width: 6),
-        squareBtn(const Color(0xFF4A8FE0), Icons.code, 'Copy as command',
-            () => _copy(_keyCommand(t), 'Command copied')),
+        squareBtn(const Color(0xFF4A8FE0), Icons.code, tr('br.copyAsCommand'),
+            () => _copy(_keyCommand(t), tr('br.commandCopied'))),
       ]),
     );
   }
@@ -1005,37 +1006,37 @@ class _BrowserPageViewState extends State<BrowserPageView>
       case 'string':
         return _stringEditor(t);
       case 'hash':
-        return _collectionEditor(t, ['Key', 'Value'],
-            onAdd: () => _fieldValueDialog('Add New Line',
+        return _collectionEditor(t, [tr('br.key'), tr('br.value')],
+            onAdd: () => _fieldValueDialog(tr('br.addNewLine'),
                 onSubmit: (f, v) => _client!.hset(t.key, f, v)),
-            rowEdit: (r) => _fieldValueDialog('Edit Line',
+            rowEdit: (r) => _fieldValueDialog(tr('br.editLine'),
                 field: r[0], value: r[1], fieldLocked: true,
                 onSubmit: (f, v) => _client!.hset(t.key, f, v)),
             rowDelete: (r) => _client!.hdel(t.key, r[0]));
       case 'list':
-        return _collectionEditor(t, ['#', 'Value'], numbered: false,
+        return _collectionEditor(t, ['#', tr('br.value')], numbered: false,
             onAdd: () => _listAddDialog(t.key),
-            rowEdit: (r) => _singleValueDialog('Edit Line', value: r[1],
+            rowEdit: (r) => _singleValueDialog(tr('br.editLine'), value: r[1],
                 onSubmit: (v) => _client!.lset(t.key, int.parse(r[0]), v)),
             rowDelete: (r) => _lremAt(t.key, int.parse(r[0])));
       case 'set':
-        return _collectionEditor(t, ['Member'], singleColumn: true,
-            onAdd: () => _singleValueDialog('Add New Line', onSubmit: (v) => _client!.sadd(t.key, v)),
-            rowEdit: (r) => _singleValueDialog('Edit Line', value: r[0],
+        return _collectionEditor(t, [tr('br.member')], singleColumn: true,
+            onAdd: () => _singleValueDialog(tr('br.addNewLine'), onSubmit: (v) => _client!.sadd(t.key, v)),
+            rowEdit: (r) => _singleValueDialog(tr('br.editLine'), value: r[0],
                 onSubmit: (v) async {
                   await _client!.sadd(t.key, v);
                   if (v != r[0]) await _client!.srem(t.key, r[0]);
                 }),
             rowDelete: (r) => _client!.srem(t.key, r[0]));
       case 'zset':
-        return _collectionEditor(t, ['Score', 'Member'], scoreFirst: true,
-            onAdd: () => _scoreMemberDialog('Add New Line',
+        return _collectionEditor(t, [tr('br.score'), tr('br.member')], scoreFirst: true,
+            onAdd: () => _scoreMemberDialog(tr('br.addNewLine'),
                 onSubmit: (s, m) => _client!.zadd(t.key, s, m)),
-            rowEdit: (r) => _scoreMemberDialog('Edit Line', score: r[1], member: r[0], memberLocked: true,
+            rowEdit: (r) => _scoreMemberDialog(tr('br.editLine'), score: r[1], member: r[0], memberLocked: true,
                 onSubmit: (s, m) => _client!.zadd(t.key, s, m)),
             rowDelete: (r) => _client!.zrem(t.key, r[0]));
       default:
-        return Text('Unsupported type: ${t.type}');
+        return Text('${tr('br.unsupportedType')}: ${t.type}');
     }
   }
 
@@ -1093,12 +1094,12 @@ class _BrowserPageViewState extends State<BrowserPageView>
             child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
               Row(children: [
                 Expanded(
-                  child: Text('View · ${t.key}${field.isNotEmpty ? ' · $field' : ''}',
+                  child: Text('${tr('br.view')} · ${t.key}${field.isNotEmpty ? ' · $field' : ''}',
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
                 ),
                 IconButton(
-                  tooltip: 'Close',
+                  tooltip: tr('br.close'),
                   icon: const Icon(Icons.close, size: 18),
                   onPressed: () => Navigator.pop(ctx),
                 ),
@@ -1158,19 +1159,19 @@ class _BrowserPageViewState extends State<BrowserPageView>
 
     // Data columns: hash Field/Value, list Value, set Member, zset Score/Member.
     final dataCols = numbered ? columns : columns.sublist(1);
-    final idHeader = 'ID (Total: ${t.total})';
+    final idHeader = 'ID (${tr('br.total')}: ${t.total})';
 
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Row(children: [
-        FilledButton(onPressed: onAdd, child: const Text('Add New Line')),
+        FilledButton(onPressed: onAdd, child: Text(tr('br.addNewLine'))),
         // ARDM shows a DESC/ASC order toggle for zsets, DESC first.
         if (scoreFirst) ...[
           const SizedBox(width: 10),
           SegmentedButton<bool>(
             style: const ButtonStyle(visualDensity: VisualDensity.compact),
-            segments: const [
-              ButtonSegment(value: true, label: Text('DESC'), icon: Icon(Icons.arrow_drop_down)),
-              ButtonSegment(value: false, label: Text('ASC'), icon: Icon(Icons.arrow_drop_up)),
+            segments: [
+              ButtonSegment(value: true, label: Text(tr('br.desc')), icon: const Icon(Icons.arrow_drop_down)),
+              ButtonSegment(value: false, label: Text(tr('br.asc')), icon: const Icon(Icons.arrow_drop_up)),
             ],
             selected: {t.desc},
             onSelectionChanged: (s) => _setZsetOrder(t, s.first),
@@ -1182,7 +1183,7 @@ class _BrowserPageViewState extends State<BrowserPageView>
         Padding(
           padding: const EdgeInsets.all(12),
           child: Center(
-            child: Text(t.filter.isEmpty ? 'Empty' : 'No match in loaded rows',
+            child: Text(t.filter.isEmpty ? tr('br.empty') : tr('br.noMatchInLoadedRows'),
                 style: const TextStyle(color: Colors.grey)),
           ),
         )
@@ -1217,11 +1218,11 @@ class _BrowserPageViewState extends State<BrowserPageView>
                   width: 190,
                   child: TextField(
                     style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w400),
-                    decoration: const InputDecoration(
+                    decoration: InputDecoration(
                       isDense: true,
-                      hintText: 'Keyword Search',
-                      border: OutlineInputBorder(),
-                      contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                      hintText: tr('br.keywordSearch'),
+                      border: const OutlineInputBorder(),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
                     ),
                     onChanged: (v) => setState(() => t.filter = v),
                   ),
@@ -1247,14 +1248,14 @@ class _BrowserPageViewState extends State<BrowserPageView>
               onPressed: t.loadingMore ? null : () => _loadMoreRows(t),
               child: t.loadingMore
                   ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-                  : Text('load more  (${t.rows.length}/${t.total})'),
+                  : Text('${tr('br.loadMore')}  (${t.rows.length}/${t.total})'),
             ),
           ),
         ),
       if (f.isNotEmpty && t.hasMore)
         Padding(
           padding: const EdgeInsets.only(top: 4),
-          child: Text('Filter applies to loaded rows only — load more to search further.',
+          child: Text(tr('br.filterLoadedOnly'),
               style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant)),
         ),
     ]);
@@ -1294,27 +1295,27 @@ class _BrowserPageViewState extends State<BrowserPageView>
           )),
         DataCell(Row(mainAxisSize: MainAxisSize.min, children: [
           IconButton(
-            tooltip: 'View / format value',
+            tooltip: tr('br.viewFormatValue'),
             visualDensity: VisualDensity.compact,
             icon: Icon(Icons.description_outlined, size: 15, color: iconColor),
             onPressed: () => _viewValue(t, row),
           ),
           IconButton(
-            tooltip: 'Copy value',
+            tooltip: tr('br.copyValue'),
             visualDensity: VisualDensity.compact,
             icon: Icon(Icons.copy, size: 14, color: iconColor),
             // The row's VALUE: hash value / list element (row[1]); set/zset member (row[0]).
-            onPressed: () => _copy(scoreFirst || singleColumn ? row[0] : row[1], 'Value copied'),
+            onPressed: () => _copy(scoreFirst || singleColumn ? row[0] : row[1], tr('br.valueCopied')),
           ),
           IconButton(
             visualDensity: VisualDensity.compact,
-            tooltip: 'Edit',
+            tooltip: tr('br.edit'),
             icon: Icon(Icons.edit, size: 15, color: iconColor),
             onPressed: disabled ? null : () => onEdit(row),
           ),
           IconButton(
             visualDensity: VisualDensity.compact,
-            tooltip: 'Delete',
+            tooltip: tr('br.delete'),
             icon: Icon(Icons.delete_outline, size: 15, color: iconColor),
             // Disabled while a write is in flight so a second (positional) delete
             // can't fire against a stale, shifted index.
@@ -1322,9 +1323,9 @@ class _BrowserPageViewState extends State<BrowserPageView>
           ),
           IconButton(
             visualDensity: VisualDensity.compact,
-            tooltip: 'Copy as command',
+            tooltip: tr('br.copyAsCommand'),
             icon: Icon(Icons.code, size: 15, color: iconColor),
-            onPressed: () => _copy(_rowCommand(t, row), 'Command copied'),
+            onPressed: () => _copy(_rowCommand(t, row), tr('br.commandCopied')),
           ),
         ])),
       ],
@@ -1337,16 +1338,16 @@ class _BrowserPageViewState extends State<BrowserPageView>
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text(keys.length == 1 ? 'Delete key?' : 'Delete ${keys.length} keys?'),
+        title: Text(keys.length == 1 ? tr('br.deleteKeyQ') : '${tr('br.delete')} ${keys.length} ${tr('br.keysQ')}'),
         content: Text(keys.length == 1
             ? 'Permanently delete "${keys.first}"? This cannot be undone.'
-            : 'Permanently delete ${keys.length} keys? This cannot be undone.'),
+            : '${tr('br.permDelete')} ${keys.length} ${tr('br.keysQCannotUndo')}'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(tr('br.cancel'))),
           FilledButton(
             style: FilledButton.styleFrom(backgroundColor: Theme.of(context).colorScheme.error),
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Delete'),
+            child: Text(tr('br.delete')),
           ),
         ],
       ),
@@ -1379,7 +1380,7 @@ class _BrowserPageViewState extends State<BrowserPageView>
       if (_active < 0) _active = _tabs.isEmpty ? -1 : 0;
     });
     if (failed > 0) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$failed key(s) could not be deleted')));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$failed ${tr('br.keysCouldNotDelete')}')));
     }
   }
 
@@ -1389,14 +1390,14 @@ class _BrowserPageViewState extends State<BrowserPageView>
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Delete whole folder?'),
+        title: Text(tr('br.deleteWholeFolder')),
         content: Text('Scan and delete every key under "$prefix:" ? This cannot be undone.'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(tr('br.cancel'))),
           FilledButton(
             style: FilledButton.styleFrom(backgroundColor: Theme.of(context).colorScheme.error),
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Delete'),
+            child: Text(tr('br.delete')),
           ),
         ],
       ),
@@ -1426,7 +1427,7 @@ class _BrowserPageViewState extends State<BrowserPageView>
       } catch (_) {}
     }
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Deleted ${toDel.length} key(s)')));
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${tr('br.deleted')} ${toDel.length} ${tr('br.keyPlural')}')));
     _reload();
   }
 
@@ -1434,11 +1435,11 @@ class _BrowserPageViewState extends State<BrowserPageView>
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Load all keys?'),
-        content: const Text('This walks the entire keyspace with SCAN. On a large database it may take a while.'),
+        title: Text(tr('br.loadAllKeysQ')),
+        content: Text(tr('br.loadAllWarning')),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Load all')),
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(tr('br.cancel'))),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: Text(tr('br.loadAll'))),
         ],
       ),
     );
@@ -1455,15 +1456,15 @@ class _BrowserPageViewState extends State<BrowserPageView>
       context: context,
       builder: (ctx) => StatefulBuilder(builder: (ctx, setD) {
         return AlertDialog(
-          title: const Text('New Key'),
+          title: Text(tr('br.newKey')),
           content: SizedBox(
             width: 380,
             child: Column(mainAxisSize: MainAxisSize.min, children: [
-              TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: 'Key name', border: OutlineInputBorder())),
+              TextField(controller: nameCtrl, decoration: InputDecoration(labelText: tr('br.keyName'), border: const OutlineInputBorder())),
               const SizedBox(height: 12),
               DropdownButtonFormField<String>(
                 initialValue: type,
-                decoration: const InputDecoration(labelText: 'Type', border: OutlineInputBorder()),
+                decoration: InputDecoration(labelText: tr('br.type'), border: const OutlineInputBorder()),
                 items: const [
                   DropdownMenuItem(value: 'string', child: Text('String')),
                   DropdownMenuItem(value: 'hash', child: Text('Hash')),
@@ -1478,9 +1479,9 @@ class _BrowserPageViewState extends State<BrowserPageView>
                 controller: valCtrl,
                 decoration: InputDecoration(
                   labelText: switch (type) {
-                    'hash' => 'field=value',
-                    'zset' => 'score=member',
-                    _ => 'first value',
+                    'hash' => tr('br.fieldEqValue'),
+                    'zset' => tr('br.scoreEqMember'),
+                    _ => tr('br.firstValue'),
                   },
                   border: const OutlineInputBorder(),
                 ),
@@ -1488,7 +1489,7 @@ class _BrowserPageViewState extends State<BrowserPageView>
             ]),
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+            TextButton(onPressed: () => Navigator.pop(ctx), child: Text(tr('br.cancel'))),
             FilledButton(
               onPressed: () async {
                 final name = nameCtrl.text.trim();
@@ -1512,15 +1513,15 @@ class _BrowserPageViewState extends State<BrowserPageView>
                     final go = await showDialog<bool>(
                       context: ctx,
                       builder: (c2) => AlertDialog(
-                        title: const Text('Overwrite key?'),
+                        title: Text(tr('br.overwriteKeyQ')),
                         content: Text('A "$existing" key named "$name" already exists. '
                             'Creating a String will replace it. Continue?'),
                         actions: [
-                          TextButton(onPressed: () => Navigator.pop(c2, false), child: const Text('Cancel')),
+                          TextButton(onPressed: () => Navigator.pop(c2, false), child: Text(tr('br.cancel'))),
                           FilledButton(
                             style: FilledButton.styleFrom(backgroundColor: Theme.of(c2).colorScheme.error),
                             onPressed: () => Navigator.pop(c2, true),
-                            child: const Text('Overwrite'),
+                            child: Text(tr('br.overwrite')),
                           ),
                         ],
                       ),
@@ -1550,7 +1551,7 @@ class _BrowserPageViewState extends State<BrowserPageView>
                 if (!_keys.contains(name)) setState(() => _keys.insert(0, name));
                 _openKey(name);
               },
-              child: const Text('Create'),
+              child: Text(tr('br.create')),
             ),
           ],
         );
@@ -1573,20 +1574,20 @@ class _BrowserPageViewState extends State<BrowserPageView>
       context: context,
       builder: (ctx) => StatefulBuilder(builder: (ctx, setD) {
         return AlertDialog(
-          title: const Text('Add New Line'),
+          title: Text(tr('br.addNewLine')),
           content: SizedBox(
             width: 380,
             child: Column(mainAxisSize: MainAxisSize.min, children: [
               TextField(controller: ctrl, minLines: 3, maxLines: 10,
-                  decoration: const InputDecoration(labelText: 'Value', border: OutlineInputBorder())),
+                  decoration: InputDecoration(labelText: tr('br.value'), border: const OutlineInputBorder())),
               const SizedBox(height: 12),
               Row(children: [
-                const Text('Push at: '),
+                Text(tr('br.pushAt')),
                 const SizedBox(width: 8),
                 SegmentedButton<String>(
-                  segments: const [
-                    ButtonSegment(value: 'head', label: Text('Head')),
-                    ButtonSegment(value: 'tail', label: Text('Tail')),
+                  segments: [
+                    ButtonSegment(value: 'head', label: Text(tr('br.head'))),
+                    ButtonSegment(value: 'tail', label: Text(tr('br.tail'))),
                   ],
                   selected: {where},
                   onSelectionChanged: (s) => setD(() => where = s.first),
@@ -1595,13 +1596,13 @@ class _BrowserPageViewState extends State<BrowserPageView>
             ]),
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+            TextButton(onPressed: () => Navigator.pop(ctx), child: Text(tr('br.cancel'))),
             FilledButton(
               onPressed: () {
                 Navigator.pop(ctx);
                 _guard(() => where == 'head' ? _client!.lpush(key, ctrl.text) : _client!.rpush(key, ctrl.text));
               },
-              child: const Text('Add'),
+              child: Text(tr('br.add')),
             ),
           ],
         );
@@ -1613,7 +1614,7 @@ class _BrowserPageViewState extends State<BrowserPageView>
       {String? value, required Future<void> Function(String) onSubmit}) async {
     final ctrl = TextEditingController(text: value ?? '');
     await _formDialog(title, [ctrl], (v) => onSubmit(v[0]),
-        labels: const ['Value'], multiline: const [true]);
+        labels: [tr('br.value')], multiline: const [true]);
   }
 
   Future<void> _fieldValueDialog(String title,
@@ -1622,7 +1623,7 @@ class _BrowserPageViewState extends State<BrowserPageView>
     final f = TextEditingController(text: field ?? '');
     final v = TextEditingController(text: value ?? '');
     await _formDialog(title, [f, v], (x) => onSubmit(x[0], x[1]),
-        labels: const ['Field', 'Value'], locked: [fieldLocked, false], multiline: const [false, true]);
+        labels: [tr('br.field'), tr('br.value')], locked: [fieldLocked, false], multiline: const [false, true]);
   }
 
   Future<void> _scoreMemberDialog(String title,
@@ -1631,7 +1632,7 @@ class _BrowserPageViewState extends State<BrowserPageView>
     final s = TextEditingController(text: score ?? '');
     final m = TextEditingController(text: member ?? '');
     await _formDialog(title, [s, m], (x) => onSubmit(x[0], x[1]),
-        labels: const ['Score', 'Member'], locked: [false, memberLocked], multiline: const [false, true]);
+        labels: [tr('br.score'), tr('br.member')], locked: [false, memberLocked], multiline: const [false, true]);
   }
 
   Future<void> _formDialog(String title, List<TextEditingController> ctrls,
@@ -1653,13 +1654,13 @@ class _BrowserPageViewState extends State<BrowserPageView>
                   child: ValueListenableBuilder<TextEditingValue>(
                     valueListenable: ctrls[i],
                     builder: (c2, v, _) => Row(children: [
-                      Text('Size: ${utf8.encode(v.text).length}B',
+                      Text('${tr('br.size')}: ${utf8.encode(v.text).length}B',
                           style: TextStyle(fontSize: 12, color: Theme.of(c2).hintColor)),
                       const SizedBox(width: 8),
                       TextButton.icon(
-                        onPressed: () => _copy(v.text, 'Value copied'),
+                        onPressed: () => _copy(v.text, tr('br.valueCopied')),
                         icon: const Icon(Icons.copy, size: 13),
-                        label: const Text('Copy', style: TextStyle(fontSize: 12)),
+                        label: Text(tr('br.copy'), style: const TextStyle(fontSize: 12)),
                       ),
                       const Spacer(),
                     ]),
@@ -1676,13 +1677,13 @@ class _BrowserPageViewState extends State<BrowserPageView>
           ]),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: Text(tr('br.cancel'))),
           FilledButton(
             onPressed: () {
               Navigator.pop(ctx);
               _guard(() => onSubmit(ctrls.map((c) => c.text).toList()));
             },
-            child: const Text('OK'),
+            child: Text(tr('br.ok')),
           ),
         ],
       ),
@@ -1754,8 +1755,8 @@ class _FolderState extends State<_Folder> {
     final choice = await showMenu<String>(
       context: context,
       position: RelativeRect.fromLTRB(pos.dx, pos.dy, overlay.size.width - pos.dx, 0),
-      items: const [
-        PopupMenuItem(value: 'delete', child: Text('Scan & delete whole folder')),
+      items: [
+        PopupMenuItem(value: 'delete', child: Text(tr('br.scanDeleteFolder'))),
       ],
     );
     if (choice == 'delete') widget.onDelete();

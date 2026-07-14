@@ -11,6 +11,7 @@
 
 import 'package:flutter/material.dart';
 
+import 'i18n.dart';
 import 'models.dart';
 import 'native.dart';
 
@@ -88,7 +89,7 @@ class _EndpointPageViewState extends State<EndpointPageView>
         _endpoint = r['endpoint']?.toString() ?? '';
         _error = null;
       } else {
-        _error = r['error']?.toString() ?? 'failed to list tables';
+        _error = r['error']?.toString() ?? tr('ep.failedToListTables');
       }
     });
   }
@@ -121,7 +122,7 @@ class _EndpointPageViewState extends State<EndpointPageView>
       child: Row(children: [
         Icon(Icons.folder_open, size: 18, color: scheme.primary),
         const SizedBox(width: 8),
-        const Text('Tables', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+        Text(tr('ep.tables'), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
         const SizedBox(width: 10),
         _endpointChip(),
         const Spacer(),
@@ -130,18 +131,18 @@ class _EndpointPageViewState extends State<EndpointPageView>
           child: TextField(
             controller: _filter,
             onChanged: (_) => setState(() {}),
-            decoration: const InputDecoration(
+            decoration: InputDecoration(
               isDense: true,
-              prefixIcon: Icon(Icons.search, size: 18),
-              hintText: 'Filter tables…',
-              border: OutlineInputBorder(),
-              contentPadding: EdgeInsets.symmetric(vertical: 8, horizontal: 8),
+              prefixIcon: const Icon(Icons.search, size: 18),
+              hintText: tr('ep.filterTables'),
+              border: const OutlineInputBorder(),
+              contentPadding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
             ),
           ),
         ),
         const SizedBox(width: 8),
         IconButton(
-          tooltip: 'Refresh',
+          tooltip: tr('ep.refresh'),
           onPressed: _busy || _loading ? null : _load,
           icon: const Icon(Icons.refresh, size: 20),
         ),
@@ -151,11 +152,11 @@ class _EndpointPageViewState extends State<EndpointPageView>
 
   Widget _endpointChip() {
     if (_awsMode) {
-      return _chip(Icons.cloud_outlined, 'AWS · read-only', Colors.amber.shade700);
+      return _chip(Icons.cloud_outlined, tr('ep.awsReadOnly'), Colors.amber.shade700);
     }
-    final label = _endpoint.isEmpty ? 'endpoint' : _endpoint;
+    final label = _endpoint.isEmpty ? tr('ep.endpoint') : _endpoint;
     return _chip(_loopback ? Icons.lan_outlined : Icons.public,
-        _loopback ? 'Local · loopback · $label' : label,
+        _loopback ? '${tr('ep.localLoopback')} · $label' : label,
         _loopback ? _green : Colors.orange.shade700);
   }
 
@@ -185,7 +186,7 @@ class _EndpointPageViewState extends State<EndpointPageView>
           const SizedBox(width: 8),
           Expanded(
             child: Text(
-              'AWS mode — table lifecycle is disabled; the manager cannot distinguish test from production.',
+              tr('ep.awsModeBanner'),
               style: TextStyle(fontSize: 12.5, color: Colors.amber.shade900),
             ),
           ),
@@ -195,16 +196,16 @@ class _EndpointPageViewState extends State<EndpointPageView>
   Widget _body() {
     if (_loading) return const Center(child: CircularProgressIndicator());
     if (_error != null) {
-      return _center(Icons.error_outline, 'Cannot list tables', _error!,
+      return _center(Icons.error_outline, tr('ep.cannotListTables'), _error!,
           action: FilledButton.icon(
-              onPressed: _load, icon: const Icon(Icons.refresh), label: const Text('Retry')));
+              onPressed: _load, icon: const Icon(Icons.refresh), label: Text(tr('ep.retry'))));
     }
     final rows = _filtered;
     if (rows.isEmpty) {
-      return _center(Icons.inbox_outlined, 'No tables',
+      return _center(Icons.inbox_outlined, tr('ep.noTables'),
           _filter.text.trim().isEmpty
-              ? 'This endpoint has no tables. Start a config with Auto-create, or a config bound to a missing table shows a Provision row here.'
-              : 'No tables match “${_filter.text.trim()}”.');
+              ? tr('ep.noTablesHint')
+              : '${tr('ep.noTablesMatch')} “${_filter.text.trim()}”.');
     }
     return ListView.separated(
       padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
@@ -256,7 +257,7 @@ class _EndpointPageViewState extends State<EndpointPageView>
                 ),
                 if (missing) ...[
                   const SizedBox(width: 6),
-                  Text('(missing)', style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant)),
+                  Text(tr('ep.missing'), style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant)),
                 ],
                 const SizedBox(width: 8),
                 _kindBadge(kind),
@@ -295,12 +296,12 @@ class _EndpointPageViewState extends State<EndpointPageView>
     if (missing) {
       // A bound-but-missing table can only be Provisioned (needs a config's schema).
       if (canLifecycle && boundId != null) {
-        children.add(_actionBtn('Provision', scheme.primary,
+        children.add(_actionBtn(tr('ep.provision'), scheme.primary,
             _busy ? null : () => _recreate(boundId, provision: true)));
       }
     } else {
       // Browse works for ANY existing table (AWS or endpoint) — the sole AWS action.
-      children.add(_actionBtn('Browse', null, () => widget.onOpenTable(name)));
+      children.add(_actionBtn(tr('ep.browse'), null, () => widget.onOpenTable(name)));
       // Purge / Recreate / Delete live behind an overflow menu, endpoint mode only.
       if (canLifecycle) {
         children.add(_opsMenu(name, boundId));
@@ -323,7 +324,7 @@ class _EndpointPageViewState extends State<EndpointPageView>
     return MenuAnchor(
       builder: (context, controller, child) => IconButton(
         icon: const Icon(Icons.more_vert, size: 20),
-        tooltip: 'Table operations',
+        tooltip: tr('ep.tableOperations'),
         visualDensity: VisualDensity.compact,
         onPressed: _busy
             ? null
@@ -333,18 +334,18 @@ class _EndpointPageViewState extends State<EndpointPageView>
         MenuItemButton(
           leadingIcon: const Icon(Icons.cleaning_services_outlined, size: 18),
           onPressed: _busy ? null : () => _purge(table),
-          child: const Text('Purge items'),
+          child: Text(tr('ep.purgeItems')),
         ),
         if (boundId != null)
           MenuItemButton(
             leadingIcon: const Icon(Icons.restart_alt, size: 18),
             onPressed: _busy ? null : () => _recreate(boundId, provision: false),
-            child: const Text('Recreate table'),
+            child: Text(tr('ep.recreateTable')),
           ),
         MenuItemButton(
           leadingIcon: Icon(Icons.delete_outline, size: 18, color: scheme.error),
           onPressed: _busy ? null : () => _delete(table),
-          child: Text('Delete table', style: TextStyle(color: scheme.error)),
+          child: Text(tr('ep.deleteTable'), style: TextStyle(color: scheme.error)),
         ),
       ],
     );
@@ -452,17 +453,17 @@ class _EndpointPageViewState extends State<EndpointPageView>
       final pre = await widget.core.tableInspect(widget.config, table);
       if (!mounted) return;
       if (pre['ok'] != true) {
-        _toast('${pre['error'] ?? 'inspect failed'}', error: true);
+        _toast('${pre['error'] ?? tr('ep.inspectFailed')}', error: true);
         return;
       }
       if (pre['allowed'] != true) {
-        _toast('${pre['reason'] ?? 'not allowed'}', error: true);
+        _toast('${pre['reason'] ?? tr('ep.notAllowed')}', error: true);
         return;
       }
       if (await _confirmDestroy(pre: pre, table: table, isDelete: false) != true || !mounted) {
         return;
       }
-      final progress = _progressDialog('Purging items…');
+      final progress = _progressDialog(tr('ep.purgingItems'));
       Map<String, dynamic> res;
       try {
         res = await widget.core.tablePurge(widget.config, table);
@@ -477,7 +478,7 @@ class _EndpointPageViewState extends State<EndpointPageView>
         _toast('Purged $n item(s) from "$table"');
         _load();
       } else {
-        _toast('${res['error'] ?? 'purge failed'}', error: true);
+        _toast('${res['error'] ?? tr('ep.purgeFailed')}', error: true);
       }
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -491,17 +492,17 @@ class _EndpointPageViewState extends State<EndpointPageView>
       final pre = await widget.core.tableInspect(widget.config, table);
       if (!mounted) return;
       if (pre['ok'] != true) {
-        _toast('${pre['error'] ?? 'inspect failed'}', error: true);
+        _toast('${pre['error'] ?? tr('ep.inspectFailed')}', error: true);
         return;
       }
       if (pre['allowed'] != true) {
-        _toast('${pre['reason'] ?? 'not allowed'}', error: true);
+        _toast('${pre['reason'] ?? tr('ep.notAllowed')}', error: true);
         return;
       }
       if (await _confirmDestroy(pre: pre, table: table, isDelete: true) != true || !mounted) {
         return;
       }
-      final progress = _progressDialog('Deleting table…');
+      final progress = _progressDialog(tr('ep.deletingTable'));
       Map<String, dynamic> res;
       try {
         res = await widget.core.tableDelete(widget.config, table);
@@ -512,10 +513,10 @@ class _EndpointPageViewState extends State<EndpointPageView>
       await progress;
       if (!mounted) return;
       if (res['ok'] == true) {
-        _toast('Deleted table "$table"');
+        _toast('${tr('ep.deletedTable')} "$table"');
         _load();
       } else {
-        _toast('${res['error'] ?? 'delete failed'}', error: true);
+        _toast('${res['error'] ?? tr('ep.deleteFailed')}', error: true);
       }
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -555,7 +556,7 @@ class _EndpointPageViewState extends State<EndpointPageView>
     // An unknown item count (DescribeTable failed, or DynamoDB's ~6h-stale ItemCount
     // reads 0 for a freshly bulk-loaded table) must NOT skip friction — treat it as big.
     final bigOrOld = (itemCount < 0) || (itemCount > 100000) || (ageDays > 30);
-    final countStr = itemCount < 0 ? 'unknown item count' : '~${_fmt(itemCount)} items';
+    final countStr = itemCount < 0 ? tr('ep.unknownItemCount') : '~${_fmt(itemCount)} items';
     final nameCtrl = TextEditingController();
     var ack = false;
     try {
@@ -565,8 +566,8 @@ class _EndpointPageViewState extends State<EndpointPageView>
           final ok = (!needsName || nameCtrl.text == table) && (!bigOrOld || ack);
           return AlertDialog(
             title: Text(isDelete
-                ? 'Delete table "$table"?'
-                : 'Purge all items from "$table"?'),
+                ? '${tr('ep.deleteTable')} "$table"?'
+                : '${tr('ep.purgeAllItemsFrom')} "$table"?'),
             content: SizedBox(
               width: 460,
               child: Column(
@@ -581,7 +582,7 @@ class _EndpointPageViewState extends State<EndpointPageView>
                       Text(
                         isDelete
                             ? 'This stops ${runningDeps.length} running config(s) that use this table and leaves them stopped.'
-                            : '${runningDeps.length} running config(s) use this table; they stay up and will see it empty.',
+                            : '${runningDeps.length} ${tr('ep.runningConfigsStayUp')}',
                         style: TextStyle(fontSize: 13, color: scheme.onSurfaceVariant),
                       ),
                       const SizedBox(height: 8),
@@ -616,7 +617,7 @@ class _EndpointPageViewState extends State<EndpointPageView>
                         ),
                         const SizedBox(height: 12),
                       ],
-                      Text('Type the table name to confirm:',
+                      Text(tr('ep.typeTableName'),
                           style: TextStyle(fontSize: 13, color: scheme.onSurfaceVariant)),
                       const SizedBox(height: 6),
                       TextField(
@@ -649,11 +650,11 @@ class _EndpointPageViewState extends State<EndpointPageView>
             ),
             actions: [
               TextButton(
-                  onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+                  onPressed: () => Navigator.pop(ctx, false), child: Text(tr('ep.cancel'))),
               FilledButton(
                 style: FilledButton.styleFrom(backgroundColor: scheme.error),
                 onPressed: ok ? () => Navigator.pop(ctx, true) : null,
-                child: Text(isDelete ? 'Delete' : 'Purge'),
+                child: Text(isDelete ? tr('ep.delete') : tr('ep.purge')),
               ),
             ],
           );
@@ -669,11 +670,11 @@ class _EndpointPageViewState extends State<EndpointPageView>
   Future<void> _recreate(String configId, {required bool provision}) async {
     final pre = widget.core.tablePrecheck(configId);
     if (pre['ok'] != true) {
-      _toast('${pre['error'] ?? 'precheck failed'}', error: true);
+      _toast('${pre['error'] ?? tr('ep.precheckFailed')}', error: true);
       return;
     }
     if (pre['allowed'] != true) {
-      _toast('${pre['reason'] ?? 'not allowed'}', error: true);
+      _toast('${pre['reason'] ?? tr('ep.notAllowed')}', error: true);
       return;
     }
     final go = await _confirm(pre: pre, provision: provision);
@@ -687,7 +688,7 @@ class _EndpointPageViewState extends State<EndpointPageView>
         content: Row(mainAxisSize: MainAxisSize.min, children: [
           const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.5)),
           const SizedBox(width: 16),
-          Text(provision ? 'Provisioning table…' : 'Recreating table…'),
+          Text(provision ? tr('ep.provisioningTable') : tr('ep.recreatingTable')),
         ]),
       ),
     );
@@ -704,11 +705,11 @@ class _EndpointPageViewState extends State<EndpointPageView>
     if (res['ok'] == true) {
       final warn = res['warning'];
       _toast(provision
-          ? 'Table provisioned'
-          : (warn != null ? 'Table recreated — $warn' : 'Table recreated'));
+          ? tr('ep.tableProvisioned')
+          : (warn != null ? '${tr('ep.tableRecreated')} — $warn' : tr('ep.tableRecreated')));
       _load();
     } else {
-      _toast('${res['error'] ?? 'operation failed'}', error: true);
+      _toast('${res['error'] ?? tr('ep.operationFailed')}', error: true);
     }
   }
 
@@ -724,7 +725,7 @@ class _EndpointPageViewState extends State<EndpointPageView>
     final runningDeps = deps.where((d) => d['running'] == true).toList();
     final needsName = !loopback && !provision;
     final nameCtrl = TextEditingController();
-    final countStr = itemCount < 0 ? 'unknown item count' : '~${_fmt(itemCount)} items';
+    final countStr = itemCount < 0 ? tr('ep.unknownItemCount') : '~${_fmt(itemCount)} items';
     // Extra friction when destroying a large or old table — recreate only, since
     // provision creates an empty table and there is nothing to lose.
     final bigOrOld = !provision && ((itemCount < 0) || (itemCount > 100000) || (ageDays > 30));
@@ -736,7 +737,7 @@ class _EndpointPageViewState extends State<EndpointPageView>
       builder: (ctx) => StatefulBuilder(builder: (ctx, setD) {
         final ok = (!needsName || nameCtrl.text == table) && (!bigOrOld || ack);
         return AlertDialog(
-          title: Text(provision ? 'Provision table "$table"?' : 'Recreate table "$table"?'),
+          title: Text(provision ? '${tr('ep.provisionTable')} "$table"?' : '${tr('ep.recreateTable')} "$table"?'),
           content: SizedBox(
             width: 460,
             child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -778,7 +779,7 @@ class _EndpointPageViewState extends State<EndpointPageView>
                   ]),
                 ),
                 const SizedBox(height: 12),
-                Text('Type the table name to confirm:', style: TextStyle(fontSize: 13, color: scheme.onSurfaceVariant)),
+                Text(tr('ep.typeTableName'), style: TextStyle(fontSize: 13, color: scheme.onSurfaceVariant)),
                 const SizedBox(height: 6),
                 TextField(
                   controller: nameCtrl,
@@ -806,12 +807,12 @@ class _EndpointPageViewState extends State<EndpointPageView>
             ]),
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(tr('ep.cancel'))),
             FilledButton(
               style: FilledButton.styleFrom(
                   backgroundColor: provision ? scheme.primary : scheme.error),
               onPressed: ok ? () => Navigator.pop(ctx, true) : null,
-              child: Text(provision ? 'Provision' : 'Recreate'),
+              child: Text(provision ? tr('ep.provision') : tr('ep.recreate')),
             ),
           ],
         );

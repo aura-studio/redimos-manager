@@ -13,6 +13,8 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'i18n.dart';
+
 // ---------------------------------------------------------------------------
 // RESP reply model + parser
 // ---------------------------------------------------------------------------
@@ -474,13 +476,13 @@ class _CmdConsoleState extends State<CmdConsole>
 
     final args = tokenize(line);
     if (args == null || args.isEmpty) {
-      setState(() => _append('(error) unbalanced quotes', _Kind.error));
+      setState(() => _append('(error) ${tr('cmd.unbalancedQuotes')}', _Kind.error));
       return;
     }
 
     final client = _client;
     if (client == null || !client.connected) {
-      setState(() => _append('(error) not connected — start the instance', _Kind.error));
+      setState(() => _append('(error) ${tr('cmd.notConnectedStart')}', _Kind.error));
       return;
     }
 
@@ -538,15 +540,15 @@ class _CmdConsoleState extends State<CmdConsole>
         // the generic "not running" hint, so the real problem is in front of you.
         return _placeholder(
           icon: Icons.error_outline,
-          title: 'Instance failed to start',
+          title: tr('cmd.instanceFailedToStart'),
           subtitle: reason,
           tint: Colors.redAccent,
         );
       }
       return _placeholder(
         icon: Icons.play_circle_outline,
-        title: 'Instance not running',
-        subtitle: 'Start this config to open an interactive redis-cli console.',
+        title: tr('cmd.instanceNotRunning'),
+        subtitle: tr('cmd.startConfigHint'),
       );
     }
 
@@ -609,7 +611,7 @@ class _CmdConsoleState extends State<CmdConsole>
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
                 Text(
-                  _connecting ? 'connecting… ' : _prompt,
+                  _connecting ? '${tr('cmd.connectingPrompt')} ' : _prompt,
                   style: TextStyle(
                     fontFamily: 'monospace',
                     fontSize: 12.5,
@@ -643,8 +645,8 @@ class _CmdConsoleState extends State<CmdConsole>
                         isDense: true,
                         border: InputBorder.none,
                         hintText: connected
-                            ? 'type a command — e.g. PING, SET k v, GET k'
-                            : 'not connected',
+                            ? tr('cmd.typeCommandHint')
+                            : tr('cmd.notConnected'),
                         hintStyle: TextStyle(color: hintColor, fontSize: 12.5),
                       ),
                       onSubmitted: _submit,
@@ -654,11 +656,11 @@ class _CmdConsoleState extends State<CmdConsole>
                 if (!connected && !_connecting)
                   TextButton(
                     onPressed: _connect,
-                    child: const Text('Reconnect'),
+                    child: Text(tr('cmd.reconnect')),
                   )
                 else
                   IconButton(
-                    tooltip: 'Clear',
+                    tooltip: tr('cmd.clear'),
                     visualDensity: VisualDensity.compact,
                     padding: EdgeInsets.zero,
                     constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
@@ -699,17 +701,17 @@ class _CmdConsoleState extends State<CmdConsole>
                   fontFamily: 'monospace', fontSize: 13, fontWeight: FontWeight.w700, color: ink)),
         ]),
         const SizedBox(height: 10),
-        Text('Connected to ${widget.host}:${widget.port} — Redis-compatible.', style: mono),
-        Text('Use SCAN (not KEYS) and HMSET for multi-field hashes.', style: mono),
+        Text('${tr('cmd.connectedTo')} ${widget.host}:${widget.port} ${tr('cmd.redisCompatible')}', style: mono),
+        Text(tr('cmd.scanTip'), style: mono),
         const SizedBox(height: 16),
-        Text('Try a command — click to insert, then press Enter:',
+        Text(tr('cmd.tryCommand'),
             style: mono.copyWith(color: ink)),
         const SizedBox(height: 10),
         Wrap(spacing: 8, runSpacing: 8, children: [
           for (final c in examples) _cmdChip(c, dark),
         ]),
         const SizedBox(height: 18),
-        Text('History: ↑ / ↓   ·   Clear: the ⌫ button on the right',
+        Text(tr('cmd.historyHint'),
             style: mono.copyWith(fontSize: 11.5)),
       ]),
     );
@@ -752,7 +754,7 @@ class _CmdConsoleState extends State<CmdConsole>
             child: CircularProgressIndicator(strokeWidth: 3),
           ),
           const SizedBox(height: 18),
-          Text(_everConnected ? 'Reconnecting…' : 'Connecting…',
+          Text(_everConnected ? tr('cmd.reconnecting') : tr('cmd.connecting'),
               style: const TextStyle(fontSize: 14)),
           const SizedBox(height: 6),
           Text('${widget.host}:${widget.port}',

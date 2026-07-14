@@ -10,6 +10,7 @@ import 'package:flutter/services.dart';
 import 'src/browser_page.dart';
 import 'src/cmd_console.dart';
 import 'src/endpoint_page.dart';
+import 'src/i18n.dart';
 import 'src/models.dart';
 import 'src/native.dart';
 import 'src/partiql_page.dart';
@@ -17,6 +18,7 @@ import 'src/table_page.dart';
 
 void main() {
   _loadThemeMode();
+  loadAppLang();
   runApp(const RedimosManagerApp());
 }
 
@@ -75,14 +77,16 @@ class RedimosManagerApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ValueListenableBuilder<ThemeMode>(
-      valueListenable: appThemeMode,
-      builder: (_, mode, __) => MaterialApp(
+    // Rebuild the whole app on a theme OR language change, so every widget that
+    // reads tr() re-localises and the theme re-applies.
+    return AnimatedBuilder(
+      animation: Listenable.merge([appThemeMode, appLang]),
+      builder: (_, __) => MaterialApp(
         title: 'Redimos Manager',
         debugShowCheckedModeBanner: false,
         theme: _appTheme(Brightness.light),
         darkTheme: _appTheme(Brightness.dark),
-        themeMode: mode,
+        themeMode: appThemeMode.value,
         home: const HomePage(),
       ),
     );
@@ -323,13 +327,12 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     final choice = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Unsaved changes'),
-        content: const Text(
-            'This config has unsaved changes. Do you want to save them before continuing?'),
+        title: Text(tr('home.unsavedChanges')),
+        content: Text(tr('home.unsavedChangesBody')),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, 'cancel'), child: const Text('Cancel')),
-          TextButton(onPressed: () => Navigator.pop(ctx, 'discard'), child: const Text("Don't save")),
-          FilledButton(onPressed: () => Navigator.pop(ctx, 'save'), child: const Text('Save')),
+          TextButton(onPressed: () => Navigator.pop(ctx, 'cancel'), child: Text(tr('home.cancel'))),
+          TextButton(onPressed: () => Navigator.pop(ctx, 'discard'), child: Text(tr('home.dontSave'))),
+          FilledButton(onPressed: () => Navigator.pop(ctx, 'save'), child: Text(tr('home.save'))),
         ],
       ),
     );
@@ -372,9 +375,9 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       final id = _core!.saveConfig(toSave);
       _selectedId = id;
       _reload();
-      _toast('Saved "${edited.name}"');
+      _toast('${tr('home.saved')} "${edited.name}"');
     } catch (e) {
-      _toast('Save failed: $e', error: true);
+      _toast('${tr('home.saveFailed')}: $e', error: true);
     }
   }
 
@@ -390,15 +393,15 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       _core!.deleteConfig(c.id);
       _selectedId = null;
       _reload();
-      _toast('Deleted "${c.name}"');
+      _toast('${tr('home.deleted')} "${c.name}"');
     } catch (e) {
-      _toast('Delete failed: $e', error: true);
+      _toast('${tr('home.deleteFailed')}: $e', error: true);
     }
   }
 
   void _startStop(RedimosConfig c) async {
     if (c.id.startsWith('unsaved-')) {
-      _toast('Save the config before starting it', error: true);
+      _toast(tr('home.saveBeforeStart'), error: true);
       return;
     }
     // "active" = running OR in a supervisor restart backoff — either way the
@@ -410,7 +413,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
         _core!.stop(c.id);
         _refresh();
       } catch (e) {
-        _toast('Stop failed: $e', error: true);
+        _toast('${tr('home.stopFailed')}: $e', error: true);
       }
       return;
     }
@@ -429,7 +432,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       _core!.start(c.id);
       _refresh();
     } catch (e) {
-      _toast('Start failed: $e', error: true);
+      _toast('${tr('home.startFailed')}: $e', error: true);
     }
   }
 
@@ -450,27 +453,27 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     final choice = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Table format mismatch'),
+        title: Text(tr('home.tableMismatchTitle')),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(ins.detail),
             const SizedBox(height: 12),
-            const Text(
-              'Starting anyway would fail or corrupt the data. Choose how to fix it:',
-              style: TextStyle(fontSize: 12.5),
+            Text(
+              tr('home.startingAnyway'),
+              style: const TextStyle(fontSize: 12.5),
             ),
           ],
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, 'cancel'), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(ctx, 'cancel'), child: Text(tr('home.cancel'))),
           TextButton(
               onPressed: () => Navigator.pop(ctx, 'rename'),
-              child: const Text('Change table name')),
+              child: Text(tr('home.changeTableName'))),
           FilledButton(
               onPressed: () => Navigator.pop(ctx, 'recommend'),
-              child: const Text('Use recommended config')),
+              child: Text(tr('home.useRecommendedConfig'))),
         ],
       ),
     );
@@ -484,12 +487,12 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     if (st == null || !mounted) return;
     if (choice == 'rename') {
       st.applyTableName(_suggestTableName(c));
-      _toast('Table renamed — Save, then Start again');
+      _toast(tr('home.tableRenamedHint'));
     } else if (choice == 'recommend') {
       st.applyRecommended(
           ins.tableVersion.isEmpty ? null : ins.tableVersion,
           ins.tableMultiDbKnown ? ins.tableMultiDb : null);
-      _toast('Config updated to match the data — Save, then Start again');
+      _toast(tr('home.configUpdatedHint'));
     }
   }
 
@@ -505,8 +508,21 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
           _Wordmark(),
         ]),
         actions: [
+          PopupMenuButton<AppLang>(
+            tooltip: tr('app.language'),
+            icon: const Icon(Icons.language_outlined),
+            onSelected: (l) {
+              appLang.value = l;
+              saveAppLang(l);
+            },
+            itemBuilder: (_) => [
+              // Language names show natively, not translated.
+              _langMenuItem(AppLang.zh, '中文'),
+              _langMenuItem(AppLang.en, 'English'),
+            ],
+          ),
           PopupMenuButton<ThemeMode>(
-            tooltip: 'Theme',
+            tooltip: tr('app.theme'),
             icon: Icon(switch (appThemeMode.value) {
               ThemeMode.light => Icons.light_mode_outlined,
               ThemeMode.dark => Icons.dark_mode_outlined,
@@ -517,9 +533,9 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
               _saveThemeMode(m);
             },
             itemBuilder: (_) => [
-              _themeMenuItem(ThemeMode.light, Icons.light_mode_outlined, 'Light'),
-              _themeMenuItem(ThemeMode.dark, Icons.dark_mode_outlined, 'Dark'),
-              _themeMenuItem(ThemeMode.system, Icons.brightness_auto_outlined, 'System'),
+              _themeMenuItem(ThemeMode.light, Icons.light_mode_outlined, tr('theme.light')),
+              _themeMenuItem(ThemeMode.dark, Icons.dark_mode_outlined, tr('theme.dark')),
+              _themeMenuItem(ThemeMode.system, Icons.brightness_auto_outlined, tr('theme.system')),
             ],
           ),
           _stopAllButton(),
@@ -543,14 +559,13 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
             child: Column(mainAxisSize: MainAxisSize.min, children: [
               const Icon(Icons.error_outline, size: 48, color: Colors.redAccent),
               const SizedBox(height: 16),
-              const Text('Could not load the native core (redimos_core.dll).'),
+              Text(tr('home.coreLoadFailed')),
               const SizedBox(height: 8),
               SelectableText('$_loadError',
                   style: const TextStyle(color: Colors.orangeAccent)),
               const SizedBox(height: 16),
-              const Text(
-                'Build it with scripts/build_native.ps1 and place the library '
-                'next to the app executable, or set REDIMOS_CORE_LIB.',
+              Text(
+                tr('home.coreBuildHint'),
                 textAlign: TextAlign.center,
               ),
             ]),
@@ -566,7 +581,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
         _status.values.any((s) => s.isRunning || s.status == 'restarting');
     if (anyRunning) {
       return IconButton(
-        tooltip: 'Stop all',
+        tooltip: tr('app.stopAll'),
         icon: const Icon(Icons.stop_circle_outlined),
         onPressed: _stopAll,
       );
@@ -575,14 +590,14 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       // Default icon colour (matches the outlined stop icon) — not green, so the
       // AppBar style stays consistent.
       return IconButton(
-        tooltip: 'Start all — restore ${_stopAllSnapshot.length} config(s)',
+        tooltip: '${tr('app.startAll')} — ${tr('home.restore')} ${_stopAllSnapshot.length} ${tr('home.configsSuffix')}',
         icon: const Icon(Icons.play_circle_outline),
         onPressed: _restoreAll,
       );
     }
-    return const IconButton(
-      tooltip: 'Stop all',
-      icon: Icon(Icons.stop_circle_outlined),
+    return IconButton(
+      tooltip: tr('app.stopAll'),
+      icon: const Icon(Icons.stop_circle_outlined),
       onPressed: null, // nothing running, nothing to restore
     );
   }
@@ -592,7 +607,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     setState(() => _stopAllSnapshot = snap);
     _refresh();
     if (snap.isNotEmpty) {
-      _toast('Stopped ${snap.length} config(s) — tap ▶ to restore');
+      _toast('${tr('home.stopped')} ${snap.length} ${tr('home.configsSuffix')} — ${tr('home.tapToRestore')}');
     }
   }
 
@@ -600,7 +615,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     final started = _core?.restoreAll() ?? [];
     setState(() => _stopAllSnapshot = []);
     _refresh();
-    _toast('Restored ${started.length} config(s)');
+    _toast('${tr('home.restored')} ${started.length} ${tr('home.configsSuffix')}');
   }
 
   Widget _configList() {
@@ -619,7 +634,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
             child: FilledButton.icon(
               onPressed: _newConfig,
               icon: const Icon(Icons.add),
-              label: const Text('New config'),
+              label: Text(tr('config.new')),
               style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(38)),
             ),
           ),
@@ -627,7 +642,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
         const Divider(height: 1), // thin sidebar rule
         Expanded(
           child: _configs.isEmpty
-              ? const Center(child: Text('No configs yet'))
+              ? Center(child: Text(tr('config.none')))
               : ListView.builder(
                   itemCount: _configs.length,
                   itemBuilder: (_, i) => _configTile(_configs[i]),
@@ -654,7 +669,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       child: ListTile(
         dense: true,
         leading: _statusDot(st?.status ?? 'stopped'),
-        title: Text(c.name.isEmpty ? '(unnamed)' : c.name,
+        title: Text(c.name.isEmpty ? tr('config.unnamed') : c.name,
             overflow: TextOverflow.ellipsis),
         subtitle: Text(
           '${c.version} · :${c.port}'
@@ -664,7 +679,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
           style: const TextStyle(fontSize: 11),
         ),
         trailing: IconButton(
-          tooltip: active ? 'Stop' : 'Start',
+          tooltip: active ? tr('config.stop') : tr('config.start'),
           icon: Icon(active ? Icons.stop : Icons.play_arrow,
               color: active ? Colors.redAccent : goGreen(context)),
           onPressed: () => _startStop(c),
@@ -692,7 +707,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   Widget _detail() {
     final c = _selected;
     if (c == null) {
-      return const Center(child: Text('Select or create a config'));
+      return Center(child: Text(tr('config.pick')));
     }
     final logsConfigId = c.id.startsWith('unsaved-') ? null : c.id;
     final st = _status[c.id];
@@ -716,14 +731,14 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
               // Drop the tab bar's own M3 divider so it doesn't double up.
               dividerColor: Colors.transparent,
               tabs: [
-                _tab(Icons.tune, 'Configure'),
-                _tab(Icons.insights, 'Monitor'),
-                _tab(Icons.terminal, 'Logs'),
-                _tab(Icons.folder_open, 'Endpoint'),
-                _tab(Icons.table_chart, 'Table'),
-                _tab(Icons.code, 'PartiQL'),
-                _tab(Icons.chevron_right, 'Console'),
-                _tab(Icons.travel_explore, 'Browser'),
+                _tab(Icons.tune, tr('tab.configure')),
+                _tab(Icons.insights, tr('tab.monitor')),
+                _tab(Icons.terminal, tr('tab.logs')),
+                _tab(Icons.folder_open, tr('tab.endpoint')),
+                _tab(Icons.table_chart, tr('tab.table')),
+                _tab(Icons.code, tr('tab.partiql')),
+                _tab(Icons.chevron_right, tr('tab.console')),
+                _tab(Icons.travel_explore, tr('tab.browser')),
               ],
             ),
           ),
@@ -847,6 +862,19 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       child: Row(children: [
         Icon(icon, size: 18, color: color),
         const SizedBox(width: 10),
+        Text(label, style: TextStyle(color: color, fontWeight: selected ? FontWeight.w600 : null)),
+        const Spacer(),
+        if (selected) Icon(Icons.check, size: 16, color: color),
+      ]),
+    );
+  }
+
+  PopupMenuItem<AppLang> _langMenuItem(AppLang l, String label) {
+    final selected = appLang.value == l;
+    final color = selected ? Theme.of(context).colorScheme.primary : null;
+    return PopupMenuItem<AppLang>(
+      value: l,
+      child: Row(children: [
         Text(label, style: TextStyle(color: color, fontWeight: selected ? FontWeight.w600 : null)),
         const Spacer(),
         if (selected) Icon(Icons.check, size: 16, color: color),
@@ -1104,25 +1132,25 @@ class _ConfigEditorState extends State<ConfigEditor> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
           // ── 1 · Name ─────────────────────────────────────────
-          _sectionHead('1', 'Name', topPad: 6),
-          SizedBox(width: cw, child: _field(_name, 'Name')),
+          _sectionHead('1', tr('home.name'), topPad: 6),
+          SizedBox(width: cw, child: _field(_name, tr('home.name'))),
 
           // ── 2 · Redis (the RESP endpoint this proxy exposes) ──
           _sectionHead('2', 'Redis'),
           Row(children: [
-            SizedBox(width: redisAuthW, child: _field(_pass, 'Auth', obscure: true)),
+            SizedBox(width: redisAuthW, child: _field(_pass, tr('home.auth'), obscure: true)),
             const SizedBox(width: 12),
-            SizedBox(width: dropW, child: _field(_port, 'Port', number: true)),
+            SizedBox(width: dropW, child: _field(_port, tr('home.port'), number: true)),
             const SizedBox(width: 12),
             SizedBox(
               width: dropW,
               child: DropdownButtonFormField<bool>(
                 initialValue: _autoRestart,
                 isDense: true,
-                decoration: _dd('AutoRestart'),
-                items: const [
-                  DropdownMenuItem(value: true, child: Text('On')),
-                  DropdownMenuItem(value: false, child: Text('Off')),
+                decoration: _dd(tr('home.autoRestart')),
+                items: [
+                  DropdownMenuItem(value: true, child: Text(tr('home.on'))),
+                  DropdownMenuItem(value: false, child: Text(tr('home.off'))),
                 ],
                 onChanged: (v) => setState(() => _autoRestart = v ?? true),
               ),
@@ -1133,10 +1161,10 @@ class _ConfigEditorState extends State<ConfigEditor> {
               child: DropdownButtonFormField<String>(
                 initialValue: _runMode,
                 isDense: true,
-                decoration: _dd('Engine'),
-                items: const [
-                  DropdownMenuItem(value: 'native', child: Text('Native')),
-                  DropdownMenuItem(value: 'docker', child: Text('Docker')),
+                decoration: _dd(tr('home.engine')),
+                items: [
+                  DropdownMenuItem(value: 'native', child: Text(tr('home.native'))),
+                  const DropdownMenuItem(value: 'docker', child: Text('Docker')),
                 ],
                 onChanged: (v) => setState(() => _runMode = v ?? 'native'),
               ),
@@ -1146,14 +1174,14 @@ class _ConfigEditorState extends State<ConfigEditor> {
           // ── 3 · Redimos (proxy line + behaviour + backing table) ──
           _sectionHead('3', 'Redimos'),
           Row(children: [
-            SizedBox(width: redimosTableW, child: _field(_table, 'Table', focusNode: _tableFocus)),
+            SizedBox(width: redimosTableW, child: _field(_table, tr('home.table'), focusNode: _tableFocus)),
             const SizedBox(width: 12),
             SizedBox(
               width: dropW,
               child: DropdownButtonFormField<String>(
                 initialValue: _version,
                 isDense: true,
-                decoration: _dd('Version'),
+                decoration: _dd(tr('home.version')),
                 items: const [
                   DropdownMenuItem(value: 'v1', child: Text('v1')),
                   DropdownMenuItem(value: 'v2', child: Text('v2')),
@@ -1167,10 +1195,10 @@ class _ConfigEditorState extends State<ConfigEditor> {
               child: DropdownButtonFormField<bool>(
                 initialValue: _autoCreate,
                 isDense: true,
-                decoration: _dd('AutoCreate'),
-                items: const [
-                  DropdownMenuItem(value: true, child: Text('On')),
-                  DropdownMenuItem(value: false, child: Text('Off')),
+                decoration: _dd(tr('home.autoCreate')),
+                items: [
+                  DropdownMenuItem(value: true, child: Text(tr('home.on'))),
+                  DropdownMenuItem(value: false, child: Text(tr('home.off'))),
                 ],
                 onChanged: (v) => setState(() => _autoCreate = v ?? false),
               ),
@@ -1181,10 +1209,10 @@ class _ConfigEditorState extends State<ConfigEditor> {
               child: DropdownButtonFormField<bool>(
                 initialValue: _multiDb,
                 isDense: true,
-                decoration: _dd('MultiDB'),
-                items: const [
-                  DropdownMenuItem(value: true, child: Text('On')),
-                  DropdownMenuItem(value: false, child: Text('Off')),
+                decoration: _dd(tr('home.multiDb')),
+                items: [
+                  DropdownMenuItem(value: true, child: Text(tr('home.on'))),
+                  DropdownMenuItem(value: false, child: Text(tr('home.off'))),
                 ],
                 onChanged: (v) => setState(() => _multiDb = v ?? false),
               ),
@@ -1199,12 +1227,12 @@ class _ConfigEditorState extends State<ConfigEditor> {
             alignment: Alignment.centerLeft,
             child: SegmentedButton<String>(
               style: const ButtonStyle(visualDensity: VisualDensity.compact),
-              segments: const [
+              segments: [
                 ButtonSegment(
                     value: 'endpoint',
-                    label: Text('Endpoint'),
-                    icon: Icon(Icons.link, size: 15)),
-                ButtonSegment(
+                    label: Text(tr('home.endpoint')),
+                    icon: const Icon(Icons.link, size: 15)),
+                const ButtonSegment(
                     value: 'aws',
                     label: Text('AWS'),
                     icon: Icon(Icons.cloud_outlined, size: 15)),
@@ -1217,25 +1245,25 @@ class _ConfigEditorState extends State<ConfigEditor> {
           if (_ddbMode == 'endpoint')
             // Endpoint mode: the URL is all that's needed.
             Row(children: [
-              SizedBox(width: cw, child: _field(_endpoint, 'Url')),
+              SizedBox(width: cw, child: _field(_endpoint, tr('home.url'))),
             ])
           else ...[
             // AWS mode: region + the credential triple.
             Row(children: [
-              SizedBox(width: leadW, child: _field(_region, 'Region')),
+              SizedBox(width: leadW, child: _field(_region, tr('home.region'))),
               const SizedBox(width: 12),
-              SizedBox(width: credRightW, child: _field(_ak, 'AccessKeyID')),
+              SizedBox(width: credRightW, child: _field(_ak, tr('home.accessKeyId'))),
             ]),
             const SizedBox(height: 12),
             Row(children: [
-              SizedBox(width: leadW, child: _field(_sk, 'SecretAccessKey', obscure: true)),
+              SizedBox(width: leadW, child: _field(_sk, tr('home.secretAccessKey'), obscure: true)),
               const SizedBox(width: 12),
-              SizedBox(width: credRightW, child: _field(_sessionToken, 'SessionToken', obscure: true)),
+              SizedBox(width: credRightW, child: _field(_sessionToken, tr('home.sessionToken'), obscure: true)),
             ]),
           ],
 
           // ── 5 · Extra flags ──────────────────────────────────
-          _sectionHead('5', 'Extra flags'),
+          _sectionHead('5', tr('home.extraFlags')),
           for (var i = 0; i < _extraFlags.length; i++)
             Padding(
               padding: const EdgeInsets.only(bottom: 10),
@@ -1246,7 +1274,7 @@ class _ConfigEditorState extends State<ConfigEditor> {
                     initialValue:
                         _flagKeys.contains(_extraFlags[i].key) ? _extraFlags[i].key : null,
                     isDense: true,
-                    decoration: _dd('Key'),
+                    decoration: _dd(tr('home.key')),
                     items: _flagKeys
                         .map((k) => DropdownMenuItem(value: k, child: Text(k)))
                         .toList(),
@@ -1258,11 +1286,11 @@ class _ConfigEditorState extends State<ConfigEditor> {
                   // Value fills the right half, reserving 52px (4px gap + the
                   // 48px remove button) so the row still totals the grid width.
                   width: (halfW - 52).clamp(90.0, 4000.0).toDouble(),
-                  child: _field(_flagVals[i], 'Value'),
+                  child: _field(_flagVals[i], tr('home.value')),
                 ),
                 const SizedBox(width: 4),
                 IconButton(
-                  tooltip: 'Remove',
+                  tooltip: tr('home.remove'),
                   icon: const Icon(Icons.remove_circle_outline, color: Colors.redAccent, size: 20),
                   onPressed: () => _removeFlag(i),
                 ),
@@ -1273,7 +1301,7 @@ class _ConfigEditorState extends State<ConfigEditor> {
             child: OutlinedButton.icon(
               onPressed: _addFlag,
               icon: const Icon(Icons.add, size: 18),
-              label: const Text('Add flag'),
+              label: Text(tr('home.addFlag')),
             ),
           ),
 
@@ -1292,20 +1320,20 @@ class _ConfigEditorState extends State<ConfigEditor> {
               child: Row(children: [
                 FilledButton.icon(
                   icon: const Icon(Icons.save),
-                  label: const Text('Save'),
+                  label: Text(tr('home.save')),
                   onPressed: () => widget.onSave(_collect()),
                 ),
                 const SizedBox(width: 12),
                 // Restore: discard unsaved edits, reverting fields to the saved config.
                 OutlinedButton.icon(
                   icon: const Icon(Icons.restore),
-                  label: const Text('Restore'),
+                  label: Text(tr('home.revert')),
                   onPressed: () {
                     final wasDirty = isDirty;
                     _resetControllers();
                     if (wasDirty && mounted) {
                       ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Reverted unsaved changes')),
+                        SnackBar(content: Text(tr('home.revertedChanges'))),
                       );
                     }
                   },
@@ -1313,7 +1341,7 @@ class _ConfigEditorState extends State<ConfigEditor> {
                 const Spacer(),
                 OutlinedButton.icon(
                   icon: const Icon(Icons.delete_outline),
-                  label: const Text('Delete'),
+                  label: Text(tr('home.delete')),
                   style: OutlinedButton.styleFrom(foregroundColor: Colors.redAccent),
                   onPressed: _confirmDelete,
                 ),
@@ -1327,21 +1355,21 @@ class _ConfigEditorState extends State<ConfigEditor> {
 
   // Delete needs an explicit confirmation — it permanently removes the config.
   Future<void> _confirmDelete() async {
-    final name = widget.config.name.isEmpty ? '(unnamed)' : widget.config.name;
+    final name = widget.config.name.isEmpty ? tr('home.unnamedParen') : widget.config.name;
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Delete config?'),
-        content: Text('Permanently remove "$name"? This cannot be undone.'),
+        title: Text(tr('home.deleteConfigTitle')),
+        content: Text('${tr('home.permanentlyRemove')} "$name"? ${tr('home.cannotBeUndone')}'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
+            child: Text(tr('home.cancel')),
           ),
           FilledButton(
             style: FilledButton.styleFrom(backgroundColor: Colors.redAccent),
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Delete'),
+            child: Text(tr('home.delete')),
           ),
         ],
       ),
@@ -1522,7 +1550,7 @@ class _LogsViewState extends State<LogsView> {
             padding: const EdgeInsets.all(12),
             alignment: Alignment.topLeft,
             child: lines.isEmpty
-                ? Text('(no output)',
+                ? Text(tr('home.noOutput'),
                     style: TextStyle(color: Theme.of(context).textTheme.bodySmall?.color))
                 : SingleChildScrollView(
                     controller: sc,
@@ -1617,7 +1645,7 @@ class _LogsViewState extends State<LogsView> {
               const SizedBox(width: 6),
               const Icon(Icons.terminal, size: 16),
               const SizedBox(width: 8),
-              Text('logs', style: Theme.of(context).textTheme.labelLarge),
+              Text(tr('home.logs'), style: Theme.of(context).textTheme.labelLarge),
               const Spacer(),
               if (st != null)
                 Text(
@@ -1635,7 +1663,7 @@ class _LogsViewState extends State<LogsView> {
             color: Colors.black,
             padding: const EdgeInsets.all(10),
             child: tail.isEmpty
-                ? const Text('(no output)', style: TextStyle(color: Colors.grey))
+                ? Text(tr('home.noOutput'), style: const TextStyle(color: Colors.grey))
                 : SelectableText(
                     tail.join('\n'),
                     style: const TextStyle(
@@ -1700,48 +1728,48 @@ class MonitorView extends StatelessWidget {
       runSpacing: 10,
       children: [
         _SparkTile(
-          label: 'CPU',
+          label: tr('home.cpu'),
           value: running ? '${st!.cpuPercent.toStringAsFixed(1)} %' : '—',
           data: cpuHist,
           color: const Color(0xFF7FB2E6),
         ),
         _SparkTile(
-          label: 'Memory',
+          label: tr('home.memory'),
           value: running ? '${(st!.memBytes / (1024 * 1024)).round()} MB' : '—',
           data: memHist,
           color: const Color(0xFF57CF92),
         ),
         _SparkTile(
-          label: 'Ops/s',
+          label: tr('home.opsPerSec'),
           value: running && st!.metricsOk ? st.opsPerSec.toStringAsFixed(0) : '—',
           data: opsHist,
           color: const Color(0xFFD9A85B),
         ),
-        _InfoTile(label: 'Uptime', value: running ? _fmtUptime(st!.uptimeSec) : '—'),
-        _InfoTile(label: 'Restarts', value: '${st?.restarts ?? 0}'),
-        _InfoTile(label: 'Port', value: running ? '${st!.port}' : '—'),
+        _InfoTile(label: tr('home.uptime'), value: running ? _fmtUptime(st!.uptimeSec) : '—'),
+        _InfoTile(label: tr('home.restarts'), value: '${st?.restarts ?? 0}'),
+        _InfoTile(label: tr('home.port'), value: running ? '${st!.port}' : '—'),
         _InfoTile(
-            label: 'Engine',
-            value: (st?.runMode ?? 'native') == 'docker' ? 'Docker' : 'Native'),
+            label: tr('home.engine'),
+            value: (st?.runMode ?? 'native') == 'docker' ? 'Docker' : tr('home.native')),
         _InfoTile(
-            label: 'Auto-restart',
-            value: (st?.autoRestart ?? false) ? 'On' : 'Off'),
+            label: tr('home.autoRestartLabel'),
+            value: (st?.autoRestart ?? false) ? tr('home.on') : tr('home.off')),
         // ── redimos /metrics ───────────────────────────────
         _InfoTile(
-            label: 'Latency',
+            label: tr('home.latency'),
             value: running && st!.metricsOk
                 ? '${st.avgLatencyMs.toStringAsFixed(2)} ms'
                 : '—'),
         _InfoTile(
-            label: 'Throttled',
+            label: tr('home.throttled'),
             value: running && st!.metricsOk ? '${st.throttled}' : '—'),
         _InfoTile(
-            label: 'Health',
+            label: tr('home.health'),
             value: !running || !st!.metricsOk
                 ? '—'
                 : st.healthy
-                    ? (st.ready ? 'Ready' : 'Healthy')
-                    : 'Down'),
+                    ? (st.ready ? tr('home.ready') : tr('home.healthy'))
+                    : tr('home.down')),
       ],
     );
   }
@@ -1793,15 +1821,15 @@ class MonitorView extends StatelessWidget {
         IntrinsicHeight(
           child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
             Expanded(
-                child: spark('CPU', running ? '${st!.cpuPercent.toStringAsFixed(1)} %' : '—',
+                child: spark(tr('home.cpu'), running ? '${st!.cpuPercent.toStringAsFixed(1)} %' : '—',
                     cpuHist, const Color(0xFF7FB2E6))),
             const SizedBox(width: 12),
             Expanded(
-                child: spark('Memory', running ? '${(st!.memBytes / (1024 * 1024)).round()} MB' : '—',
+                child: spark(tr('home.memory'), running ? '${(st!.memBytes / (1024 * 1024)).round()} MB' : '—',
                     memHist, const Color(0xFF57CF92))),
             const SizedBox(width: 12),
             Expanded(
-                child: spark('Ops/s', running && st!.metricsOk ? st.opsPerSec.toStringAsFixed(0) : '—',
+                child: spark(tr('home.opsPerSec'), running && st!.metricsOk ? st.opsPerSec.toStringAsFixed(0) : '—',
                     opsHist, const Color(0xFFD9A85B))),
           ]),
         ),
@@ -1813,32 +1841,32 @@ class MonitorView extends StatelessWidget {
         // bigger or smaller than its neighbours.
         _tileRow([
           // Dynamic metrics first …
-          _InfoTile(label: 'Uptime', fitReference: _fitRef, value: running ? _fmtUptime(st!.uptimeSec) : '—'),
-          _InfoTile(label: 'Restarts', fitReference: _fitRef, value: '${st?.restarts ?? 0}'),
+          _InfoTile(label: tr('home.uptime'), fitReference: _fitRef, value: running ? _fmtUptime(st!.uptimeSec) : '—'),
+          _InfoTile(label: tr('home.restarts'), fitReference: _fitRef, value: '${st?.restarts ?? 0}'),
           _InfoTile(
-              label: 'Latency',
+              label: tr('home.latency'),
               fitReference: _fitRef,
               value: running && st!.metricsOk ? '${st.avgLatencyMs.toStringAsFixed(2)} ms' : '—'),
           // Status (col 4) mirrors the DDB section's Status tile so the two rows
           // align on this column too.
-          _InfoTile(label: 'Status', fitReference: _fitRef, value: running ? 'Running' : (st?.status ?? 'stopped')),
+          _InfoTile(label: tr('home.status'), fitReference: _fitRef, value: running ? tr('home.running') : (st?.status ?? 'stopped')),
           _InfoTile(
-              label: 'Health',
+              label: tr('home.health'),
               fitReference: _fitRef,
               value: !running || !st!.metricsOk
                   ? '—'
                   : st.healthy
-                      ? (st.ready ? 'Ready' : 'Healthy')
-                      : 'Down'),
+                      ? (st.ready ? tr('home.ready') : tr('home.healthy'))
+                      : tr('home.down')),
           // … fixed / static values last. Show the RESP Port rather than a
           // PID/Container id: in docker run-mode the value was still the host
           // PID (never the container id), so the "Container" label was wrong —
           // and the port is the more useful thing to see here anyway.
-          _InfoTile(label: 'Port', fitReference: _fitRef, value: running ? '${st!.port}' : '—'),
+          _InfoTile(label: tr('home.port'), fitReference: _fitRef, value: running ? '${st!.port}' : '—'),
           _InfoTile(
-              label: 'Engine',
+              label: tr('home.engine'),
               fitReference: _fitRef,
-              value: (st?.runMode ?? 'native') == 'docker' ? 'Docker' : 'Native'),
+              value: (st?.runMode ?? 'native') == 'docker' ? 'Docker' : tr('home.native')),
         ]),
         if (ddb != null) _ddbSection(context, ddb!),
       ],
@@ -1867,15 +1895,15 @@ class MonitorView extends StatelessWidget {
         IntrinsicHeight(
           child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
             Expanded(
-                child: spark('CPU', up ? '${d.cpuPercent.toStringAsFixed(1)} %' : '—',
+                child: spark(tr('home.cpu'), up ? '${d.cpuPercent.toStringAsFixed(1)} %' : '—',
                     ddbCpuHist, const Color(0xFF7FB2E6))),
             const SizedBox(width: 12),
             Expanded(
-                child: spark('Memory', up ? '${(d.memBytes / (1024 * 1024)).round()} MB' : '—',
+                child: spark(tr('home.memory'), up ? '${(d.memBytes / (1024 * 1024)).round()} MB' : '—',
                     ddbMemHist, const Color(0xFF57CF92))),
             const SizedBox(width: 12),
             Expanded(
-                child: spark('Disk I/O', up ? _fmtRate(d.diskPerSec) : '—',
+                child: spark(tr('home.diskIo'), up ? _fmtRate(d.diskPerSec) : '—',
                     ddbDiskHist, const Color(0xFFD9A85B))),
           ]),
         ),
@@ -1885,21 +1913,21 @@ class MonitorView extends StatelessWidget {
           // two rows align column-for-column: Uptime · Restarts · Latency · (a
           // section-specific pair) · Port · Engine. Every tile shares the same
           // fit reference (the engine label) so both rows render at one size.
-          _InfoTile(label: 'Uptime', fitReference: engine, value: up ? _fmtUptime(d.uptimeSec) : '—'),
-          _InfoTile(label: 'Restarts', fitReference: engine, value: '${d.restarts}'),
+          _InfoTile(label: tr('home.uptime'), fitReference: engine, value: up ? _fmtUptime(d.uptimeSec) : '—'),
+          _InfoTile(label: tr('home.restarts'), fitReference: engine, value: '${d.restarts}'),
           // Latency sits at column 3 to line up with the redimos Latency tile.
           // DynamoDB Local / LocalStack expose no latency metric, so it's a
           // placeholder ('—') that keeps the columns aligned.
-          _InfoTile(label: 'Latency', fitReference: engine, value: '—'),
-          _InfoTile(label: 'Status', fitReference: engine, value: up ? 'Running' : d.status),
+          _InfoTile(label: tr('home.latency'), fitReference: engine, value: '—'),
+          _InfoTile(label: tr('home.status'), fitReference: engine, value: up ? tr('home.running') : d.status),
           // Health (col 5) lines up with the redimos Health tile. DDB exposes no
           // health endpoint, so this is derived from the running state.
-          _InfoTile(label: 'Health', fitReference: engine, value: up ? 'Ready' : 'Down'),
+          _InfoTile(label: tr('home.health'), fitReference: engine, value: up ? tr('home.ready') : tr('home.down')),
           // Port + Engine last, aligning with the redimos section's Port + Engine
           // tiles above. (DDB says "Engine" because the choice is a different
           // backend product — dynamodb-local vs LocalStack — not just a run mode.)
-          _InfoTile(label: 'Port', fitReference: engine, value: '${d.config.port}'),
-          _InfoTile(label: 'Engine', fitReference: engine, value: engine),
+          _InfoTile(label: tr('home.port'), fitReference: engine, value: '${d.config.port}'),
+          _InfoTile(label: tr('home.engine'), fitReference: engine, value: engine),
         ]),
       ],
     );
@@ -1929,7 +1957,7 @@ class MonitorView extends StatelessWidget {
               const SizedBox(width: 6),
               const Icon(Icons.insights, size: 16),
               const SizedBox(width: 8),
-              Text('monitor', style: Theme.of(context).textTheme.labelLarge),
+              Text(tr('home.monitor'), style: Theme.of(context).textTheme.labelLarge),
               const Spacer(),
               if (st != null)
                 Text(
@@ -2191,31 +2219,31 @@ class _LocalDdbPanelState extends State<LocalDdbPanel> {
     showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Local DynamoDB logs'),
+        title: Text(tr('home.localDdbLogs')),
         content: SizedBox(
           width: 720,
           height: 420,
           child: SingleChildScrollView(
             child: SelectableText(
-              lines.isEmpty ? '(no output)' : lines.join('\n'),
+              lines.isEmpty ? tr('home.noOutput') : lines.join('\n'),
               style: const TextStyle(fontSize: 12, height: 1.4),
             ),
           ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close')),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: Text(tr('home.close'))),
         ],
       ),
     );
   }
 
   (Color, String) _pill(BuildContext context, String status) => switch (status) {
-        'running' => (goGreen(context), 'Running'),
-        'preparing' => (Colors.amberAccent, 'Preparing…'),
-        'restarting' => (Colors.amberAccent, 'Restarting…'),
-        'error' => (Colors.redAccent, 'Error'),
-        'failed' => (Colors.redAccent, 'Failed'),
-        _ => (Colors.grey, 'Stopped'),
+        'running' => (goGreen(context), tr('home.running')),
+        'preparing' => (Colors.amberAccent, tr('home.preparing')),
+        'restarting' => (Colors.amberAccent, tr('home.restarting')),
+        'error' => (Colors.redAccent, tr('home.error')),
+        'failed' => (Colors.redAccent, tr('home.failed')),
+        _ => (Colors.grey, tr('home.stopped')),
       };
 
   @override
@@ -2233,19 +2261,19 @@ class _LocalDdbPanelState extends State<LocalDdbPanel> {
       DropdownMenuItem(
         value: 'java',
         enabled: javaOk,
-        child: Text('Java · local${javaOk ? "" : "  (no JRE)"}',
+        child: Text('Java · local${javaOk ? "" : "  ${tr('home.noJre')}"}',
             style: TextStyle(color: javaOk ? null : Colors.grey)),
       ),
       DropdownMenuItem(
         value: 'docker',
         enabled: dockerOk,
-        child: Text('Docker · dynamodb-local${dockerOk ? "" : "  (no Docker)"}',
+        child: Text('Docker · dynamodb-local${dockerOk ? "" : "  ${tr('home.noDocker')}"}',
             style: TextStyle(color: dockerOk ? null : Colors.grey)),
       ),
       DropdownMenuItem(
         value: 'localstack',
         enabled: dockerOk,
-        child: Text('Docker · LocalStack${dockerOk ? "" : "  (no Docker)"}',
+        child: Text('Docker · LocalStack${dockerOk ? "" : "  ${tr('home.noDocker')}"}',
             style: TextStyle(color: dockerOk ? null : Colors.grey)),
       ),
     ];
@@ -2277,14 +2305,14 @@ class _LocalDdbPanelState extends State<LocalDdbPanel> {
                 decoration: BoxDecoration(color: dotColor, shape: BoxShape.circle),
               ),
               const SizedBox(width: 8),
-              const Text('Local DynamoDB',
-                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
+              Text(tr('home.localDynamoDb'),
+                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
             ];
             // Tight icon button: zero padding + small hit box, so the one-line
             // collapsed layout has as much room as possible for the figures.
             final button = _expanded
                 ? IconButton(
-                    tooltip: 'Logs',
+                    tooltip: tr('home.logsTooltip'),
                     visualDensity: VisualDensity.compact,
                     padding: EdgeInsets.zero,
                     constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
@@ -2292,7 +2320,7 @@ class _LocalDdbPanelState extends State<LocalDdbPanel> {
                     onPressed: _showLogs,
                   )
                 : IconButton(
-                    tooltip: active ? 'Stop' : 'Start',
+                    tooltip: active ? tr('config.stop') : tr('config.start'),
                     visualDensity: VisualDensity.compact,
                     padding: EdgeInsets.zero,
                     constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
@@ -2345,11 +2373,11 @@ class _LocalDdbPanelState extends State<LocalDdbPanel> {
             DropdownButtonFormField<String>(
               initialValue: cfg.engine,
               isDense: true,
-              decoration: const InputDecoration(
-                labelText: 'Engine',
+              decoration: InputDecoration(
+                labelText: tr('home.engine'),
                 isDense: true,
-                border: OutlineInputBorder(),
-                contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                border: const OutlineInputBorder(),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
               ),
               items: engineItems,
               onChanged: (v) {
@@ -2363,16 +2391,16 @@ class _LocalDdbPanelState extends State<LocalDdbPanel> {
                   child: DropdownButtonFormField<String>(
                     initialValue: cfg.storage == 'persist' ? 'persist' : 'memory',
                     isDense: true,
-                    decoration: const InputDecoration(
-                      labelText: 'Storage',
+                    decoration: InputDecoration(
+                      labelText: tr('home.storage'),
                       isDense: true,
-                      border: OutlineInputBorder(),
+                      border: const OutlineInputBorder(),
                       contentPadding:
-                          EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                          const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
                     ),
-                    items: const [
-                      DropdownMenuItem(value: 'memory', child: Text('In-memory')),
-                      DropdownMenuItem(value: 'persist', child: Text('Persisted')),
+                    items: [
+                      DropdownMenuItem(value: 'memory', child: Text(tr('home.inMemory'))),
+                      DropdownMenuItem(value: 'persist', child: Text(tr('home.persisted'))),
                     ],
                     onChanged: (v) {
                       if (v != null) _commit(storage: v);
@@ -2380,9 +2408,9 @@ class _LocalDdbPanelState extends State<LocalDdbPanel> {
                   ),
                 )
               else
-                const Expanded(
-                  child: Text('storage: managed by LocalStack',
-                      style: TextStyle(fontSize: 11, color: Colors.grey)),
+                Expanded(
+                  child: Text(tr('home.storageManagedByLocalstack'),
+                      style: const TextStyle(fontSize: 11, color: Colors.grey)),
                 ),
               const SizedBox(width: 8),
               SizedBox(
@@ -2390,12 +2418,12 @@ class _LocalDdbPanelState extends State<LocalDdbPanel> {
                 child: TextField(
                   controller: _port,
                   keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(
-                    labelText: 'Port',
+                  decoration: InputDecoration(
+                    labelText: tr('home.port'),
                     isDense: true,
-                    border: OutlineInputBorder(),
+                    border: const OutlineInputBorder(),
                     contentPadding:
-                        EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
                   ),
                   onSubmitted: (_) => _commit(),
                 ),
@@ -2406,7 +2434,7 @@ class _LocalDdbPanelState extends State<LocalDdbPanel> {
               TextField(
                 controller: _store,
                 decoration: InputDecoration(
-                  labelText: cfg.engine == 'java' ? 'Data dir' : 'Volume',
+                  labelText: cfg.engine == 'java' ? tr('home.dataDir') : tr('home.volume'),
                   isDense: true,
                   border: const OutlineInputBorder(),
                   contentPadding:
@@ -2422,7 +2450,7 @@ class _LocalDdbPanelState extends State<LocalDdbPanel> {
               child: active
                   ? OutlinedButton.icon(
                       icon: const Icon(Icons.stop, size: 16),
-                      label: const Text('Stop'),
+                      label: Text(tr('home.stop')),
                       style: OutlinedButton.styleFrom(
                           foregroundColor: Colors.redAccent,
                           visualDensity: VisualDensity.compact),
@@ -2430,7 +2458,7 @@ class _LocalDdbPanelState extends State<LocalDdbPanel> {
                     )
                   : FilledButton.icon(
                       icon: const Icon(Icons.play_arrow, size: 16),
-                      label: const Text('Start'),
+                      label: Text(tr('home.start')),
                       style: FilledButton.styleFrom(
                           visualDensity: VisualDensity.compact),
                       onPressed: () => _startStop(false),
@@ -2439,7 +2467,7 @@ class _LocalDdbPanelState extends State<LocalDdbPanel> {
             if (status == 'running') ...[
               const SizedBox(width: 8),
               IconButton(
-                tooltip: 'Copy endpoint',
+                tooltip: tr('home.copyEndpoint'),
                 visualDensity: VisualDensity.compact,
                 icon: const Icon(Icons.copy, size: 16),
                 onPressed: () {
