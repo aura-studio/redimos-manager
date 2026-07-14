@@ -348,11 +348,43 @@ func (m *manager) load() {
 	if err != nil {
 		return // fresh install: empty store
 	}
-	_ = json.Unmarshal(b, &m.st)
+	var d diskStore
+	if json.Unmarshal(b, &d) != nil {
+		return
+	}
+	m.st.Settings = d.Settings
+	m.st.LocalDdb = d.LocalDdb
+	m.st.Formatters = d.Formatters
+	m.st.AutoStart = d.AutoStart
+	m.st.DdbAutoStart = d.DdbAutoStart
+	m.st.StopAllSnapshot = d.StopAllSnapshot
+	// Prefer the split form; fall back to a legacy pre-1.2 configs[] (rewritten
+	// in the new shape on the next persist).
+	if len(d.Instances) > 0 || len(d.Endpoints) > 0 {
+		m.st.Configs = mergeToConfigs(d.Endpoints, d.Instances)
+	} else {
+		m.st.Configs = d.Configs
+	}
 }
 
 func (m *manager) persist() error {
-	b, err := json.MarshalIndent(m.st, "", "  ")
+	eps, insts := splitConfigs(m.st.Configs)
+	d := diskStore{
+		Endpoints: eps,
+		Instances: insts,
+		// Legacy mirror: keep configs[] so a downgrade to a pre-1.2 build still
+		// sees the configs. load() prefers endpoints/instances when present; an
+		// old build overwrites the whole file with configs[] only, after which a
+		// new build falls back to configs[] cleanly.
+		Configs:         m.st.Configs,
+		Settings:        m.st.Settings,
+		LocalDdb:        m.st.LocalDdb,
+		Formatters:      m.st.Formatters,
+		AutoStart:       m.st.AutoStart,
+		DdbAutoStart:    m.st.DdbAutoStart,
+		StopAllSnapshot: m.st.StopAllSnapshot,
+	}
+	b, err := json.MarshalIndent(d, "", "  ")
 	if err != nil {
 		return err
 	}
