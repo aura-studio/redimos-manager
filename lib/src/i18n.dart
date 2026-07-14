@@ -74,6 +74,7 @@ const Map<String, Map<AppLang, String>> _strings = {
   'tab.partiql': {AppLang.en: 'PartiQL', AppLang.zh: 'PartiQL'},
   'tab.console': {AppLang.en: 'Console', AppLang.zh: '命令行'},
   'tab.browser': {AppLang.en: 'Browser', AppLang.zh: '浏览器'},
+  'tab.playground': {AppLang.en: 'Playground', AppLang.zh: '脚本台'},
 
   // --- config sidebar ---
   'config.new': {AppLang.en: 'New config', AppLang.zh: '新建配置'},
@@ -89,6 +90,69 @@ const Map<String, Map<AppLang, String>> _strings = {
   'nav.collapse': {AppLang.en: 'Collapse sidebar', AppLang.zh: '收起侧栏'},
   'nav.expand': {AppLang.en: 'Expand sidebar', AppLang.zh: '展开侧栏'},
   'nav.noneYet': {AppLang.en: 'No instances or endpoints yet', AppLang.zh: '暂无实例或端点'},
+
+  // --- v1.2 Playground (JS via goja / Go via yaegi) ---
+  'pg.title': {AppLang.en: 'Playground', AppLang.zh: '脚本台'},
+  'pg.run': {AppLang.en: 'Run', AppLang.zh: '运行'},
+  'pg.clear': {AppLang.en: 'Clear', AppLang.zh: '清空'},
+  'pg.samples': {AppLang.en: 'Samples', AppLang.zh: '示例'},
+  'pg.language': {AppLang.en: 'Language', AppLang.zh: '语言'},
+  'pg.console': {AppLang.en: 'Console output', AppLang.zh: '控制台输出'},
+  'pg.result': {AppLang.en: 'Return value', AppLang.zh: '返回值'},
+  'pg.copy': {AppLang.en: 'Copy', AppLang.zh: '复制'},
+  'pg.copied': {AppLang.en: 'Copied', AppLang.zh: '已复制'},
+  'pg.completed': {AppLang.en: 'Completed', AppLang.zh: '已完成'},
+  'pg.failed': {AppLang.en: 'Failed', AppLang.zh: '失败'},
+  'pg.startedOn': {AppLang.en: 'Started on', AppLang.zh: '开始于'},
+  'pg.elapsed': {AppLang.en: 'Elapsed', AppLang.zh: '耗时'},
+  'pg.errorOccurred': {AppLang.en: 'Script error', AppLang.zh: '脚本出错'},
+  'pg.readOnly': {AppLang.en: 'read-only', AppLang.zh: '只读'},
+  'pg.hostRedis': {AppLang.en: 'Redis', AppLang.zh: 'Redis'},
+  'pg.hostDdb': {AppLang.en: 'DynamoDB', AppLang.zh: 'DynamoDB'},
+  'pg.typeScript': {
+    AppLang.en: 'write a script, or pick a Sample',
+    AppLang.zh: '编写脚本，或从「示例」选择'
+  },
+  'pg.apiHintRedis': {
+    AppLang.en:
+        'Host objects: redis (get/set/del/type/ttl/hget/hgetall/scan/keys/command), console (log/error/table). JS uses lowercase; Go uses Go names (redis.Get).',
+    AppLang.zh:
+        '宿主对象：redis(get/set/del/type/ttl/hget/hgetall/scan/keys/command)、console(log/error/table)。JS 用小写，Go 用大写方法名(redis.Get)。'
+  },
+  'pg.apiHintDdb': {
+    AppLang.en:
+        'Host objects: ddb (listTables/scan/scanAll/getItem/putItem/deleteItem/partiql/call), console (log/error/table). AWS endpoints are read-only. JS uses lowercase; Go uses Go names (ddb.ScanAll).',
+    AppLang.zh:
+        '宿主对象：ddb(listTables/scan/scanAll/getItem/putItem/deleteItem/partiql/call)、console(log/error/table)。AWS 端点只读。JS 用小写，Go 用大写方法名(ddb.ScanAll)。'
+  },
+  'pg.instanceNotRunning': {
+    AppLang.en: 'Instance not running',
+    AppLang.zh: '实例未运行'
+  },
+  'pg.instanceNotRunningSub': {
+    AppLang.en: 'Start this instance to run scripts against its Redis proxy.',
+    AppLang.zh: '启动该实例后，才能对其 Redis 代理运行脚本。'
+  },
+  // sample titles
+  'pg.s.redisPrefix': {
+    AppLang.en: 'Key prefix stats',
+    AppLang.zh: '按前缀统计键'
+  },
+  'pg.s.redisHashExport': {AppLang.en: 'Export a hash', AppLang.zh: '导出哈希'},
+  'pg.s.redisTtlAudit': {AppLang.en: 'TTL audit', AppLang.zh: 'TTL 审计'},
+  'pg.s.redisRename': {AppLang.en: 'Rename a key (write)', AppLang.zh: '重命名键(写)'},
+  'pg.s.redisBench': {AppLang.en: 'Benchmark SET+GET (write)', AppLang.zh: '压测 SET+GET(写)'},
+  'pg.s.ddbScanAggregate': {
+    AppLang.en: 'Scan & aggregate',
+    AppLang.zh: '扫描并聚合'
+  },
+  'pg.s.ddbExportJsonl': {AppLang.en: 'Export as JSONL', AppLang.zh: '导出为 JSONL'},
+  'pg.s.ddbSizeHistogram': {AppLang.en: 'Item size histogram', AppLang.zh: '条目大小分布'},
+  'pg.s.ddbPartiql': {AppLang.en: 'PartiQL SELECT', AppLang.zh: 'PartiQL 查询'},
+  'pg.s.ddbConditionalDelete': {
+    AppLang.en: 'Conditional delete (write)',
+    AppLang.zh: '条件删除(写)'
+  },
 
   // --- extracted from page files (workflow, phase 1 cont.) ---
   'home.accessKeyId': {AppLang.en: 'AccessKeyID', AppLang.zh: '访问密钥 ID'},

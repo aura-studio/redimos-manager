@@ -305,7 +305,11 @@ class _TablePageViewState extends State<TablePageView>
       return _center(Icons.play_circle_outline, tr('tbl.instanceNotRunning'),
           tr('tbl.startToBrowseTable'));
     }
-    if (widget.config.table.trim().isEmpty) {
+    // Gate on the EFFECTIVE table (override included) so an endpoint Explorer —
+    // whose own config.table is empty — becomes usable the moment a table is
+    // browsed from the Tables tab, while an instance (table always set) is
+    // unaffected.
+    if (_effTable.trim().isEmpty) {
       return _center(Icons.table_chart_outlined, tr('tbl.noTableConfigured'),
           tr('tbl.setTableNameToBrowse'));
     }

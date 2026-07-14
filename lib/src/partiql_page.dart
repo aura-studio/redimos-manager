@@ -26,8 +26,17 @@ class PartiqlPageView extends StatefulWidget {
   final NativeCore core;
   final RedimosConfig config;
   final bool running;
+
+  /// Endpoint mode: the backing config has no single table (you name it in the
+  /// statement), so don't show the "no table configured" empty state and let the
+  /// templates use a placeholder table name.
+  final bool allowNoTable;
   const PartiqlPageView(
-      {super.key, required this.core, required this.config, required this.running});
+      {super.key,
+      required this.core,
+      required this.config,
+      required this.running,
+      this.allowNoTable = false});
 
   @override
   State<PartiqlPageView> createState() => _PartiqlPageViewState();
@@ -80,7 +89,9 @@ class _PartiqlPageViewState extends State<PartiqlPageView>
 
   // ---- templates (console's table/attribute ⋮ menus, adapted) ----
 
-  String get _q => '"${widget.config.table}"';
+  String get _tbl =>
+      widget.config.table.trim().isEmpty ? 'your_table' : widget.config.table;
+  String get _q => '"$_tbl"';
 
   List<(String, String)> get _templates => [
         (tr('pq.tplScanTable'), 'SELECT * FROM $_q'),
@@ -162,7 +173,7 @@ class _PartiqlPageViewState extends State<PartiqlPageView>
       return _center(Icons.play_circle_outline, tr('pq.instanceNotRunning'),
           tr('pq.instanceNotRunningSub'));
     }
-    if (widget.config.table.trim().isEmpty) {
+    if (!widget.allowNoTable && widget.config.table.trim().isEmpty) {
       return _center(Icons.code, tr('pq.noTableConfigured'),
           tr('pq.noTableConfiguredSub'));
     }

@@ -9,11 +9,13 @@ import 'package:flutter/services.dart';
 
 import 'src/browser_page.dart';
 import 'src/cmd_console.dart';
+import 'src/endpoint_detail.dart';
 import 'src/endpoint_page.dart';
 import 'src/i18n.dart';
 import 'src/models.dart';
 import 'src/native.dart';
 import 'src/partiql_page.dart';
+import 'src/playground_page.dart';
 import 'src/table_page.dart';
 
 void main() {
@@ -237,8 +239,8 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   // Lets the parent inspect / save the editor form before leaving it.
   final _editorKey = GlobalKey<_ConfigEditorState>();
   // Right-pane tabs (Configure / Monitor / Logs / Endpoint / Table / PartiQL /
-  // Console / Browser) — owned here so flows can jump between tabs.
-  late final TabController _tabs = TabController(length: 8, vsync: this);
+  // Console / Browser / Playground) — owned here so flows can jump between tabs.
+  late final TabController _tabs = TabController(length: 9, vsync: this);
 
   // Rolling CPU / memory history per config id, fed by the status poll and
   // drawn as sparklines in the monitor panel.
@@ -888,45 +890,14 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       width: 12, height: 12,
       decoration: BoxDecoration(color: _statusColor(status), shape: BoxShape.circle));
 
-  // Right pane for a selected endpoint: a header + its DynamoDB table list /
-  // lifecycle ops (over a synthesized storage config). P4 will expand this into
-  // the merged Browser (Tables sidebar + Explorer) + PartiQL.
-  Widget _endpointDetail(DdbEndpoint e) {
-    final scheme = Theme.of(context).colorScheme;
-    final cfg = e.toStorageConfig();
-    final kindLabel = switch (e.kind) {
-      'aws' => e.region.isEmpty ? 'AWS' : 'AWS · ${e.region}',
-      'local' => 'Local DynamoDB · ${_hostOf(e.endpoint)}',
-      _ => e.endpoint,
-    };
-    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      SizedBox(
-        height: 50,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: Row(children: [
-            Icon(Icons.dns_outlined, size: 18, color: scheme.primary),
-            const SizedBox(width: 9),
-            Text(e.name.isEmpty ? tr('config.unnamed') : e.name,
-                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
-            const SizedBox(width: 10),
-            Text(kindLabel,
-                style: TextStyle(fontSize: 12, color: Theme.of(context).textTheme.bodySmall?.color)),
-          ]),
-        ),
-      ),
-      const Divider(height: 1),
-      Expanded(
-        child: EndpointPageView(
-          key: ValueKey('endpoint-detail-${e.id}'),
-          core: _core!,
-          config: cfg,
-          running: true, // storage views connect to DynamoDB directly, no proxy
-          onOpenTable: (_) {}, // P4: jump into the merged Browser
-        ),
-      ),
-    ]);
-  }
+  // Right pane for a selected endpoint: its own tab set (Tables · Explorer ·
+  // PartiQL · Playground) bound directly to the DynamoDB backend — see
+  // EndpointDetailView.
+  Widget _endpointDetail(DdbEndpoint e) => EndpointDetailView(
+        key: ValueKey('endpoint-detail-${e.id}'),
+        core: _core!,
+        endpoint: e,
+      );
 
   Widget _detail() {
     // Endpoint selected → its storage views (see _endpointDetail).
@@ -969,6 +940,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                 _tab(Icons.code, tr('tab.partiql')),
                 _tab(Icons.chevron_right, tr('tab.console')),
                 _tab(Icons.travel_explore, tr('tab.browser')),
+                _tab(Icons.science_outlined, tr('tab.playground')),
               ],
             ),
           ),
@@ -1076,6 +1048,14 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                   config: c,
                   running: st?.isRunning ?? false,
                   core: _core!,
+                ),
+                // playground — run a JS/Go script against the proxy's Redis
+                PlaygroundView(
+                  key: ValueKey('playground-${c.id}'),
+                  core: _core!,
+                  config: c,
+                  kind: 'redis',
+                  running: st?.isRunning ?? false,
                 ),
               ],
             ),

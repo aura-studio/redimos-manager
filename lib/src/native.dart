@@ -424,6 +424,42 @@ class NativeCore {
     }
   }
 
+  // ---- Playground (JS via goja / Go via yaegi, sandboxed + timeout) ----
+
+  /// Run a Playground [script] against either a running proxy's Redis
+  /// (`kind:'redis'` → connects to `127.0.0.1:port`, optional [auth]) or an
+  /// endpoint's DynamoDB (`kind:'ddb'` → uses [config]'s backend, writes gated
+  /// by the AWS read-only guard natively). [lang] is 'js' or 'go'. Runs on a
+  /// background isolate (it blocks on the network + interpreter for up to
+  /// [timeoutMs]). Never throws — returns {ok, logs[], result, error, elapsedMs}.
+  Future<Map<String, dynamic>> playgroundRun({
+    required String kind,
+    required String lang,
+    required String script,
+    int port = 0,
+    String auth = '',
+    RedimosConfig? config,
+    int timeoutMs = 5000,
+  }) async {
+    final libPath = _resolveLibraryPath();
+    final arg = jsonEncode({
+      'kind': kind,
+      'lang': lang,
+      'script': script,
+      'port': port,
+      'auth': auth,
+      'config': config?.toJson() ?? <String, dynamic>{},
+      'timeoutMs': timeoutMs,
+    });
+    try {
+      final raw = await Isolate.run(
+          () => _callCoreSymbol(libPath, 'rm_playground_run', arg));
+      return jsonDecode(raw) as Map<String, dynamic>;
+    } catch (e) {
+      return {'ok': false, 'error': e.toString()};
+    }
+  }
+
   void _expectOk(String raw) {
     final r = jsonDecode(raw) as Map<String, dynamic>;
     if (r['ok'] != true) throw StateError(r['error']?.toString() ?? 'call failed');

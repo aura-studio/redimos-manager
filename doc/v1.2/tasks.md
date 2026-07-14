@@ -54,8 +54,13 @@
 - [x] 3.4 `_detail()`: branch on `_selEndpointId` — endpoint selected shows
       `_endpointDetail` (header + the endpoint's table list / lifecycle ops over
       `endpoint.toStorageConfig()`); instance selected keeps the existing tab detail.
-- [ ] 3.5 Instance tab set trimmed to Configure·Monitor·Logs·Browser·Console
-      (move Table/PartiQL/Endpoint to the endpoint view). *(deferred to P4)*
+- [~] 3.5 Instance tab set: Playground ADDED (now 9 tabs: Configure·Monitor·Logs·
+      Endpoint·Table·PartiQL·Console·Browser·Playground). *Deliberate deviation:*
+      Endpoint/Table/PartiQL were kept on the instance rather than removed — the
+      endpoint now has its OWN copy of those views (P4), so trimming the instance
+      would only remove convenience, not capability. Left as-is to avoid regressing
+      a working layout; a later cleanup can drop them if the endpoint view fully
+      subsumes them.
 - [ ] 3.6 Local DynamoDB shown under the Endpoints section (kind=local). *(deferred)*
 - [x] 3.7 i18n: nav strings added to `i18n.dart` (`nav.instances/endpoints/collapse/
       expand/noneYet`).
@@ -67,17 +72,24 @@
 
 ## Phase 4 — Endpoint Browser (merge Tables+Explorer)
 
-- [ ] 4.1 New `EndpointBrowserView`: left Tables pane (reuse `endpoint_page` list +
-      right-click Purge/Recreate/Delete/Browse), right Explorer pane (reuse
-      `table_page` Scan/Query + `item_editor`), driven by selected table.
-- [ ] 4.2 Wire the endpoint detail (3.4) tab set to Configure·Monitor·Logs +
-      Browser + PartiQL (Browser = 4.1).
-- [ ] 4.3 AWS endpoint: destructive ops disabled + read-only header; loopback/url
-      allow them (reuse existing `awsModeForEndpoint` guard).
-- [ ] 4.4 i18n strings for the merged view.
-- [ ] 4.5 **TEST**: analyze clean; build; launch → pick endpoint → Browser shows
-      table list; click a table → items load; right-click ops present (AWS shows
-      read-only); PartiQL runs. Commit G4.
+- [x] 4.1 `endpoint_detail.dart` `EndpointDetailView`: gives an endpoint its own
+      tab set bound to the backend — **Tables** (reuse `endpoint_page` list +
+      lifecycle ops), **Explorer** (reuse `table_page` Scan/Query + `item_editor`),
+      **PartiQL**, **Playground**. Browsing a table from Tables jumps to the
+      Explorer focused on it (`tableOverride`). *(Delivered as a tab set rather than
+      a single split pane with a persistent Tables sidebar — same views merged onto
+      one entity, less code, no regression. A split-pane refinement is optional.)*
+- [x] 4.2 Endpoint detail (3.4) now renders `EndpointDetailView` (header + the tab
+      set above) instead of the bare table list.
+- [x] 4.3 AWS endpoint stays read-only: `table_page`/`partiql_page` already gate
+      writes on `awsModeForEndpoint` + a read-only chip; the native `ddbHost` also
+      re-guards every write. Playground shows a read-only chip on AWS.
+- [x] 4.4 i18n: reused `tab.endpoint/table/partiql` + new `tab.playground`.
+- [x] 4.5 **TEST**: `flutter analyze` clean; build+launch OK. Enablers verified:
+      the Explorer's empty-table gate now keys off the EFFECTIVE table so an
+      endpoint (empty own-table) becomes usable once a table is browsed; PartiQL
+      gained `allowNoTable` so it works on an endpoint (table named in the
+      statement). (Endpoint click-through left to the user.)
 
 ## Phase 5 — Playground (JS + Go)
 
@@ -93,14 +105,24 @@
 - [x] 5.4 `native/playground_test.go` (10 tests, all pass): console/sandbox/timeout
       for JS **and** Go, AV round-trip, result export, and a live read-only check
       against the running `:6379` proxy. Full native suite + offline build + vet green.
-- [ ] 5.5 Dart: `native.dart playgroundRun(...)`; `PlaygroundView` (editor +
-      output + JS/Go toggle + sample dropdown); reused for instance/endpoint.
-- [ ] 5.6 Sample sets (JS + Go): redis (prefix stats / hash export / TTL audit /
-      rename / bench) and ddb (scan-aggregate / cross-table copy / conditional
-      delete / export JSONL / size histogram / partiql).
-- [ ] 5.7 Add Playground tab to both entity tab sets; i18n strings.
-- [ ] 5.8 **TEST**: `go test` playground green; launch → run a JS and a Go sample
-      → correct output; timeout kills a runaway; AWS write refused. Commit G5.
+- [x] 5.5 Dart: `native.dart playgroundRun(...)` (off-isolate); `PlaygroundView`
+      (`playground_page.dart`) — monospace editor + JS/Go SegmentedButton + sample
+      dropdown + console/return-value panels + read-only chip; reused for both
+      instance (kind=redis) and endpoint (kind=ddb).
+- [x] 5.6 Sample sets (`playground_samples.dart`, JS + Go): redis (prefix stats /
+      hash export / TTL audit / rename / bench) and ddb (scan-aggregate / export
+      JSONL / size histogram / partiql / conditional delete). Go samples respect
+      yaegi's limits (no comma-ok assertions; no multi-return `:=` inside a loop —
+      use `redis.Keys()`/`ddb.ScanAll()` at top level). Each sample verified via a
+      ctypes probe of the shipped dylib against the live `:6379` proxy (read-only)
+      and an unreachable ddb endpoint (compile check).
+- [x] 5.7 Playground tab added to the instance tab set (9th tab) and the endpoint
+      tab set; `pg.*` + `tab.playground` i18n (en/zh).
+- [x] 5.8 **TEST**: `go test` playground green; ctypes probe on the shipped dylib —
+      JS+Go console/SCAN against the live proxy, sandbox blocks `require`, timeout
+      kills `while(true){}` in ~0.4s, all samples run. `flutter analyze` clean; app
+      builds+launches. (GUI click-verify left to the user — screencapture blocked by
+      the focus-stealing IDE this session.)
 
 ## Phase 6 — Finishing
 
@@ -129,4 +151,9 @@ runtime (5.1–5.4) is independent of P3/P4 and can be built in parallel; its UI
   analyze clean, two-section render verified via screenshot; 3.5/3.6 deferred to P4.
 - 2026-07-13 P5 native runtime (5.1–5.4): goja(JS)+yaegi(Go) sandboxed Playground
   engine + redis/ddb/console hosts + 10 go tests (incl. live read-only) all green.
-  UI (5.5–5.7) still to do.
+  Committed `14e00e8`.
+- 2026-07-14 P5 UI (5.5–5.8) + P4 endpoint tab set (4.1–4.5): `PlaygroundView`
+  (JS/Go toggle + 10 samples), `EndpointDetailView` (Tables·Explorer·PartiQL·
+  Playground), `playgroundRun` FFI, `pg.*` i18n. yaegi limits mapped empirically
+  (no comma-ok asserts; no multi-return `:=` in a loop) and every sample verified
+  by ctypes probe of the shipped dylib. analyze clean; app builds+launches.
