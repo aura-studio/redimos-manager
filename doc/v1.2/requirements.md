@@ -33,8 +33,14 @@ DynamoDB storage) as eight flat tabs.
 - **R8 — Playground.** Instances and Endpoints each get a **Playground** tab: a
   code editor (JS or Go) whose script gets a `redis` (instance) or `ddb`
   (endpoint) client to run batch operations, with a "sample program" dropdown.
-- **R9 — Local DynamoDB.** The Local DynamoDB stops being a special sidebar panel
-  and becomes an Endpoint (kind=local) with the same Configure/Monitor/Logs.
+- **R9 — Local DynamoDB.** *(Revised in P6; see [tasks](tasks.md) 3.6.)* Originally:
+  the Local DynamoDB stops being a special sidebar panel and becomes an Endpoint
+  (kind=local) with the same Configure/Monitor/Logs. P6.1 (`c907a47`) removed that
+  target — endpoints are passive storage records, not managed processes, so they get
+  one Overview tab and no Configure/Monitor/Logs. The Local DynamoDB is a managed
+  singleton, so it does NOT fold into the Endpoints list; it retains a dedicated
+  control surface. Its redesign — `doc/local-ddb-ui-redesign.md`, the pinned LOCAL
+  BACKEND section, gated on an explicit `ddbSource` field — is tracked post-1.2.
 
 ## Non-functional / acceptance
 

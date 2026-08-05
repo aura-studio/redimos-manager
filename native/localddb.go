@@ -703,7 +703,7 @@ func rm_ddb_get() *C.char {
 	_, javaOK := javaBin()
 	javaDir := mgr.ddbJavaDir()
 
-	st := map[string]any{"status": "stopped"}
+	st := map[string]any{"status": "stopped", "probeOk": false, "latencyMs": 0.0}
 	if in != nil {
 		in.mu.Lock()
 		st = map[string]any{
@@ -717,9 +717,18 @@ func rm_ddb_get() *C.char {
 			"diskPerSec": in.diskPerSec,
 			"adopted":    in.adopted,
 			"uptimeSec":  0,
+			// Measured RTT of a synthetic ListTables, NOT a scraped server-side
+			// average like the redimos tiles' avgLatencyMs — the local engines
+			// expose no metrics endpoint. Gated on "running" like the redimos
+			// side: terminate() leaves the last sample in place, so an ungated
+			// read would report a dead child's RTT.
+			"probeOk":   false,
+			"latencyMs": 0.0,
 		}
 		if in.status == "running" {
 			st["uptimeSec"] = int64(time.Since(in.started).Seconds())
+			st["probeOk"] = in.ddbProbeOK
+			st["latencyMs"] = in.ddbLatencyMs
 		}
 		in.mu.Unlock()
 	}

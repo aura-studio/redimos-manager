@@ -6,6 +6,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:redimos_manager/src/cmd_console.dart';
+import 'package:redimos_manager/src/i18n.dart';
 
 void main() {
   group('tokenize', () {
@@ -54,6 +55,37 @@ void main() {
     expect(identical(p.next(), RespParser.incomplete), isTrue);
     p.addBytes('lo\r\n'.codeUnits);
     expect(p.next(), 'hello');
+  });
+
+  group('backendDegradedTooltip', () {
+    // The fallback is the load-bearing case, not the edge case: the console also
+    // lights the dot optimistically from a command's error reply, with no health
+    // sample — and hence no cause — behind it, and an older redimos publishes no
+    // cause at all.
+    test('no cause reported falls back to the generic wording', () {
+      expect(backendDegradedTooltip(null), tr('cmd.backendDegraded'));
+    });
+    test('an empty cause is treated as no cause', () {
+      expect(backendDegradedTooltip(''), tr('cmd.backendDegraded'));
+    });
+    test('a reported cause is appended, not substituted', () {
+      const err = 'api error ResourceNotFoundException: Requested resource not found';
+      final msg = backendDegradedTooltip(err);
+      // The generic sentence explains the CONSEQUENCE ("commands may fail with…"),
+      // which a raw AWS error does not — so it survives alongside the cause.
+      expect(msg, contains(tr('cmd.backendDegraded')));
+      expect(msg, contains(err));
+      expect(msg, isNot(contains('{err}')), reason: 'trp placeholder must be substituted');
+    });
+    test('localises the cause label, not the machine string', () {
+      const err = 'ResourceNotFoundException';
+      final prev = appLang.value;
+      addTearDown(() => appLang.value = prev);
+      appLang.value = AppLang.zh;
+      final msg = backendDegradedTooltip(err);
+      expect(msg, contains(tr('cmd.backendDegraded'))); // the zh sentence
+      expect(msg, contains(err)); // the error stays verbatim
+    });
   });
 
   final portStr = Platform.environment['REDIMOS_TEST_PORT'];

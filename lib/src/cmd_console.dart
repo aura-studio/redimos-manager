@@ -14,6 +14,35 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'i18n.dart';
+import 'ui_theme.dart';
+
+// The redimos proxy's reply for ANY storage-layer error — deliberately generic
+// and lossy on its side, so it can never diagnose the cause. Matched verbatim
+// (exact ASCII, never a localized or normalized form) and used ONLY to flip the
+// degraded dot early; /readyz stays the source of truth.
+const _kBackendErrorReply = 'ERR backend error, retry later';
+
+/// How long a backend-error reply keeps the degraded dot lit on its own. Covers
+/// the health signal's worst-case lag: redimos re-probes its backend every 10s,
+/// the manager scrapes every 3s, the UI polls every 1.5s.
+const _kBackendErrorLatch = Duration(seconds: 15);
+
+/// The degraded dot's tooltip text, given the cause redimos reports for its
+/// failing backend check (null/empty = it reports none).
+///
+/// The generic wording describes only the OBSERVED SIGNAL, because neither
+/// trigger identifies a cause on its own: healthy && !ready is equally an IAM
+/// loss or a deleted table with DynamoDB perfectly reachable, and the
+/// error-reply path ([_kBackendErrorReply]) is lossy by construction. So a cause
+/// is only ever appended when redimos itself supplies one, and the generic
+/// sentence stays in front of it — that sentence explains the CONSEQUENCE, which
+/// a raw AWS error string does not. With no cause, this says exactly what it said
+/// before the cause was plumbed through: no less, and nothing invented.
+String backendDegradedTooltip(String? backendError) {
+  final generic = tr('cmd.backendDegraded');
+  if (backendError == null || backendError.isEmpty) return generic;
+  return '$generic\n\n${trp('cmd.backendDegradedCause', {'err': backendError})}';
+}
 
 // ---------------------------------------------------------------------------
 // RESP reply model + parser
@@ -315,6 +344,17 @@ class CmdConsole extends StatefulWidget {
   // check that keeps failing). Non-null while the instance is restarting/failed;
   // shown so a crash-loop doesn't look like a silent "Reconnecting…".
   final String? statusReason;
+  // The proxy is up but its DynamoDB backend is not (healthy && !ready). The
+  // RESP socket survives a backend outage, so nothing else in this widget can
+  // notice one — commands simply start failing.
+  final bool backendDegraded;
+  // The cause redimos itself reports for that failing check (its /readyz body's
+  // backend_error), when it reports one. Null/empty is the common case, not an
+  // anomaly: the local optimistic path below (_sawBackendErrorAt) raises the dot
+  // from a command's error reply alone, with no health sample behind it, and an
+  // older redimos publishes no cause at all. So this refines the tooltip when
+  // present and the generic wording must stand on its own when absent.
+  final String? backendError;
   const CmdConsole({
     super.key,
     required this.host,
@@ -322,6 +362,8 @@ class CmdConsole extends StatefulWidget {
     required this.running,
     this.auth,
     this.statusReason,
+    this.backendDegraded = false,
+    this.backendError,
   });
 
   @override
@@ -341,6 +383,11 @@ class _CmdConsoleState extends State<CmdConsole>
   bool _everConnected = false; // distinguishes "Connecting…" from "Reconnecting…"
   int _db = 0;
   Timer? _reconnectTimer; // auto-reconnect while the instance is meant to be up
+  // Set when a command comes back with the proxy's backend-error reply, to show
+  // the degraded dot ahead of the health signal (see _kBackendErrorReply). Held
+  // as a timestamp, not a bool: the health signal it defers to lags by up to
+  // ~14.5s, so the flag has to outlive that window to be worth anything.
+  DateTime? _sawBackendErrorAt;
 
   @override
   void initState() {
@@ -351,6 +398,17 @@ class _CmdConsoleState extends State<CmdConsole>
   @override
   void didUpdateWidget(CmdConsole old) {
     super.didUpdateWidget(old);
+    // Retire the optimistic flag only once it has outlived the health signal's
+    // worst-case lag. Clearing it on any non-degraded rebuild would fire on the
+    // first 1.5s status poll — long before the signal could have caught up — so
+    // the flag would never bridge the very window it exists for. Past the latch,
+    // a still-healthy signal means the error really was a one-off.
+    final sawAt = _sawBackendErrorAt;
+    if (sawAt != null &&
+        !widget.backendDegraded &&
+        DateTime.now().difference(sawAt) > _kBackendErrorLatch) {
+      _sawBackendErrorAt = null;
+    }
     // Reconnect when the target endpoint changes, or when the instance comes up.
     if (old.port != widget.port || old.host != widget.host || old.auth != widget.auth) {
       _disconnect(silent: true);
@@ -449,6 +507,7 @@ class _CmdConsoleState extends State<CmdConsole>
   String get _prompt =>
       '${widget.host}:${widget.port}${_db > 0 ? '[$_db]' : ''}> ';
 
+
   void _refocus() {
     // Keep typing after a command: return focus to the input on the next frame.
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -492,6 +551,14 @@ class _CmdConsoleState extends State<CmdConsole>
       setState(() {
         final isErr = reply is RespError;
         _append(formatReply(reply), isErr ? _Kind.error : _Kind.reply);
+        // The health signal lags by up to ~14.5s, so the error reaches the
+        // console while the dot is still dark. Light it now; the latch keeps it
+        // lit across that window (see _kBackendErrorLatch). The reply is only a
+        // latency reducer — it is deliberately generic and can never diagnose a
+        // cause, so the health signal stays the source of truth.
+        if (isErr && reply.message == _kBackendErrorReply) {
+          _sawBackendErrorAt = DateTime.now();
+        }
         // track SELECT so the prompt reflects the current DB
         if (args[0].toUpperCase() == 'SELECT' &&
             reply is RespStatus &&
@@ -610,6 +677,19 @@ class _CmdConsoleState extends State<CmdConsole>
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
+                if (widget.backendDegraded || _sawBackendErrorAt != null) ...[
+                  Tooltip(
+                    message: backendDegradedTooltip(widget.backendError),
+                    waitDuration: const Duration(milliseconds: 250),
+                    child: Container(
+                      width: 8,
+                      height: 8,
+                      decoration: const BoxDecoration(
+                          color: Accents.amber, shape: BoxShape.circle),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                ],
                 Text(
                   _connecting ? '${tr('cmd.connectingPrompt')} ' : _prompt,
                   style: TextStyle(

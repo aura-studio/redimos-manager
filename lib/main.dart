@@ -17,6 +17,7 @@ import 'src/native.dart';
 import 'src/partiql_page.dart';
 import 'src/playground_page.dart';
 import 'src/table_page.dart';
+import 'src/ui_theme.dart';
 
 void main() {
   _loadThemeMode();
@@ -225,8 +226,10 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   // When an endpoint (not an instance) is selected, this holds its id and the
   // right pane shows the endpoint's storage views instead of the instance tabs.
   String? _selEndpointId;
-  // Root sidebar collapse (v1.2): a ~200px panel ↔ a 52px rail. Persisted.
+  // Root sidebar collapse (v1.2): a ~232px panel ↔ a 64px rail. Persisted.
   bool _navCollapsed = _loadNavCollapsed();
+  // Sidebar card currently under the pointer (reveals its start/stop control).
+  String? _hoveredCardId;
   // Endpoint tab "Browse" on a table that isn't the config's own points the Table
   // tab at it (read-only). Keyed by config id so switching configs drops the override
   // without a manual clear at every selection site.
@@ -582,7 +585,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           SizedBox(
-            width: _navCollapsed ? 58 : 232,
+            width: _navCollapsed ? 64 : 236,
             child: _navCollapsed ? _navRail() : _configList(),
           ),
           const VerticalDivider(width: 1),
@@ -703,10 +706,12 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
           child: (_configs.isEmpty && _endpoints.isEmpty)
               ? Center(child: Text(tr('nav.noneYet')))
               : ListView(children: [
-                  _navSection(tr('nav.instances'), const Color(0xFFB26A12)),
+                  _navSection(tr('nav.instances'), Accents.amber),
                   for (final c in _configs) _configTile(c),
-                  _navSection(tr('nav.endpoints'), const Color(0xFF0E7F86)),
+                  const SizedBox(height: 6),
+                  _navSection(tr('nav.endpoints'), Accents.teal),
                   for (final e in _endpoints) _endpointTile(e),
+                  const SizedBox(height: 8),
                 ]),
         ),
         const Divider(height: 1),
@@ -721,45 +726,41 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
 
   // A small colored section header in the sidebar (Instances / Endpoints).
   Widget _navSection(String label, Color color) => Padding(
-        padding: const EdgeInsets.fromLTRB(14, 12, 12, 4),
+        padding: const EdgeInsets.fromLTRB(16, 12, 12, 6),
         child: Row(children: [
-          Container(width: 7, height: 7, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
-          const SizedBox(width: 7),
-          Text(label.toUpperCase(),
+          Container(width: 8, height: 8, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
+          const SizedBox(width: 8),
+          Text(label,
               style: TextStyle(
-                  fontSize: 10, letterSpacing: 1.2, fontWeight: FontWeight.w600,
-                  color: Theme.of(context).textTheme.bodySmall?.color)),
+                  fontSize: 12, fontWeight: FontWeight.w700,
+                  color: Theme.of(context).textTheme.bodyMedium?.color)),
         ]),
       );
 
-  Widget _endpointTile(DdbEndpoint e) {
-    final sel = e.id == _selEndpointId;
-    final (badge, badgeColor) = switch (e.kind) {
-      'local' => ('LOCAL', const Color(0xFF0E7F86)),
-      'aws' => ('AWS', const Color(0xFFB26A12)),
-      _ => ('URL', Theme.of(context).colorScheme.primary),
-    };
-    final sub = switch (e.kind) {
-      'aws' => e.region.isEmpty ? 'AWS' : 'AWS · ${e.region}',
-      'local' => 'Local · ${_hostOf(e.endpoint)}',
-      _ => e.endpoint,
-    };
-    return Material(
-      color: sel ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.15) : Colors.transparent,
-      child: ListTile(
-        dense: true,
-        leading: Container(width: 12, height: 12,
-            decoration: const BoxDecoration(color: Color(0xFF0E7F86), shape: BoxShape.circle)),
-        title: Text(e.name.isEmpty ? tr('config.unnamed') : e.name, overflow: TextOverflow.ellipsis),
-        subtitle: Text(sub, style: const TextStyle(fontSize: 11), overflow: TextOverflow.ellipsis),
-        trailing: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-          decoration: BoxDecoration(color: badgeColor, borderRadius: BorderRadius.circular(4)),
-          child: Text(badge, style: const TextStyle(fontSize: 8.5, color: Colors.white, fontWeight: FontWeight.w700)),
-        ),
-        onTap: () => _selectEndpoint(e.id),
-      ),
-    );
+  // The endpoint an instance's config points at (matched by backend tuple), so
+  // an instance card can show "→ endpoint-name".
+  DdbEndpoint? _endpointFor(RedimosConfig c) {
+    for (final e in _endpoints) {
+      if (e.endpoint == c.endpoint &&
+          e.region == c.region &&
+          e.accessKeyId == c.accessKeyId &&
+          e.secretKey == c.secretKey &&
+          e.sessionToken == c.sessionToken &&
+          e.source == c.source) {
+        return e;
+      }
+    }
+    return null;
+  }
+
+  Future<void> _selectInstance(RedimosConfig c) async {
+    if (c.id == _selectedId) return;
+    if (await _confirmLeaveEditor()) {
+      setState(() {
+        _selectedId = c.id;
+        _selEndpointId = null;
+      });
+    }
   }
 
   String _hostOf(String url) {
@@ -767,114 +768,284 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     return (u != null && u.host.isNotEmpty) ? (u.hasPort ? '${u.host}:${u.port}' : u.host) : url;
   }
 
-  // Collapsed sidebar: a narrow rail of status dots with an expand toggle.
-  Widget _navRail() {
-    Widget item({required Color dot, required String label, required bool selected, required VoidCallback onTap}) =>
-        Tooltip(
-          message: label,
-          waitDuration: const Duration(milliseconds: 300),
-          child: InkWell(
-            onTap: onTap,
-            borderRadius: BorderRadius.circular(9),
-            child: Container(
-              margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-              height: 34,
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(9),
-                border: selected
-                    ? Border.all(color: Theme.of(context).colorScheme.primary, width: 2)
-                    : Border.all(color: Colors.transparent, width: 2),
-                color: selected ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.10) : null,
+  String _portLabel(String url) {
+    final u = Uri.tryParse(url);
+    if (u != null && u.hasPort) return ':${u.port}';
+    return _hostOf(url);
+  }
+
+  // A rounded sidebar card (the shared shell for instance / endpoint tiles).
+  Widget _sidebarCard({
+    required bool selected,
+    required VoidCallback onTap,
+    required Widget child,
+    void Function(bool)? onHover,
+  }) {
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(10, 3, 10, 3),
+      child: Material(
+        color: selected
+            ? Accents.indigo.withValues(alpha: 0.12)
+            : scheme.surfaceContainerHighest.withValues(alpha: 0.35),
+        borderRadius: BorderRadius.circular(12),
+        child: InkWell(
+          onTap: onTap,
+          onHover: onHover,
+          borderRadius: BorderRadius.circular(12),
+          child: Ink(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: selected
+                    ? Accents.indigo
+                    : scheme.outlineVariant.withValues(alpha: 0.45),
+                width: selected ? 1.6 : 1,
               ),
-              alignment: Alignment.center,
-              child: Container(width: 10, height: 10, decoration: BoxDecoration(color: dot, shape: BoxShape.circle)),
             ),
-          ),
-        );
-    return Column(children: [
-      SizedBox(
-        height: 50,
-        child: Center(
-          child: IconButton(
-            tooltip: tr('nav.expand'),
-            visualDensity: VisualDensity.compact,
-            icon: const Icon(Icons.chevron_right, size: 20),
-            onPressed: _toggleNav,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(12, 10, 10, 10),
+              child: child,
+            ),
           ),
         ),
       ),
-      const Divider(height: 1),
-      Expanded(
-        child: ListView(children: [
-          const SizedBox(height: 4),
-          Container(height: 2, margin: const EdgeInsets.fromLTRB(16, 4, 16, 4),
-              color: const Color(0xFFB26A12).withValues(alpha: 0.6)),
-          for (final c in _configs)
-            item(
-              dot: _statusColor(_status[c.id]?.status ?? 'stopped'),
-              label: c.name.isEmpty ? tr('config.unnamed') : c.name,
-              selected: c.id == _selectedId,
-              onTap: () async {
-                if (c.id == _selectedId) return;
-                if (await _confirmLeaveEditor()) {
-                  setState(() {
-                    _selectedId = c.id;
-                    _selEndpointId = null;
-                  });
-                }
-              },
-            ),
-          Container(height: 2, margin: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-              color: const Color(0xFF0E7F86).withValues(alpha: 0.6)),
-          for (final e in _endpoints)
-            item(
-              dot: const Color(0xFF0E7F86),
-              label: e.name.isEmpty ? tr('config.unnamed') : e.name,
-              selected: e.id == _selEndpointId,
-              onTap: () => _selectEndpoint(e.id),
-            ),
-        ]),
-      ),
-    ]);
+    );
   }
 
   Widget _configTile(RedimosConfig c) {
     final st = _status[c.id];
     final running = st?.isRunning ?? false;
     final active = running || st?.status == 'restarting';
-    return Material(
-      color: c.id == _selectedId
-          ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.15)
-          : Colors.transparent,
-      child: ListTile(
-        dense: true,
-        leading: _statusDot(st?.status ?? 'stopped'),
-        title: Text(c.name.isEmpty ? tr('config.unnamed') : c.name,
-            overflow: TextOverflow.ellipsis),
-        subtitle: Text(
-          '${c.version} · :${c.port}'
-          '${running ? " · ${st!.cpuPercent.toStringAsFixed(1)}% · ${(st.memBytes / (1024 * 1024)).round()}MB" : ""}'
-          '${st?.status == "restarting" ? " · restarting…" : ""}'
-          '${(st?.restarts ?? 0) > 0 ? " · ↻${st!.restarts}" : ""}',
-          style: const TextStyle(fontSize: 11),
+    final sel = c.id == _selectedId;
+    final hovered = _hoveredCardId == c.id;
+    final ep = _endpointFor(c);
+    final epName = (ep != null && ep.name.isNotEmpty)
+        ? ep.name
+        : (c.endpoint.isEmpty ? 'AWS' : _hostOf(c.endpoint));
+    final mutedColor = Theme.of(context).textTheme.bodySmall?.color;
+    return _sidebarCard(
+      selected: sel,
+      onTap: () => _selectInstance(c),
+      onHover: (h) => setState(() => _hoveredCardId = h ? c.id : null),
+      child: Row(children: [
+        _statusDot(st?.status ?? 'stopped'),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(c.name.isEmpty ? tr('config.unnamed') : c.name,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600)),
+            const SizedBox(height: 2),
+            Text(':${c.port} → $epName',
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontSize: 11, fontFamily: 'monospace', color: mutedColor)),
+          ]),
         ),
-        trailing: IconButton(
-          tooltip: active ? tr('config.stop') : tr('config.start'),
-          icon: Icon(active ? Icons.stop : Icons.play_arrow,
-              color: active ? Colors.redAccent : goGreen(context)),
-          onPressed: () => _startStop(c),
+        // Start/stop reveals on hover (or stays visible while active so a running
+        // instance can always be stopped), keeping the resting card clean.
+        AnimatedOpacity(
+          opacity: (hovered || active) ? 1 : 0,
+          duration: const Duration(milliseconds: 120),
+          child: IgnorePointer(
+            ignoring: !(hovered || active),
+            child: IconButton(
+              tooltip: active ? tr('config.stop') : tr('config.start'),
+              visualDensity: VisualDensity.compact,
+              iconSize: 18,
+              icon: Icon(active ? Icons.stop_circle : Icons.play_circle_fill,
+                  color: active ? Colors.redAccent : Accents.green),
+              onPressed: () => _startStop(c),
+            ),
+          ),
         ),
-        onTap: () async {
-          if (c.id == _selectedId) return;
-          if (await _confirmLeaveEditor()) {
-            setState(() {
-              _selectedId = c.id;
-              _selEndpointId = null;
-            });
-          }
-        },
+      ]),
+    );
+  }
+
+  Widget _endpointTile(DdbEndpoint e) {
+    final sel = e.id == _selEndpointId;
+    final (badge, badgeColor) = switch (e.kind) {
+      'local' => ('LOCAL', Accents.teal),
+      'aws' => ('AWS', Accents.amber),
+      _ => ('URL', Accents.indigo),
+    };
+    final sub = switch (e.kind) {
+      'aws' => e.region.isEmpty ? 'AWS' : e.region,
+      'local' => _portLabel(e.endpoint),
+      _ => _hostOf(e.endpoint),
+    };
+    final mutedColor = Theme.of(context).textTheme.bodySmall?.color;
+    return _sidebarCard(
+      selected: sel,
+      onTap: () => _selectEndpoint(e.id),
+      child: Row(children: [
+        Container(
+            width: 11,
+            height: 11,
+            decoration: const BoxDecoration(color: Accents.teal, shape: BoxShape.circle)),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(e.name.isEmpty ? tr('config.unnamed') : e.name,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600)),
+            const SizedBox(height: 2),
+            Text(sub,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontSize: 11, fontFamily: 'monospace', color: mutedColor)),
+          ]),
+        ),
+        const SizedBox(width: 6),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2.5),
+          decoration: BoxDecoration(
+              color: badgeColor.withValues(alpha: 0.18),
+              borderRadius: BorderRadius.circular(5)),
+          child: Text(badge,
+              style: TextStyle(
+                  fontSize: 8.5, color: badgeColor, fontWeight: FontWeight.w800, letterSpacing: 0.4)),
+        ),
+      ]),
+    );
+  }
+
+  // ---- collapsed rail (avatars) ----
+
+  String _instanceAvatarLabel(RedimosConfig c) {
+    final v = c.version.trim();
+    final m = RegExp(r'v\d+', caseSensitive: false).firstMatch(v);
+    if (m != null) return m.group(0)!.toLowerCase();
+    if (v.isNotEmpty) return v.length <= 3 ? v : v.substring(0, 2);
+    final n = c.name.trim();
+    return n.isEmpty ? '?' : n.substring(0, 1).toUpperCase();
+  }
+
+  String _endpointAvatarLabel(DdbEndpoint e) {
+    final n = e.name.trim();
+    return n.isEmpty ? '?' : n.substring(0, 1).toUpperCase();
+  }
+
+  Widget _railDivider(Color c) => Container(
+        height: 2,
+        margin: const EdgeInsets.fromLTRB(18, 7, 18, 7),
+        decoration: BoxDecoration(
+            color: c.withValues(alpha: 0.55), borderRadius: BorderRadius.circular(1)),
+      );
+
+  Widget _railAvatar({
+    required String label,
+    required Color accent,
+    // Process status → badge dot. Null for endpoints: an endpoint is a storage
+    // backend, not a managed process, so it takes the same teal dot
+    // _endpointTile shows rather than a fabricated "running" (which would read
+    // green here and teal when the sidebar is expanded — same object, two
+    // colours depending on sidebar state).
+    String? status,
+    required bool selected,
+    required String tooltip,
+    required VoidCallback onTap,
+  }) {
+    final dot = status == null ? Accents.teal : _statusColor(status);
+    final bg = Theme.of(context).scaffoldBackgroundColor;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+      child: Tooltip(
+        message: tooltip,
+        waitDuration: const Duration(milliseconds: 250),
+        child: InkWell(
+          onTap: onTap,
+          customBorder: const CircleBorder(),
+          child: Stack(clipBehavior: Clip.none, children: [
+            Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: accent.withValues(alpha: selected ? 0.24 : 0.14),
+                border: Border.all(
+                    color: selected ? Accents.indigo : accent.withValues(alpha: 0.45),
+                    width: selected ? 2 : 1),
+              ),
+              alignment: Alignment.center,
+              child: Text(label,
+                  style: TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w700,
+                      fontFamily: 'monospace',
+                      color: accent)),
+            ),
+            Positioned(
+              right: -1,
+              bottom: -1,
+              child: Container(
+                width: 12,
+                height: 12,
+                decoration: BoxDecoration(
+                  color: dot,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: bg, width: 2),
+                ),
+              ),
+            ),
+          ]),
+        ),
       ),
     );
+  }
+
+  // Collapsed sidebar: a narrow rail of circular avatars with an expand toggle.
+  Widget _navRail() {
+    final scheme = Theme.of(context).colorScheme;
+    return Column(children: [
+      SizedBox(
+        height: 50,
+        child: Center(
+          child: Tooltip(
+            message: tr('nav.expand'),
+            child: InkWell(
+              onTap: _toggleNav,
+              borderRadius: BorderRadius.circular(9),
+              child: Container(
+                width: 34,
+                height: 34,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(9),
+                  border: Border.all(color: scheme.outlineVariant.withValues(alpha: 0.6)),
+                ),
+                child: const Icon(Icons.keyboard_double_arrow_right, size: 18),
+              ),
+            ),
+          ),
+        ),
+      ),
+      const Divider(height: 1),
+      Expanded(
+        child: ListView(padding: const EdgeInsets.symmetric(vertical: 6), children: [
+          _railDivider(Accents.amber),
+          for (final c in _configs)
+            _railAvatar(
+              label: _instanceAvatarLabel(c),
+              accent: Accents.amber,
+              status: _status[c.id]?.status ?? 'stopped',
+              selected: c.id == _selectedId,
+              tooltip:
+                  '${c.name.isEmpty ? tr('config.unnamed') : c.name}\n:${c.port}',
+              onTap: () => _selectInstance(c),
+            ),
+          _railDivider(Accents.teal),
+          for (final e in _endpoints)
+            _railAvatar(
+              label: _endpointAvatarLabel(e),
+              accent: Accents.teal,
+              selected: e.id == _selEndpointId,
+              tooltip:
+                  '${e.name.isEmpty ? tr('config.unnamed') : e.name}\n${e.endpoint.isEmpty ? 'AWS${e.region.isEmpty ? '' : ' · ${e.region}'}' : e.endpoint}',
+              onTap: () => _selectEndpoint(e.id),
+            ),
+        ]),
+      ),
+    ]);
   }
 
   Color _statusColor(String status) => switch (status) {
@@ -1030,6 +1201,17 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                   port: c.port,
                   auth: c.requirepass.isEmpty ? null : c.requirepass,
                   running: st?.isRunning ?? false,
+                  // The console's RESP socket stays up when the DynamoDB backend
+                  // dies, so no "Reconnecting" state ever appears — commands just
+                  // start failing. /readyz is what reports backend usability.
+                  backendDegraded:
+                      st != null && st.isRunning && st.healthy && !st.ready,
+                  // The cause behind that dot, when redimos reports one. Passed
+                  // whenever present rather than gated on backendDegraded: the
+                  // console also raises the dot optimistically from an error
+                  // reply, ahead of the health signal, and that path deserves the
+                  // cause too once a sample carries it.
+                  backendError: st?.backendError,
                   // Surface the crash-loop cause (e.g. a failing startup backend
                   // check) so a proxy that can't reach its table isn't a silent
                   // spinner. Only while it's actually down for a known reason.
@@ -1932,6 +2114,10 @@ class MonitorView extends StatelessWidget {
     return '${(b / (1024 * 1024)).toStringAsFixed(1)} MB/s';
   }
 
+  // UNREACHABLE: only the embedded==false branch of build() calls this, and the
+  // sole MonitorView construction passes embedded: true. Its Latency/Health tiles
+  // are stale duplicates — the live grid is _dashboard. Kept (not deleted) so the
+  // collapsible non-embedded layout still compiles; edit _dashboard, not this.
   Widget _tiles(InstanceStatus? st, bool running) {
     return Wrap(
       spacing: 10,
@@ -1984,8 +2170,10 @@ class MonitorView extends StatelessWidget {
     );
   }
 
-  // A section eyebrow: icon + label on the left, a status string on the right.
-  Widget _sectionHeader(BuildContext context, IconData icon, String label) {
+  // A section eyebrow: icon + label on the left, an optional badge right-aligned.
+  // The badge carries state that has no tile of its own (currently "adopted").
+  Widget _sectionHeader(BuildContext context, IconData icon, String label,
+      {String? badge}) {
     final scheme = Theme.of(context).colorScheme;
     return Row(children: [
       Icon(icon, size: 16, color: scheme.onSurfaceVariant),
@@ -1996,6 +2184,12 @@ class MonitorView extends StatelessWidget {
               letterSpacing: 1.3,
               fontWeight: FontWeight.w700,
               color: scheme.onSurfaceVariant)),
+      if (badge != null) ...[
+        const Spacer(),
+        Text(badge,
+            style: TextStyle(
+                fontSize: 11, color: Theme.of(context).textTheme.bodySmall?.color)),
+      ],
     ]);
   }
 
@@ -2026,7 +2220,8 @@ class MonitorView extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _sectionHeader(context, Icons.dns, 'REDIMOS'),
+        _sectionHeader(context, Icons.dns, 'REDIMOS',
+            badge: (st?.adopted ?? false) ? tr('home.adopted') : null),
         const SizedBox(height: 12),
         IntrinsicHeight(
           child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
@@ -2100,7 +2295,8 @@ class MonitorView extends StatelessWidget {
         const SizedBox(height: 20),
         const Divider(height: 1),
         const SizedBox(height: 14),
-        _sectionHeader(context, Icons.storage, 'LOCAL DYNAMODB'),
+        _sectionHeader(context, Icons.storage, 'LOCAL DYNAMODB',
+            badge: d.adopted ? tr('home.adopted') : null),
         const SizedBox(height: 12),
         IntrinsicHeight(
           child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
@@ -2126,17 +2322,36 @@ class MonitorView extends StatelessWidget {
           _InfoTile(label: tr('home.uptime'), fitReference: engine, value: up ? _fmtUptime(d.uptimeSec) : '—'),
           _InfoTile(label: tr('home.restarts'), fitReference: engine, value: '${d.restarts}'),
           // Latency sits at column 3 to line up with the redimos Latency tile.
-          // DynamoDB Local / LocalStack expose no latency metric, so it's a
-          // placeholder ('—') that keeps the columns aligned.
-          _InfoTile(label: tr('home.latency'), fitReference: engine, value: '—'),
+          // Unlike that one (scraped from redimos's own /metrics), this number is
+          // MEASURED here: a timed ListTables round-trip against the engine. The
+          // two are therefore not comparable across engines — LocalStack is
+          // intrinsically slower than java. Gated on probeOk exactly as the
+          // redimos tile gates on metricsOk.
+          _InfoTile(
+              label: tr('home.latency'),
+              fitReference: engine,
+              value: up && d.probeOk ? '${d.latencyMs.toStringAsFixed(2)} ms' : '—'),
           _InfoTile(label: tr('home.status'), fitReference: engine, value: up ? tr('home.running') : d.status),
-          // Health (col 5) lines up with the redimos Health tile. DDB exposes no
-          // health endpoint, so this is derived from the running state.
-          _InfoTile(label: tr('home.health'), fitReference: engine, value: up ? tr('home.ready') : tr('home.down')),
+          // PID (col 5). Health would only re-derive from `up` — the same boolean
+          // the Status tile beside it already shows — so it carried no information
+          // here. The `d.pid > 0` guard is load-bearing, not defensive: an ADOPTED
+          // docker/localstack DDB is never assigned a pid (tryAdoptDocker), so it
+          // reads 0 for its whole life. Note that in docker mode this is the
+          // `docker run` CLI shim's host pid, not the container's — the same reason
+          // the redimos side dropped its own PID tile for Port (see below).
+          _InfoTile(label: tr('home.pid'), fitReference: engine, value: up && d.pid > 0 ? '${d.pid}' : '—'),
           // Port + Engine last, aligning with the redimos section's Port + Engine
           // tiles above. (DDB says "Engine" because the choice is a different
           // backend product — dynamodb-local vs LocalStack — not just a run mode.)
-          _InfoTile(label: tr('home.port'), fitReference: engine, value: '${d.config.port}'),
+          // The LIVE port while up, matching the redimos tile above and the port
+          // the Latency tile actually probed: rm_ddb_set persists a new port
+          // without restarting, so config.port can name a port nothing is bound
+          // to. Falls back to the configured one when stopped, which is then the
+          // only port there is.
+          _InfoTile(
+              label: tr('home.port'),
+              fitReference: engine,
+              value: up && d.port > 0 ? '${d.port}' : '${d.config.port}'),
           _InfoTile(label: tr('home.engine'), fitReference: engine, value: engine),
         ]),
       ],

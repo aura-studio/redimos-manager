@@ -177,39 +177,9 @@ const Map<String, Map<AppLang, String>> _strings = {
   'nav.noneYet': {AppLang.en: 'No instances or endpoints yet', AppLang.zh: '暂无实例或端点'},
 
   // --- v1.2 Playground (JS via goja / Go via yaegi) ---
-  'pg.title': {AppLang.en: 'Playground', AppLang.zh: '脚本台'},
   'pg.run': {AppLang.en: 'Run', AppLang.zh: '运行'},
-  'pg.clear': {AppLang.en: 'Clear', AppLang.zh: '清空'},
-  'pg.samples': {AppLang.en: 'Samples', AppLang.zh: '示例'},
-  'pg.language': {AppLang.en: 'Language', AppLang.zh: '语言'},
-  'pg.console': {AppLang.en: 'Console output', AppLang.zh: '控制台输出'},
-  'pg.result': {AppLang.en: 'Return value', AppLang.zh: '返回值'},
-  'pg.copy': {AppLang.en: 'Copy', AppLang.zh: '复制'},
-  'pg.copied': {AppLang.en: 'Copied', AppLang.zh: '已复制'},
-  'pg.completed': {AppLang.en: 'Completed', AppLang.zh: '已完成'},
-  'pg.failed': {AppLang.en: 'Failed', AppLang.zh: '失败'},
-  'pg.startedOn': {AppLang.en: 'Started on', AppLang.zh: '开始于'},
-  'pg.elapsed': {AppLang.en: 'Elapsed', AppLang.zh: '耗时'},
-  'pg.errorOccurred': {AppLang.en: 'Script error', AppLang.zh: '脚本出错'},
   'pg.readOnly': {AppLang.en: 'read-only', AppLang.zh: '只读'},
-  'pg.hostRedis': {AppLang.en: 'Redis', AppLang.zh: 'Redis'},
   'pg.hostDdb': {AppLang.en: 'DynamoDB', AppLang.zh: 'DynamoDB'},
-  'pg.typeScript': {
-    AppLang.en: 'write a script, or pick a Sample',
-    AppLang.zh: '编写脚本，或从「示例」选择'
-  },
-  'pg.apiHintRedis': {
-    AppLang.en:
-        'Host objects: redis (get/set/del/type/ttl/hget/hgetall/scan/keys/command), console (log/error/table). JS uses lowercase; Go uses Go names (redis.Get).',
-    AppLang.zh:
-        '宿主对象：redis(get/set/del/type/ttl/hget/hgetall/scan/keys/command)、console(log/error/table)。JS 用小写，Go 用大写方法名(redis.Get)。'
-  },
-  'pg.apiHintDdb': {
-    AppLang.en:
-        'Host objects: ddb (listTables/scan/scanAll/getItem/putItem/deleteItem/partiql/call), console (log/error/table). AWS endpoints are read-only. JS uses lowercase; Go uses Go names (ddb.ScanAll).',
-    AppLang.zh:
-        '宿主对象：ddb(listTables/scan/scanAll/getItem/putItem/deleteItem/partiql/call)、console(log/error/table)。AWS 端点只读。JS 用小写，Go 用大写方法名(ddb.ScanAll)。'
-  },
   'pg.instanceNotRunning': {
     AppLang.en: 'Instance not running',
     AppLang.zh: '实例未运行'
@@ -227,21 +197,75 @@ const Map<String, Map<AppLang, String>> _strings = {
   'pg.s.redisTtlAudit': {AppLang.en: 'TTL audit', AppLang.zh: 'TTL 审计'},
   'pg.s.redisRename': {AppLang.en: 'Rename a key (write)', AppLang.zh: '重命名键(写)'},
   'pg.s.redisBench': {AppLang.en: 'Benchmark SET+GET (write)', AppLang.zh: '压测 SET+GET(写)'},
-  'pg.s.ddbScanAggregate': {
-    AppLang.en: 'Scan & aggregate',
-    AppLang.zh: '扫描并聚合'
-  },
+  'pg.s.ddbScanAggregate': {AppLang.en: 'Scan & aggregate', AppLang.zh: '扫描聚合'},
+  'pg.s.ddbCrossCopy': {AppLang.en: 'Cross-table copy', AppLang.zh: '跨表复制项'},
+  'pg.s.ddbConditionalDelete': {AppLang.en: 'Conditional delete', AppLang.zh: '条件批量删除'},
   'pg.s.ddbExportJsonl': {AppLang.en: 'Export as JSONL', AppLang.zh: '导出为 JSONL'},
-  'pg.s.ddbSizeHistogram': {AppLang.en: 'Item size histogram', AppLang.zh: '条目大小分布'},
-  'pg.s.ddbPartiql': {AppLang.en: 'PartiQL SELECT', AppLang.zh: 'PartiQL 查询'},
-  'pg.s.ddbConditionalDelete': {
-    AppLang.en: 'Conditional delete (write)',
-    AppLang.zh: '条件删除(写)'
+  'pg.s.ddbSizeHistogram': {AppLang.en: 'Item size histogram', AppLang.zh: '项大小分布'},
+
+  // sample descriptions (shown under the title in the sample dropdown)
+  'pg.d.redisPrefix': {
+    AppLang.en: 'SCAN the keyspace, group by ":" prefix',
+    AppLang.zh: 'SCAN 全库,按 : 前缀分组'
+  },
+  'pg.d.redisHashExport': {
+    AppLang.en: 'HGETALL one hash key',
+    AppLang.zh: 'HGETALL 一个 hash 键'
+  },
+  'pg.d.redisTtlAudit': {
+    AppLang.en: 'Scan and list keys that carry a TTL',
+    AppLang.zh: '扫描并列出带 TTL 的键'
+  },
+  'pg.d.redisRename': {
+    AppLang.en: 'Copy to a new key, delete the old (write)',
+    AppLang.zh: '复制到新键后删除旧键(写)'
+  },
+  'pg.d.redisBench': {
+    AppLang.en: 'Time N SET+GET round-trips (write)',
+    AppLang.zh: '计时 N 次 SET+GET 往返(写)'
+  },
+  'pg.d.ddbScanAggregate': {
+    AppLang.en: 'Scan a table, group & count by a field',
+    AppLang.zh: '扫一张表,按某字段分组计数'
+  },
+  'pg.d.ddbCrossCopy': {
+    AppLang.en: 'Read from table A, write into table B',
+    AppLang.zh: '从表 A 读、写入表 B'
+  },
+  'pg.d.ddbConditionalDelete': {
+    AppLang.en: 'Scan with a filter → delete matches',
+    AppLang.zh: '带 filter 扫描 → batchWrite 删除'
+  },
+  'pg.d.ddbExportJsonl': {
+    AppLang.en: 'Whole-table scan → one JSON per line',
+    AppLang.zh: '整表 scan → 每行一个 JSON'
+  },
+  'pg.d.ddbSizeHistogram': {
+    AppLang.en: 'Histogram of item byte sizes',
+    AppLang.zh: '统计各项字节大小直方图'
+  },
+
+  // Playground UI (v1.2 restyle)
+  'pg.samplesMenu': {AppLang.en: 'Sample program', AppLang.zh: '样例程序'},
+  'pg.catRedis': {AppLang.en: 'REDIS SAMPLES', AppLang.zh: 'REDIS 样例'},
+  'pg.catDdb': {AppLang.en: 'DYNAMODB SAMPLES', AppLang.zh: 'DYNAMODB 样例'},
+  'pg.backendLabel': {AppLang.en: 'backend', AppLang.zh: '后端'},
+  'pg.writable': {AppLang.en: 'writable', AppLang.zh: '可写'},
+  'pg.output': {AppLang.en: 'OUTPUT', AppLang.zh: 'OUTPUT'},
+  'pg.ran': {AppLang.en: 'RAN', AppLang.zh: '已运行'},
+  'pg.errored': {AppLang.en: 'ERROR', AppLang.zh: '出错'},
+  'pg.running': {AppLang.en: 'running…', AppLang.zh: '运行中…'},
+  'pg.doneRows': {AppLang.en: 'done', AppLang.zh: '完成'},
+  'pg.rowsUnit': {AppLang.en: 'rows', AppLang.zh: '行'},
+  'pg.emptyOutput': {
+    AppLang.en: 'Run a script to see console output and the return value here.',
+    AppLang.zh: '运行脚本后,这里显示控制台输出与返回值。'
   },
 
   // --- extracted from page files (workflow, phase 1 cont.) ---
   'home.accessKeyId': {AppLang.en: 'AccessKeyID', AppLang.zh: '访问密钥 ID'},
   'home.addFlag': {AppLang.en: 'Add flag', AppLang.zh: '添加参数'},
+  'home.adopted': {AppLang.en: 'adopted', AppLang.zh: '已接管'},
   'home.auth': {AppLang.en: 'Auth', AppLang.zh: '认证'},
   'home.autoCreate': {AppLang.en: 'AutoCreate', AppLang.zh: '自动建表'},
   'home.autoRestart': {AppLang.en: 'AutoRestart', AppLang.zh: '自动重启'},
@@ -291,6 +315,8 @@ const Map<String, Map<AppLang, String>> _strings = {
   'home.opsPerSec': {AppLang.en: 'Ops/s', AppLang.zh: '操作/秒'},
   'home.permanentlyRemove': {AppLang.en: 'Permanently remove', AppLang.zh: '永久删除'},
   'home.persisted': {AppLang.en: 'Persisted', AppLang.zh: '持久化'},
+  // A universal term — stays "PID" in Chinese.
+  'home.pid': {AppLang.en: 'PID', AppLang.zh: 'PID'},
   'home.port': {AppLang.en: 'Port', AppLang.zh: '端口'},
   'home.preparing': {AppLang.en: 'Preparing…', AppLang.zh: '准备中…'},
   'home.ready': {AppLang.en: 'Ready', AppLang.zh: '就绪'},
@@ -599,6 +625,20 @@ const Map<String, Map<AppLang, String>> _strings = {
   'cmd.historyHint': {AppLang.en: 'History: ↑ / ↓   ·   Clear: the ⌫ button on the right', AppLang.zh: '历史: ↑ / ↓   ·   清除: 右侧的 ⌫ 按钮'},
   'cmd.reconnecting': {AppLang.en: 'Reconnecting…', AppLang.zh: '重新连接中…'},
   'cmd.connecting': {AppLang.en: 'Connecting…', AppLang.zh: '连接中…'},
+  'cmd.backendDegraded': {
+    AppLang.en:
+        'The proxy is up, but its DynamoDB backend check is failing — commands may fail with "ERR backend error, retry later".',
+    AppLang.zh:
+        '代理进程正常，但其 DynamoDB 后端检查未通过 —— 命令可能返回 "ERR backend error, retry later"。'
+  },
+  // Appended to cmd.backendDegraded when redimos reports a cause. {err} is that
+  // cause verbatim (an AWS SDK error string) — attributed to redimos rather than
+  // asserted as fact, since it is a report from the proxy, and left untranslated
+  // because it is a machine string, not a UI string.
+  'cmd.backendDegradedCause': {
+    AppLang.en: 'redimos reports: {err}',
+    AppLang.zh: 'redimos 报告：{err}'
+  },
   'item.createItem': {AppLang.en: 'Create item', AppLang.zh: '创建项'},
   'item.editItem': {AppLang.en: 'Edit item', AppLang.zh: '编辑项'},
   'item.viewDdbJson': {AppLang.en: 'View DynamoDB JSON', AppLang.zh: '查看 DynamoDB JSON'},

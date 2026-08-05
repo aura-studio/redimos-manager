@@ -326,6 +326,7 @@ class LocalDdbInfo {
   final LocalDdbConfig config;
   final String status; // stopped | preparing | running | restarting | error | failed
   final int pid;
+  final int port; // the live child's binding; config.port may differ until restart
   final int uptimeSec;
   final String exitMsg;
   final int restarts;
@@ -333,6 +334,8 @@ class LocalDdbInfo {
   final int memBytes;
   final double diskPerSec; // disk I/O bytes/sec (read+written)
   final bool adopted; // inherited from a previous session (crash recovery)
+  final bool probeOk; // the latency probe reached the engine
+  final double latencyMs; // measured ListTables round-trip
   final bool dockerOk;
   final bool javaOk;
   final bool jarReady;
@@ -341,6 +344,7 @@ class LocalDdbInfo {
     required this.config,
     required this.status,
     required this.pid,
+    this.port = 0,
     required this.uptimeSec,
     required this.exitMsg,
     required this.restarts,
@@ -348,6 +352,8 @@ class LocalDdbInfo {
     required this.memBytes,
     required this.diskPerSec,
     this.adopted = false,
+    this.probeOk = false,
+    this.latencyMs = 0,
     required this.dockerOk,
     required this.javaOk,
     required this.jarReady,
@@ -360,6 +366,7 @@ class LocalDdbInfo {
       config: LocalDdbConfig.fromJson((j['config'] as Map<String, dynamic>?) ?? {}),
       status: (st['status'] ?? 'stopped') as String,
       pid: (st['pid'] ?? 0) as int,
+      port: (st['port'] ?? 0) as int,
       uptimeSec: (st['uptimeSec'] ?? 0) as int,
       exitMsg: (st['exitMsg'] ?? '') as String,
       restarts: (st['restarts'] ?? 0) as int,
@@ -367,6 +374,8 @@ class LocalDdbInfo {
       memBytes: (st['memBytes'] ?? 0) as int,
       diskPerSec: ((st['diskPerSec'] ?? 0) as num).toDouble(),
       adopted: (st['adopted'] ?? false) as bool,
+      probeOk: (st['probeOk'] ?? false) as bool,
+      latencyMs: ((st['latencyMs'] ?? 0) as num).toDouble(),
       dockerOk: (det['docker'] ?? false) as bool,
       javaOk: (det['java'] ?? false) as bool,
       jarReady: (det['jarReady'] ?? false) as bool,
@@ -397,6 +406,12 @@ class InstanceStatus {
   final double avgLatencyMs; // average command latency
   final int throttled; // cumulative DynamoDB throttles
   final bool adopted; // inherited from a previous session (crash recovery)
+  // redimos's own reported cause for a failing backend check (the /readyz body's
+  // backend_error). Empty when it reports none: a ready proxy, an endpoint that
+  // never answered, or a redimos too old to publish the field. Empty therefore
+  // means "no cause known", NOT "no problem" — healthy/ready remain the signals
+  // that say whether something is wrong, and this only ever explains it.
+  final String backendError;
 
   InstanceStatus({
     required this.id,
@@ -417,6 +432,7 @@ class InstanceStatus {
     this.avgLatencyMs = 0,
     this.throttled = 0,
     this.adopted = false,
+    this.backendError = '',
   });
 
   factory InstanceStatus.fromJson(Map<String, dynamic> j) => InstanceStatus(
@@ -438,6 +454,7 @@ class InstanceStatus {
         avgLatencyMs: ((j['avgLatencyMs'] ?? 0) as num).toDouble(),
         throttled: (j['throttled'] ?? 0) as int,
         adopted: (j['adopted'] ?? false) as bool,
+        backendError: (j['backendError'] ?? '') as String,
       );
 
   bool get isRunning => status == 'running';

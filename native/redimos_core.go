@@ -174,6 +174,12 @@ type instance struct {
 	mtxOK        bool      // last scrape reached the endpoint
 	mtxHealthy   bool      // /healthz == 200
 	mtxReady     bool      // /readyz == 200
+	// backendError is redimos's own reported cause for a failing backend check,
+	// read from the /readyz body. Empty whenever redimos does not report one — a
+	// ready proxy, an unreachable endpoint, or a redimos too old to carry the field
+	// — so a consumer must treat "" as "no cause known" and say only what the
+	// healthy/ready signals prove, never as "no problem".
+	backendError string
 	opsPerSec    float64   // rate of redimos_commands_total across the last interval
 	avgLatencyMs float64   // delta(duration_sum)/delta(duration_count) in ms
 	throttled    int64     // redimos_dynamodb_throttled_total (cumulative)
@@ -181,6 +187,10 @@ type instance struct {
 	prevDurSum   float64   // previous cumulative duration sum (seconds)
 	prevDurCount float64   // previous cumulative duration count
 	prevMtxAt    time.Time // timestamp of the previous successful scrape
+
+	// Local DynamoDB latency probe (filled by the ddb probe in scraperLoop; role "ddb" only).
+	ddbProbeOK   bool
+	ddbLatencyMs float64
 }
 
 func (in *instance) appendLog(line string) {
@@ -261,6 +271,7 @@ func newManager() *manager {
 	}
 	go m.samplerLoop()
 	go m.scraperLoop()
+	go m.probeDdbLoop()
 	return m
 }
 
@@ -707,8 +718,12 @@ func (in *instance) spawn() error {
 	// port each run; native -metrics-addr :0 auto-picks a new port too).
 	in.metricsAddr = ""
 	in.mtxOK, in.mtxHealthy, in.mtxReady = false, false, false
+	in.backendError = "" // fresh child — the old one's backend cause is not ours
 	in.opsPerSec, in.avgLatencyMs, in.throttled = 0, 0, 0
 	in.prevMtxAt = time.Time{}
+	// Fresh child → drop the dead process's round-trip time; without this a
+	// restarted Local DynamoDB reports the previous child's RTT until the next probe.
+	in.ddbProbeOK, in.ddbLatencyMs = false, 0
 	in.appendLogLocked(fmt.Sprintf("$ %s %s", in.bin, strings.Join(in.launchArgs, " ")))
 	// Record the child's start-time identity so terminate() can re-verify the pid
 	// hasn't been reaped-and-recycled before it signals.
@@ -1137,6 +1152,10 @@ type statusRow struct {
 	OpsPerSec    float64 `json:"opsPerSec"`    // command rate over the last interval
 	AvgLatencyMs float64 `json:"avgLatencyMs"` // average command latency (ms)
 	Throttled    int64   `json:"throttled"`    // cumulative DynamoDB throttles
+	// BackendError is redimos's reported cause for a failing backend check (the
+	// /readyz body's backend_error). "" = no cause reported; the UI then explains
+	// only the observed signal rather than guessing one.
+	BackendError string `json:"backendError"`
 }
 
 func (m *manager) statuses() []statusRow {
@@ -1178,6 +1197,10 @@ func (m *manager) statuses() []statusRow {
 				r.OpsPerSec = in.opsPerSec
 				r.AvgLatencyMs = in.avgLatencyMs
 				r.Throttled = in.throttled
+				// Scoped to a running child, like Healthy/Ready: the cause explains a
+				// LIVE proxy's degraded backend. A stopped/failed one reports its cause
+				// through ExitMsg (failReason) instead, and must not carry both.
+				r.BackendError = in.backendError
 			}
 			in.mu.Unlock()
 		}

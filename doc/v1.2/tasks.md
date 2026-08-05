@@ -2,7 +2,8 @@
 
 > [requirements](requirements.md) → [design](design.md) → tasks (this file).
 > Expert mode: fine-grained checkboxes, tests built in, checked off as completed.
-> Branch `feat/v1.2`. Legend: `[ ]` todo · `[x]` done · `[~]` in progress.
+> Branch `feat/v1.2`. Legend: `[ ]` todo · `[x]` done · `[~]` in progress ·
+> `[-]` closed unimplemented (superseded by a later decision).
 > Gate G* = each phase ends with `flutter analyze` clean + `go vet`/`go test` green
 > before commit.
 
@@ -62,7 +63,19 @@
       would only remove convenience, not capability. Left as-is to avoid regressing
       a working layout; a later cleanup can drop them if the endpoint view fully
       subsumes them.
-- [ ] 3.6 Local DynamoDB shown under the Endpoints section (kind=local). *(deferred)*
+- [-] 3.6 Local DynamoDB shown under the Endpoints section (kind=local). **Not
+      implemented — superseded, not deferred.** P6.1 (`c907a47`) retired the entity
+      R9 targeted: an endpoint is a passive storage record with a single Overview
+      tab, ruling out the Configure/Monitor/Logs R9 assumed (a backend is not a
+      managed process), and the app now asserts that to the user unconditionally
+      (`ep.ovNoProcessNote`, `endpoint_detail.dart:262`). The Local DynamoDB is the
+      one backend that IS a managed process, so listing it here would hand one
+      privileged row the tabs P6.1 ruled out for every other row — and make that
+      row's own Overview banner false. It keeps its dedicated panel instead.
+      Follow-up of record: `doc/local-ddb-ui-redesign.md` §3 pinned **LOCAL BACKEND**
+      section — deliberately its own section, not this list (§5 scores the generic
+      BACKENDS and per-config placements down) — gated on the explicit `ddbSource`
+      field replacing URL-substring dependency detection. Post-1.2.
 - [x] 3.7 i18n: nav strings added to `i18n.dart` (`nav.instances/endpoints/collapse/
       expand/noneYet`).
 - [x] 3.8 **TEST**: `flutter analyze` clean; macOS build + launch → two sections
@@ -146,10 +159,18 @@
       so a proxy that stalled mid-reply hung the run (goja/yaegi can't interrupt a
       blocked syscall) and leaked the Dart isolate. Added `setDeadline(timeout+3s)`.
       (Sandbox escape, timeout kill, model-split edges already covered by tests.)
-- [ ] 6.4 **TEST**: full `flutter analyze` + `go vet` + `go test ./native/...`
-      green; migration + playground tests green.
+- [x] 6.4 **TEST**: full `flutter analyze` + `go vet` + `go test ./native/...`
+      green; migration + playground tests green. All four gates re-run green on
+      2026-07-14 after the leftovers round (`flutter analyze` clean; `go vet`
+      clean; `go test ./...` ok, covering the model-split migration and
+      playground suites). The DDB latency probe was additionally exercised
+      against a live docker dynamodb-local through `rm_ddb_get` via ctypes:
+      `—` through the engine's ~5s warm-up, then a real RTT, and back to
+      `probeOk=false` on stop (no stale value).
 - [ ] 6.5 Bump pubspec to 1.2.0; build macOS DMG; VM build Windows setup.exe+zip;
       `gh release create v1.2.0` with 3 assets (mirror v1.1.0).
+      *(Not started — the user declined the build and the release for now, so
+      pubspec deliberately stays at 1.1.0.)*
 - [x] 6.6 Updated memory (redimos-manager-project) with the v1.2 rework + the
       yaegi/goja Playground constraints + the P6.3 fixes.
 
