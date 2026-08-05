@@ -1,11 +1,11 @@
-// The endpoint "Browser" tab (v1.2 R7) — the endpoint's three former storage
-// tabs merged into one two-pane view: a compact **Tables** sidebar on the left
-// (the endpoint's table list + lifecycle ops in each row's right-click menu)
-// and the item **Explorer** on the right (table_page's Scan/Query + item
-// editor), driven by the table selected on the left.
+// The endpoint "Browser" tab (v1.2 R7) — the endpoint's storage surfaces
+// merged into one two-pane view: a compact **Tables** sidebar on the left (the
+// endpoint's table list + lifecycle ops in each row's right-click menu) and
+// the item **Explorer** on the right (table_page's Scan/Query + item editor),
+// driven by the table selected on the left.
 //
-// The sidebar reuses rm_ep_list_tables + TableLifecycle (same ops, guards and
-// friction ladders as the full-width Endpoint tab). The Explorer runs with
+// The sidebar drives rm_ep_list_tables + TableLifecycle (table_lifecycle.dart
+// owns the ops, guards and friction ladders). The Explorer runs with
 // allowOverrideWrites on non-AWS endpoints: an endpoint is the authority on
 // its own data, so item writes are offered there (with the same raw-write
 // confirmation); on AWS endpoints every destructive affordance is hidden and
@@ -287,10 +287,9 @@ class _EndpointBrowserViewState extends State<EndpointBrowserView>
     );
   }
 
-  // Right-click / ⋮ lifecycle menu. Same ops, guards and flows as the
-  // full-width Endpoint tab: AWS shows nothing destructive; Browse (select)
-  // works anywhere; Purge/Delete act on any table; Recreate/Provision need a
-  // bound config to author the schema.
+  // Right-click / ⋮ lifecycle menu via TableLifecycle: AWS shows nothing
+  // destructive; Browse (select) works anywhere; Purge/Delete act on any table;
+  // Recreate/Provision need a bound config to author the schema.
   List<Widget> _menuChildren(Map<String, dynamic> t, {required bool missing}) {
     if (_awsMode) return const []; // AWS: read-only — selection happens on click
     final name = t['name']?.toString() ?? '';
@@ -345,11 +344,10 @@ class _EndpointBrowserViewState extends State<EndpointBrowserView>
       key: ValueKey('epb-explore-${widget.endpoint.id}'),
       core: widget.core,
       config: widget.config,
-      running: true, // storage views connect to DynamoDB directly
       tableOverride: sel,
       // The endpoint is the authority on its own data: on non-AWS backends the
-      // Explorer offers item writes here (with the raw-write confirmation),
-      // unlike an instance browsing a foreign table read-only.
+      // Explorer offers item writes here (with the raw-write confirmation);
+      // on AWS the view stays read-only.
       allowOverrideWrites: !_awsMode,
     );
   }

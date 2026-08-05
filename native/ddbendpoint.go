@@ -1,7 +1,7 @@
 package main
 
-// Endpoint-level table listing for the "Endpoint" tab (a dynamodb-admin-style
-// landing page). Read-only: it talks to DynamoDB directly via the signed
+// Endpoint-level table listing backing the endpoint Browser's Tables sidebar
+// (EndpointBrowserView). Read-only: it talks to DynamoDB directly via the signed
 // ddbCall plane (no running redimos proxy required), lists every table on the
 // config's endpoint with DescribeTable-derived metadata, infers whether each is
 // a redimos table (and which version), joins the configs that use each table,

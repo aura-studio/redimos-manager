@@ -33,9 +33,10 @@ back**. v1.2 makes the structure explicit:
 
 - Root sidebar: two sections (Instances / Endpoints), collapsible 236px ↔ 64px
   rail (persisted to `~/.redimos/nav`). Rail shows status dots + tooltips.
-- Instance selected → tabs Configure · Monitor · Logs · Endpoint · Table ·
-  PartiQL · Console · Browser · Playground (as delivered; the instance keeps its
-  storage tabs as a deliberate deviation — tasks 3.5).
+- Instance selected → tabs Configure · Monitor · Logs · Console · Browser ·
+  Playground (as delivered; the instance's duplicate storage tabs
+  Endpoint/Table/PartiQL were removed on 2026-08-05 — the endpoint views subsume
+  them — tasks 3.5).
 - Endpoint selected → tabs Overview · Browser · PartiQL · Playground (as
   delivered; Overview = backend metadata + reachability probe, tasks 6.1).
 - Local DynamoDB → an Endpoint (kind=local) listed in the Endpoints section; its
@@ -43,8 +44,8 @@ back**. v1.2 makes the structure explicit:
 
 ## Endpoint Browser (merge)
 
-- `Browser` = a two-pane view: left **Tables** list (reuse `endpoint_page`'s list
-  + right-click Purge/Recreate/Delete/Browse) + right **Explorer** (reuse
+- `Browser` = a two-pane view: left **Tables** list (right-click
+  Purge/Recreate/Delete/Browse via `table_lifecycle`) + right **Explorer** (reuse
   `table_page` Scan/Query + `item_editor`), driven by the selected table.
 - `PartiQL` stays (`partiql_page`).
 - AWS endpoints: destructive ops disabled, header shows read-only.

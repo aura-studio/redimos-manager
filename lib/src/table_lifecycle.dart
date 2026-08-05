@@ -1,10 +1,10 @@
 // Shared table-lifecycle operations (Purge items / Recreate / Provision /
-// Delete table) with their friction-ladder confirm dialogs. Two surfaces host
-// these: the full-width Endpoint tab (EndpointPageView) and the endpoint
-// Browser's compact Tables sidebar (EndpointBrowserView) — both delegate here
-// so the guards, confirmations and flows stay identical.
+// Delete table) with their friction-ladder confirm dialogs, hosted by the
+// endpoint Browser's Tables sidebar (EndpointBrowserView) — the single surface
+// for table lifecycle since the instance's storage tabs were trimmed
+// (2026-08-05).
 //
-// The flows are unchanged from the original EndpointPageView implementation:
+// The flows are unchanged from the original implementation:
 // inspect-precheck → confirm (type-the-name / big-table ack) → progress dialog
 // → native op → refresh. Write gating (AWS read-only) happens BEFORE calling
 // into this class, exactly as before.

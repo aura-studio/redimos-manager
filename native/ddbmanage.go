@@ -305,8 +305,8 @@ func (m *manager) recreateTable(id string) map[string]any {
 }
 
 // depsForTable returns every saved config on cfg's (normalised) endpoint bound to
-// the given table name (which may differ from cfg.Table — the Endpoint tab acts on
-// an arbitrary row). Caller must NOT hold m.mu.
+// the given table name (which may differ from cfg.Table — the endpoint Browser's
+// lifecycle ops act on an arbitrary row). Caller must NOT hold m.mu.
 func (m *manager) depsForTable(cfg *Config, table string) []map[string]any {
 	key := normEndpoint(cfg.Endpoint) + "\x00" + table
 	out := []map[string]any{}

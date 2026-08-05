@@ -298,7 +298,7 @@ class NativeCore {
     }
   }
 
-  /// Endpoint tab: list every table on a config's endpoint (read-only). Runs on
+  /// Endpoint Browser: list every table on a config's endpoint (read-only). Runs on
   /// a background isolate — a ListTables + per-table DescribeTable fan-out (each
   /// with a 6s timeout) would otherwise freeze the UI on a large AWS account.
   /// Never throws — returns {ok:false, error} on any failure.

@@ -100,7 +100,7 @@ func (m *manager) probeDdbLatency() {
 	// while the child keeps its old one until restarted.
 	cfg := &Config{Endpoint: fmt.Sprintf("http://127.0.0.1:%d", port)}
 	// ListTables{Limit:1} is the cheapest call both engines are proven to answer
-	// (it is what the Endpoint tab and the playground host already use).
+	// (it is what the endpoint Browser and the playground host already use).
 	start := time.Now()
 	_, err := ddbCall(cfg, "ListTables", map[string]any{"Limit": float64(1)})
 	ms := float64(time.Since(start).Microseconds()) / 1000

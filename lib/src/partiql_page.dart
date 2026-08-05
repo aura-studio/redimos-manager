@@ -1,11 +1,13 @@
-// The "PartiQL" tab — a PartiQL statement editor modelled on the AWS console's
-// PartiQL editor, bound to the current config's table. Statement templates
-// (Scan / Query / Count / Insert / Update / Delete) stand in for the console's
-// table-tree context menus; results render in Table view | JSON view with the
-// console's status line (Completed/Failed · Started on · Elapsed time),
-// client-side Find-items filtering, NextToken pagination, and the same
-// Binary-as-readable-text enhancement as the Table tab. Write statements ask
-// for confirmation first (the console runs them silently — we don't).
+// The endpoint's **PartiQL** tab — a PartiQL statement editor modelled on the
+// AWS console's PartiQL editor. The backing endpoint config has no single
+// table (you name it in the statement); the templates use a placeholder table
+// name. Statement templates (Scan / Query / Count / Insert / Update / Delete)
+// stand in for the console's table-tree context menus; results render in Table
+// view | JSON view with the console's status line (Completed/Failed · Started
+// on · Elapsed time), client-side Find-items filtering, NextToken pagination,
+// and the same Binary-as-readable-text enhancement as the Explorer. Write
+// statements ask for confirmation first (the console runs them silently — we
+// don't).
 
 import 'dart:convert';
 
@@ -16,7 +18,7 @@ import 'i18n.dart';
 import 'models.dart';
 import 'native.dart';
 
-// Denser theme for this data tab — smaller controls / tighter tap targets.
+// Denser theme for this data surface — smaller controls / tighter tap targets.
 ThemeData _denseTabTheme(BuildContext context) => Theme.of(context).copyWith(
       visualDensity: const VisualDensity(horizontal: -2, vertical: -2),
       materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
@@ -25,18 +27,7 @@ ThemeData _denseTabTheme(BuildContext context) => Theme.of(context).copyWith(
 class PartiqlPageView extends StatefulWidget {
   final NativeCore core;
   final RedimosConfig config;
-  final bool running;
-
-  /// Endpoint mode: the backing config has no single table (you name it in the
-  /// statement), so don't show the "no table configured" empty state and let the
-  /// templates use a placeholder table name.
-  final bool allowNoTable;
-  const PartiqlPageView(
-      {super.key,
-      required this.core,
-      required this.config,
-      required this.running,
-      this.allowNoTable = false});
+  const PartiqlPageView({super.key, required this.core, required this.config});
 
   @override
   State<PartiqlPageView> createState() => _PartiqlPageViewState();
@@ -195,14 +186,6 @@ class _PartiqlPageViewState extends State<PartiqlPageView>
   @override
   Widget build(BuildContext context) {
     super.build(context);
-    if (!widget.running) {
-      return _center(Icons.play_circle_outline, tr('pq.instanceNotRunning'),
-          tr('pq.instanceNotRunningSub'));
-    }
-    if (!widget.allowNoTable && widget.config.table.trim().isEmpty) {
-      return _center(Icons.code, tr('pq.noTableConfigured'),
-          tr('pq.noTableConfiguredSub'));
-    }
     return Theme(
       data: _denseTabTheme(context),
       child: SingleChildScrollView(
@@ -616,19 +599,4 @@ class _PartiqlPageViewState extends State<PartiqlPageView>
       ),
     );
   }
-
-  Widget _center(IconData icon, String title, String subtitle) => Center(
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          Icon(icon, size: 40, color: Colors.grey),
-          const SizedBox(height: 12),
-          Text(title, style: const TextStyle(fontSize: 14)),
-          const SizedBox(height: 6),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 40),
-            child: Text(subtitle,
-                textAlign: TextAlign.center,
-                style: const TextStyle(fontSize: 12, color: Colors.grey)),
-          ),
-        ]),
-      );
 }

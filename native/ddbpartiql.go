@@ -33,8 +33,8 @@ func partiqlAwsBlocked(endpoint, stmt string) bool {
 // partiqlExec runs one PartiQL statement. SELECTs return rows/cols; write
 // statements return ok with zero rows (the confirmation lives in the UI).
 // AWS endpoints are read-only: non-SELECT statements are refused here as well
-// (defense in depth — the PartiQL tab gates them too, and R7 requires AWS to
-// be read-only for destructive ops).
+// (defense in depth — the endpoint PartiQL tab gates them too, and R7 requires
+// AWS to be read-only for destructive ops).
 func partiqlExec(req *partiqlReq) map[string]any {
 	stmt := strings.TrimSpace(req.Statement)
 	if stmt == "" {

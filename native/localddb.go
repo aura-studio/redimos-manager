@@ -7,7 +7,7 @@ package main
 //   2. java      + persist   java -jar DynamoDBLocal.jar -dbPath <dir> -sharedDb
 //   3. docker    + memory    docker run amazon/dynamodb-local ... -inMemory -sharedDb
 //   4. docker    + persist   docker run -v <vol>:/data ... -dbPath /data -sharedDb
-// (-sharedDb is always on so all clients — the proxy and the Endpoint tab's
+// (-sharedDb is always on so all clients — the proxy and the endpoint Browser's
 //  ListTables — share one table namespace regardless of creds/region.)
 //   5. localstack             docker run -e SERVICES=dynamodb localstack/localstack
 //
@@ -409,7 +409,7 @@ func (m *manager) buildDdbLaunch(cfg LocalDdbConfig) (bin string, args []string,
 		} else {
 			// -sharedDb even in memory: WITHOUT it DynamoDB Local partitions tables by
 			// (accessKeyId, region), so a redimos proxy's auto-created table is invisible
-			// to the Endpoint tab's ListTables (which signs with different creds/region).
+			// to the endpoint Browser's ListTables (which signs with different creds/region).
 			// One shared namespace makes it behave like real DynamoDB. (-inMemory only
 			// conflicts with -dbPath, not -sharedDb.)
 			a = append(a, "-inMemory", "-sharedDb")

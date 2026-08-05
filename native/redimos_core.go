@@ -1448,10 +1448,11 @@ func rm_partiql(in *C.char) *C.char {
 	return cjson(partiqlExec(&req))
 }
 
-// rm_ep_list_tables lists every table on a config's endpoint (the "Endpoint"
-// tab), with DescribeTable metadata, a redimos-kind inference, the configs that
-// use each table, and ghost rows for bound-but-missing tables. Read-only. Input
-// is a full config JSON (endpoint + creds).
+// rm_ep_list_tables lists every table on a config's endpoint (the endpoint
+// Browser's Tables sidebar), with DescribeTable metadata, a redimos-kind
+// inference, the configs that use each table, and ghost rows for
+// bound-but-missing tables. Read-only. Input is a full config JSON (endpoint +
+// creds).
 //
 //export rm_ep_list_tables
 func rm_ep_list_tables(in *C.char) *C.char {

@@ -1,11 +1,13 @@
-// The "Table" tab — a DynamoDB item browser modelled on the AWS console's
-// Explore-items page, adapted for redimos tables (Binary keys shown as readable
-// UTF-8 text, base64 on hover). Scan / Query with projection, sort-key
-// conditions, filters, DynamoDB-style pagination, column preferences, checkbox
-// multi-select with an Actions menu (Edit / Duplicate / Delete items / Export to
-// CSV), pk links into a full-page Form|JSON item editor, and a Create item
-// button. Item writes are endpoint-mode only and carry the redimos raw-write
-// confirmation. All data comes from the Go core over FFI.
+// The DynamoDB item **Explorer** — modelled on the AWS console's Explore-items
+// page, adapted for redimos tables (Binary keys shown as readable UTF-8 text,
+// base64 on hover). Hosted as the right pane of the endpoint Browser
+// (endpoint_browser.dart), pointed at the Tables-sidebar selection via
+// tableOverride. Scan / Query with projection, sort-key conditions, filters,
+// DynamoDB-style pagination, column preferences, checkbox multi-select with an
+// Actions menu (Edit / Duplicate / Delete items / Export to CSV), pk links into
+// a full-page Form|JSON item editor, and a Create item button. Item writes are
+// offered on non-AWS endpoints (allowOverrideWrites) and carry the redimos
+// raw-write confirmation. All data comes from the Go core over FFI.
 
 import 'dart:convert';
 import 'dart:io';
@@ -70,9 +72,9 @@ class _FilterRow {
   bool get needsTwo => op == 'between';
 }
 
-// A denser theme for the data tabs (Table / PartiQL / Browser): smaller controls
-// and tighter tap targets so these dense query/browse surfaces read as compact and
-// refined instead of chunky. Applied at each tab's root.
+// A denser theme for the data surfaces (Explorer / PartiQL / Browser): smaller
+// controls and tighter tap targets so these dense query/browse surfaces read as
+// compact and refined instead of chunky. Applied at each surface's root.
 ThemeData _denseTabTheme(BuildContext context) => Theme.of(context).copyWith(
       visualDensity: const VisualDensity(horizontal: -2, vertical: -2),
       materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
@@ -81,26 +83,20 @@ ThemeData _denseTabTheme(BuildContext context) => Theme.of(context).copyWith(
 class TablePageView extends StatefulWidget {
   final NativeCore core;
   final RedimosConfig config;
-  final bool running;
-  // When set (via the Endpoint tab's Browse on a table that isn't this config's),
-  // the tab browses THAT table on the same endpoint instead of config.table, and
-  // is read-only (item writes stay tied to the config's own table). onExitBrowse
-  // returns to the config's table.
+  // The endpoint Browser's Tables-sidebar selection: browse THAT table on the
+  // endpoint instead of config.table (which is empty for endpoint storage
+  // configs).
   final String? tableOverride;
-  final VoidCallback? onExitBrowse;
 
   /// Endpoint Browser mode: the override IS the view's purpose (the endpoint is
   /// the authority on its own data), so item writes are offered for the override
-  /// table on non-AWS endpoints — unlike an instance browsing a foreign table.
-  /// Also hides the read-only chip / back button (selection lives in the host).
+  /// table on non-AWS endpoints; on AWS the view stays read-only.
   final bool allowOverrideWrites;
   const TablePageView(
       {super.key,
       required this.core,
       required this.config,
-      required this.running,
       this.tableOverride,
-      this.onExitBrowse,
       this.allowOverrideWrites = false});
 
   @override
@@ -308,14 +304,9 @@ class _TablePageViewState extends State<TablePageView>
   @override
   Widget build(BuildContext context) {
     super.build(context);
-    if (!widget.running) {
-      return _center(Icons.play_circle_outline, tr('tbl.instanceNotRunning'),
-          tr('tbl.startToBrowseTable'));
-    }
-    // Gate on the EFFECTIVE table (override included) so an endpoint Explorer —
-    // whose own config.table is empty — becomes usable the moment a table is
-    // browsed from the Tables tab, while an instance (table always set) is
-    // unaffected.
+    // Gate on the EFFECTIVE table (override included) so the Explorer — whose
+    // config.table is empty — becomes usable the moment a table is picked in
+    // the Browser's Tables sidebar.
     if (_effTable.trim().isEmpty) {
       return _center(Icons.table_chart_outlined, tr('tbl.noTableConfigured'),
           tr('tbl.setTableNameToBrowse'));
@@ -364,8 +355,8 @@ class _TablePageViewState extends State<TablePageView>
 
   // AWS mode (no endpoint) is read-only for item writes: the manager can't tell a
   // test account from production. Destructive table lifecycle (recreate / provision
-  // / delete) lives entirely in the Endpoint tab, which is endpoint-mode only — this
-  // page is just the item browser/editor (AWS-console "Explore items" parity).
+  // / delete) lives in the endpoint Browser's Tables sidebar (table_lifecycle.dart)
+  // — this page is just the item browser/editor (AWS-console "Explore items" parity).
   bool get _awsMode {
     final ep = widget.config.endpoint.trim();
     if (ep.isEmpty) return true; // default AWS resolver
@@ -375,10 +366,10 @@ class _TablePageViewState extends State<TablePageView>
         host.endsWith('.amazonaws.com.cn'); // explicit AWS host (incl. China partition)
   }
 
-  // Browse-any-table: the Endpoint tab can point this tab at another table on the
-  // same endpoint. Then we browse that table via a config copy with the table
-  // swapped; the endpoint/creds stay the config's own. Writes on such a foreign
-  // table are allowed only in endpoint Browser mode (allowOverrideWrites).
+  // Browse-any-table: the endpoint Browser's Tables sidebar points this view at
+  // the selected table on the same endpoint. It is browsed via a config copy with
+  // the table swapped; endpoint/creds stay the config's own. Writes on the
+  // override table are offered when allowOverrideWrites is set (non-AWS).
   bool get _foreignBrowse =>
       widget.tableOverride != null && widget.tableOverride != widget.config.table;
   String get _effTable => widget.tableOverride ?? widget.config.table;
@@ -395,28 +386,8 @@ class _TablePageViewState extends State<TablePageView>
             overflow: TextOverflow.ellipsis,
             style: const TextStyle(fontSize: 15.5, fontWeight: FontWeight.w600)),
       ),
-      // Instance browsing a foreign table: read-only chip + back button. The
-      // endpoint Browser owns its selection, so neither shows there: on non-AWS
-      // endpoints allowOverrideWrites suppresses them, and on AWS the amber
-      // chip below carries the read-only message — an endpoint Browser never
-      // supplies onExitBrowse (there is no config table to go back to), which
-      // is the marker for the transient instance case.
-      if (_foreignBrowse &&
-          !widget.allowOverrideWrites &&
-          widget.onExitBrowse != null) ...[
-        const SizedBox(width: 10),
-        Chip(
-          visualDensity: VisualDensity.compact,
-          avatar: const Icon(Icons.visibility_outlined, size: 15),
-          label: Text(tr('tbl.browsingReadOnly')),
-        ),
-        const SizedBox(width: 8),
-        TextButton.icon(
-          onPressed: () => widget.onExitBrowse?.call(),
-          icon: const Icon(Icons.arrow_back, size: 16),
-          label: Text('${tr('tbl.backTo')} ${widget.config.table}'),
-        ),
-      ],
+      // The endpoint Browser owns its selection, so no transient browse chrome
+      // shows there; on AWS the amber chip below carries the read-only message.
       if (_awsMode) ...[
         const SizedBox(width: 10),
         Chip(

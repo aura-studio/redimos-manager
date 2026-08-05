@@ -113,8 +113,6 @@ class _EndpointDetailViewState extends State<EndpointDetailView>
               key: ValueKey('ep-partiql-${e.id}'),
               core: widget.core,
               config: cfg,
-              running: true,
-              allowNoTable: true,
             ),
             // Playground — JS/Go against the endpoint's DynamoDB
             PlaygroundView(

@@ -56,19 +56,25 @@
 - [x] 3.4 `_detail()`: branch on `_selEndpointId` — endpoint selected shows
       `_endpointDetail` (header + the endpoint's table list / lifecycle ops over
       `endpoint.toStorageConfig()`); instance selected keeps the existing tab detail.
-- [x] 3.5 Instance tab set: Playground ADDED (now 9 tabs: Configure·Monitor·Logs·
-      Endpoint·Table·PartiQL·Console·Browser·Playground). *Deliberate deviation:*
-      Endpoint/Table/PartiQL were kept on the instance rather than removed — the
-      endpoint now has its OWN copy of those views (P4), so trimming the instance
-      would only remove convenience, not capability. Left as-is to avoid regressing
-      a working layout; a later cleanup can drop them if the endpoint view fully
-      subsumes them. *(Deviation re-confirmed with the user on 2026-08-05: keep.)*
+- [x] 3.5 Instance tab set: Playground ADDED, duplicate storage tabs REMOVED —
+      final set = 6 tabs: Configure·Monitor·Logs·Console·Browser·Playground.
+      History: P3 added Playground while KEEPING Endpoint/Table/PartiQL on the
+      instance (9 tabs) as a deliberate deviation, re-confirmed with the user on
+      2026-08-05 — then REVERSED the same day at the user's request: the endpoint
+      views (R7 Browser + PartiQL + Playground) fully subsume the instance
+      copies, so the duplicates were deleted. `endpoint_page.dart` removed
+      outright (its sole host was the instance Endpoint tab); `table_page.dart`
+      and `partiql_page.dart` trimmed to their endpoint-host-only shapes
+      (tableOverride/allowOverrideWrites; running/allowNoTable/onExitBrowse and
+      the foreign-browse chrome dropped); TabController 9→6; 13 orphaned i18n
+      keys deleted. The instance Browser (Redis) and Playground stay — they are
+      not endpoint duplicates (R8: different clients).
 - [-] 3.6 Local DynamoDB shown under the Endpoints section (kind=local). **Not
       implemented — superseded, not deferred.** P6.1 (`c907a47`) retired the entity
       R9 targeted: an endpoint is a passive storage record with a single Overview
       tab, ruling out the Configure/Monitor/Logs R9 assumed (a backend is not a
       managed process), and the app now asserts that to the user unconditionally
-      (`ep.ovNoProcessNote`, `endpoint_detail.dart:257`). The Local DynamoDB is the
+      (`ep.ovNoProcessNote`, `endpoint_detail.dart:255`). The Local DynamoDB is the
       one backend that IS a managed process, so listing it here would hand one
       privileged row the tabs P6.1 ruled out for every other row — and make that
       row's own Overview banner false. It keeps its dedicated panel instead.
@@ -102,6 +108,8 @@
       in depth; the native `ddbHost`/Playground re-guard every other write. (The
       original claim that `partiql_page` already gated writes was false — fixed.)
 - [x] 4.4 i18n: reused `tab.endpoint/table/partiql` + new `tab.playground`.
+      (2026-08-05 trim: `tab.endpoint` and `tab.table` deleted with the instance
+      tabs; `tab.partiql` survives — the endpoint detail still uses it.)
 - [x] 4.5 **TEST**: `flutter analyze` clean; build+launch OK. Enablers verified:
       the Explorer's empty-table gate now keys off the EFFECTIVE table so an
       endpoint (empty own-table) becomes usable once a table is browsed; PartiQL
@@ -157,7 +165,8 @@
       use `redis.Keys()`/`ddb.ScanAll()` at top level). Each sample verified via a
       ctypes probe of the shipped dylib against the live `:6379` proxy (read-only)
       and an unreachable ddb endpoint (compile check).
-- [x] 5.7 Playground tab added to the instance tab set (9th tab) and the endpoint
+- [x] 5.7 Playground tab added to the instance tab set (then the 9th tab; still
+      present after the 2026-08-05 trim — now the 6th) and the endpoint
       tab set; `pg.*` + `tab.playground` i18n (en/zh).
 - [x] 5.8 **TEST**: `go test` playground green; ctypes probe on the shipped dylib —
       JS+Go console/SCAN against the live proxy, sandbox blocks `require`, timeout
@@ -248,3 +257,16 @@ runtime (5.1–5.4) is independent of P3/P4 and can be built in parallel; its UI
   Bonus hardening surfaced while testing: the AWS wall now also covers the
   China partition (`*.amazonaws.com.cn`) in the native `isAwsHost` and all four
   Dart mirrors. Full gates re-run green (flutter analyze/test, go vet/test).
+- 2026-08-05 Instance tab trim (3.5 deviation REVERSED at the user's request):
+  removed the three instance tabs duplicated by the endpoint views — Endpoint,
+  Table, PartiQL — leaving the instance with 6 tabs
+  (Configure·Monitor·Logs·Console·Browser·Playground); the endpoint side
+  (Overview·Browser·PartiQL·Playground) is untouched. `endpoint_page.dart`
+  deleted (sole host was the removed tab); `table_page.dart`/`partiql_page.dart`
+  trimmed to their endpoint-host-only shapes; TabController 9→6; 13 orphaned
+  i18n keys deleted (`tab.endpoint/tab.table/tbl.instanceNotRunning/...` —
+  `tab.partiql` kept, endpoint detail still uses it); stale "Endpoint tab"
+  references reworded in Dart + Go comments. Impact map corroborated by a
+  3-agent read-only workflow: no test references, no other animateTo/index
+  couplings, item_editor still reachable via the endpoint Explorer, all native
+  FFI bindings still used.

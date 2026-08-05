@@ -10,13 +10,10 @@ import 'package:flutter/services.dart';
 import 'src/browser_page.dart';
 import 'src/cmd_console.dart';
 import 'src/endpoint_detail.dart';
-import 'src/endpoint_page.dart';
 import 'src/i18n.dart';
 import 'src/models.dart';
 import 'src/native.dart';
-import 'src/partiql_page.dart';
 import 'src/playground_page.dart';
-import 'src/table_page.dart';
 import 'src/ui_theme.dart';
 
 void main() {
@@ -230,20 +227,17 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   bool _navCollapsed = _loadNavCollapsed();
   // Sidebar card currently under the pointer (reveals its start/stop control).
   String? _hoveredCardId;
-  // Endpoint tab "Browse" on a table that isn't the config's own points the Table
-  // tab at it (read-only). Keyed by config id so switching configs drops the override
-  // without a manual clear at every selection site.
-  String? _browseTable;
-  String? _browseForId;
   // Configs that were running at the last AppBar "Stop all". While non-empty and
   // nothing is running, the Stop-all button becomes a green "restore" triangle.
   List<String> _stopAllSnapshot = [];
   Timer? _poll;
   // Lets the parent inspect / save the editor form before leaving it.
   final _editorKey = GlobalKey<_ConfigEditorState>();
-  // Right-pane tabs (Configure / Monitor / Logs / Endpoint / Table / PartiQL /
-  // Console / Browser / Playground) — owned here so flows can jump between tabs.
-  late final TabController _tabs = TabController(length: 9, vsync: this);
+  // Right-pane tabs (Configure / Monitor / Logs / Console / Browser /
+  // Playground) — owned here so flows can jump between tabs. The endpoint-bound
+  // storage views (Endpoint / Table / PartiQL) live on the endpoint detail,
+  // which owns them outright (2026-08-05 trim).
+  late final TabController _tabs = TabController(length: 6, vsync: this);
 
   // Rolling CPU / memory history per config id, fed by the status poll and
   // drawn as sparklines in the monitor panel.
@@ -1083,9 +1077,9 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     }
     final logsConfigId = c.id.startsWith('unsaved-') ? null : c.id;
     final st = _status[c.id];
-    // configure / monitor / logs / cmd as switchable tabs. The controller sits
-    // above the per-config content so the chosen tab is kept when you switch
-    // between configs in the sidebar.
+    // configure / monitor / logs / console / browser / playground as switchable
+    // tabs. The controller sits above the per-config content so the chosen tab
+    // is kept when you switch between configs in the sidebar.
     return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -1095,7 +1089,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
             height: 50,
             child: TabBar(
               controller: _tabs,
-              // Nine equal-width tabs sharing the full width.
+              // Six equal-width tabs sharing the full width.
               labelColor: Theme.of(context).colorScheme.primary,
               unselectedLabelColor: Theme.of(context).textTheme.bodySmall?.color,
               indicatorColor: Theme.of(context).colorScheme.primary,
@@ -1106,9 +1100,6 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                 _tab(Icons.tune, tr('tab.configure')),
                 _tab(Icons.insights, tr('tab.monitor')),
                 _tab(Icons.terminal, tr('tab.logs')),
-                _tab(Icons.folder_open, tr('tab.endpoint')),
-                _tab(Icons.table_chart, tr('tab.table')),
-                _tab(Icons.code, tr('tab.partiql')),
                 _tab(Icons.chevron_right, tr('tab.console')),
                 _tab(Icons.travel_explore, tr('tab.browser')),
                 _tab(Icons.science_outlined, tr('tab.playground')),
@@ -1148,51 +1139,6 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                   status: st,
                   embedded: true,
                   ddb: _usesLocalDdb(c) ? _ddb : null,
-                ),
-                // endpoint — dynamodb-admin-style table list for this config's
-                // endpoint (Name/keys/indexes/count/kind/used-by + recreate)
-                EndpointPageView(
-                  key: ValueKey('endpoint-${c.id}'),
-                  core: _core!,
-                  config: c,
-                  running: st?.isRunning ?? false,
-                  onOpenTable: (name) {
-                    // Point the Table tab at this row's table (read-only when it
-                    // isn't the config's own), then jump to it. Browsing the config's
-                    // OWN table must NOT set the override — otherwise it lingers and,
-                    // if the config's table is later renamed, spuriously re-enters
-                    // read-only foreign-browse of the old name.
-                    setState(() {
-                      if (name == c.table) {
-                        _browseTable = null;
-                        _browseForId = null;
-                      } else {
-                        _browseTable = name;
-                        _browseForId = c.id;
-                      }
-                    });
-                    _tabs.animateTo(4);
-                  },
-                ),
-                // table — DynamoDB item browser (Explore-items style). tableOverride
-                // lets the Endpoint tab browse any table on the same endpoint.
-                TablePageView(
-                  key: ValueKey('table-${c.id}'),
-                  core: _core!,
-                  config: c,
-                  running: st?.isRunning ?? false,
-                  tableOverride: _browseForId == c.id ? _browseTable : null,
-                  onExitBrowse: () => setState(() {
-                    _browseTable = null;
-                    _browseForId = null;
-                  }),
-                ),
-                // partiql — statement editor (console PartiQL-editor style)
-                PartiqlPageView(
-                  key: ValueKey('partiql-${c.id}'),
-                  core: _core!,
-                  config: c,
-                  running: st?.isRunning ?? false,
                 ),
                 // cmd — interactive redis-cli against the running proxy
                 CmdConsole(
