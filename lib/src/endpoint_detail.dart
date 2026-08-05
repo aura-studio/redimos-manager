@@ -1,20 +1,19 @@
 // The right pane when an Endpoint (a DynamoDB backend, deduped across the
 // instances that share it) is selected in the sidebar. Endpoints have no proxy,
 // so instead of the instance's proxy-oriented tabs they get the storage views
-// bound directly to the backend: Tables (the endpoint's table list + lifecycle),
-// Explorer (item browser), PartiQL, and a DynamoDB Playground. Browsing a table
-// from the Tables list jumps to the Explorer focused on it. On an AWS endpoint
-// every view is read-only (the native layer re-guards writes regardless).
+// bound directly to the backend: Browser (the v1.2 R7 merge — a Tables sidebar
+// + item Explorer in one two-pane view), PartiQL, and a DynamoDB Playground.
+// On an AWS endpoint every view is read-only (the native layer re-guards writes
+// regardless).
 
 import 'package:flutter/material.dart';
 
-import 'endpoint_page.dart';
+import 'endpoint_browser.dart';
 import 'i18n.dart';
 import 'models.dart';
 import 'native.dart';
 import 'partiql_page.dart';
 import 'playground_page.dart';
-import 'table_page.dart';
 
 class EndpointDetailView extends StatefulWidget {
   final NativeCore core;
@@ -27,10 +26,7 @@ class EndpointDetailView extends StatefulWidget {
 
 class _EndpointDetailViewState extends State<EndpointDetailView>
     with TickerProviderStateMixin {
-  late final TabController _tabs = TabController(length: 5, vsync: this);
-
-  // Explorer target when the user Browses a table from the Tables list.
-  String? _browseTable;
+  late final TabController _tabs = TabController(length: 4, vsync: this);
 
   @override
   void dispose() {
@@ -84,8 +80,7 @@ class _EndpointDetailViewState extends State<EndpointDetailView>
           dividerColor: Colors.transparent,
           tabs: [
             _tab(Icons.dashboard_outlined, tr('tab.overview')),
-            _tab(Icons.folder_open, tr('tab.endpoint')),
-            _tab(Icons.table_chart, tr('tab.table')),
+            _tab(Icons.grid_view, tr('tab.browser')),
             _tab(Icons.code, tr('tab.partiql')),
             _tab(Icons.science_outlined, tr('tab.playground')),
           ],
@@ -105,25 +100,13 @@ class _EndpointDetailViewState extends State<EndpointDetailView>
               endpoint: e,
               config: cfg,
             ),
-            // Tables — the endpoint's table list + lifecycle (recreate/purge/…)
-            EndpointPageView(
-              key: ValueKey('ep-tables-${e.id}'),
+            // Browser — R7: the endpoint's Tables list (left, lifecycle ops in the
+            // right-click menu) merged with the item Explorer (right) in one view.
+            EndpointBrowserView(
+              key: ValueKey('ep-browser-${e.id}'),
               core: widget.core,
               config: cfg,
-              running: true, // storage views connect to DynamoDB directly
-              onOpenTable: (name) {
-                setState(() => _browseTable = name == cfg.table ? null : name);
-                _tabs.animateTo(1);
-              },
-            ),
-            // Explorer — DynamoDB item browser, optionally focused on a browsed table
-            TablePageView(
-              key: ValueKey('ep-explore-${e.id}'),
-              core: widget.core,
-              config: cfg,
-              running: true,
-              tableOverride: _browseTable,
-              onExitBrowse: () => setState(() => _browseTable = null),
+              endpoint: e,
             ),
             // PartiQL — statement editor bound to the endpoint
             PartiqlPageView(
@@ -212,7 +195,19 @@ class _EndpointOverviewState extends State<_EndpointOverview>
     });
   }
 
-  bool get _isAws => widget.endpoint.kind == 'aws';
+  // Mirror of the native `awsModeForEndpoint`: empty endpoint (default AWS
+  // resolver) OR an amazonaws.com host. `kind == 'aws'` alone would miss an
+  // explicit AWS URL — the native endpointKind only returns 'aws' for the
+  // empty endpoint, classifying a URL as 'url' — and then the read-only note
+  // would silently disappear for that endpoint.
+  bool get _isAws {
+    final ep = widget.endpoint.endpoint.trim();
+    if (ep.isEmpty) return true;
+    final host = (Uri.tryParse(ep)?.host ?? '').toLowerCase();
+    return host == 'amazonaws.com' ||
+        host.endsWith('.amazonaws.com') ||
+        host.endsWith('.amazonaws.com.cn');
+  }
 
   @override
   Widget build(BuildContext context) {

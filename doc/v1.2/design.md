@@ -31,12 +31,15 @@ back**. v1.2 makes the structure explicit:
 
 ## Navigation
 
-- Root sidebar: two sections (Instances / Endpoints), collapsible 232px ↔ 58px
+- Root sidebar: two sections (Instances / Endpoints), collapsible 236px ↔ 64px
   rail (persisted to `~/.redimos/nav`). Rail shows status dots + tooltips.
-- Instance selected → tabs Configure · Monitor · Logs · Browser · Console.
-- Endpoint selected → tabs Configure · Monitor · Logs · Browser · PartiQL.
-- Local DynamoDB → an Endpoint (kind=local); its Monitor/Logs reuse the existing
-  Local-DDB process metrics/logs.
+- Instance selected → tabs Configure · Monitor · Logs · Endpoint · Table ·
+  PartiQL · Console · Browser · Playground (as delivered; the instance keeps its
+  storage tabs as a deliberate deviation — tasks 3.5).
+- Endpoint selected → tabs Overview · Browser · PartiQL · Playground (as
+  delivered; Overview = backend metadata + reachability probe, tasks 6.1).
+- Local DynamoDB → an Endpoint (kind=local) listed in the Endpoints section; its
+  managed-process panel stays docked at the sidebar bottom (tasks 3.6).
 
 ## Endpoint Browser (merge)
 

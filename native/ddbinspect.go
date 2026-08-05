@@ -196,7 +196,8 @@ func isAwsHost(endpoint string) bool {
 		return false
 	}
 	h := strings.ToLower(u.Hostname())
-	return h == "amazonaws.com" || strings.HasSuffix(h, ".amazonaws.com")
+	return h == "amazonaws.com" || strings.HasSuffix(h, ".amazonaws.com") ||
+		h == "amazonaws.com.cn" || strings.HasSuffix(h, ".amazonaws.com.cn")
 }
 
 // awsModeForEndpoint reports whether destructive table/item ops must be refused for

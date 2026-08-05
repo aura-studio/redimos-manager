@@ -71,7 +71,9 @@ class _PlaygroundViewState extends State<PlaygroundView>
     final ep = widget.config.endpoint.trim();
     if (ep.isEmpty) return true; // default AWS resolver
     final host = (Uri.tryParse(ep)?.host ?? '').toLowerCase();
-    return host == 'amazonaws.com' || host.endsWith('.amazonaws.com');
+    return host == 'amazonaws.com' ||
+        host.endsWith('.amazonaws.com') ||
+        host.endsWith('.amazonaws.com.cn');
   }
 
   bool get _writable => !_isReadOnly;

@@ -110,6 +110,36 @@ const Map<String, Map<AppLang, String>> _strings = {
         '端点是存储后端而非受管进程 —— CPU/内存监控与进程日志在代理它的「实例」上。'
   },
 
+  // Endpoint Browser (v1.2 R7: merged Tables + Explorer two-pane view)
+  'epb.noTableSelected': {AppLang.en: 'No table selected', AppLang.zh: '未选择表'},
+  'epb.pickTableHint': {
+    AppLang.en:
+        'Pick a table on the left to browse its items. Lifecycle operations (purge / recreate / delete) live in each row’s right-click menu.',
+    AppLang.zh: '在左侧选择一张表以浏览其数据项。表的生命周期操作(清空/重建/删除)在每行的右键菜单中。'
+  },
+  'epb.pickTableHintAws': {
+    AppLang.en:
+        'Pick a table on the left to browse its items. This endpoint is read-only — lifecycle operations are disabled.',
+    AppLang.zh: '在左侧选择一张表以浏览其数据项。此端点为只读 —— 生命周期操作已禁用。'
+  },
+
+  // Lifecycle toasts / friction-ladder fragments (interpolated via trp)
+  'ep.purgedItems': {
+    AppLang.en: 'Purged {n} item(s) from “{table}”',
+    AppLang.zh: '已从 “{table}” 清空 {n} 个数据项'
+  },
+  'ep.approxItems': {AppLang.en: '~{n} items', AppLang.zh: '约 {n} 个数据项'},
+  'ep.nItems': {AppLang.en: '{n} items', AppLang.zh: '{n} 个数据项'},
+  'ep.ackUnderstand': {
+    AppLang.en: 'I understand this table has {count}{age}.',
+    AppLang.zh: '我已知悉此表有{count}{age}。'
+  },
+  'ep.ackCountMany': {AppLang.en: 'many items', AppLang.zh: '大量数据项'},
+  'ep.ackAge': {
+    AppLang.en: ' and was created {d} days ago',
+    AppLang.zh: '，且创建于 {d} 天前'
+  },
+
   // --- danger/confirm dialog bodies (interpolated via trp) ---
   'danger.deleteTableBody': {
     AppLang.en:
@@ -486,6 +516,10 @@ const Map<String, Map<AppLang, String>> _strings = {
   'tbl.condContains': {AppLang.en: 'Contains', AppLang.zh: '包含'},
   'tbl.condNotContains': {AppLang.en: 'Not contains', AppLang.zh: '不包含'},
   'pq.runWriteTitle': {AppLang.en: 'Run write statement?', AppLang.zh: '运行写入语句?'},
+  'pq.awsReadOnlyReject': {
+    AppLang.en: 'This endpoint is AWS (read-only) — only SELECT statements can run.',
+    AppLang.zh: '此端点为 AWS(只读)—— 只能运行 SELECT 语句。'
+  },
   'pq.cancel': {AppLang.en: 'Cancel', AppLang.zh: '取消'},
   'pq.run': {AppLang.en: 'Run', AppLang.zh: '运行'},
   'pq.instanceNotRunning': {AppLang.en: 'Instance not running', AppLang.zh: '实例未运行'},

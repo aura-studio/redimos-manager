@@ -14,6 +14,7 @@ import 'package:flutter/material.dart';
 import 'i18n.dart';
 import 'models.dart';
 import 'native.dart';
+import 'table_lifecycle.dart';
 
 const _green = Color(0xFF3BA55D);
 
@@ -45,6 +46,19 @@ class _EndpointPageViewState extends State<EndpointPageView>
   final _filter = TextEditingController();
   bool _busy = false;
 
+  // Purge/Recreate/Provision/Delete flows live in TableLifecycle (shared with
+  // the endpoint Browser's Tables sidebar); this view keeps its list + dialogs
+  // presentation while the ops/guards stay identical.
+  late final TableLifecycle _lc = TableLifecycle(
+    core: widget.core,
+    config: widget.config,
+    toast: _toast,
+    onChanged: _load,
+    setBusy: (b) {
+      if (mounted) setState(() => _busy = b);
+    },
+  );
+
   @override
   bool get wantKeepAlive => true;
 
@@ -57,6 +71,7 @@ class _EndpointPageViewState extends State<EndpointPageView>
   @override
   void didUpdateWidget(EndpointPageView old) {
     super.didUpdateWidget(old);
+    _lc.config = widget.config; // ops read it at call time — keep it fresh
     if (old.config.id != widget.config.id ||
         old.config.endpoint != widget.config.endpoint ||
         old.config.table != widget.config.table ||
@@ -289,7 +304,8 @@ class _EndpointPageViewState extends State<EndpointPageView>
     // we're viewing first (its version is what the Table tab shows), else one
     // whose version matches the row's detected kind, else the first bound config.
     // Otherwise a v1+v2 shared-table misconfig could rebuild with the wrong keys.
-    final String? boundId = _authoringConfig(usedBy, t['kind']?.toString());
+    final String? boundId =
+        TableLifecycle.authoringConfig(usedBy, t['kind']?.toString(), widget.config.id);
     final canLifecycle = !_awsMode; // endpoint mode → destructive ops allowed
 
     final children = <Widget>[];
@@ -297,7 +313,7 @@ class _EndpointPageViewState extends State<EndpointPageView>
       // A bound-but-missing table can only be Provisioned (needs a config's schema).
       if (canLifecycle && boundId != null) {
         children.add(_actionBtn(tr('ep.provision'), scheme.primary,
-            _busy ? null : () => _recreate(boundId, provision: true)));
+            _busy ? null : () => _lc.recreate(context, boundId, provision: true)));
       }
     } else {
       // Browse works for ANY existing table (AWS or endpoint) — the sole AWS action.
@@ -333,36 +349,22 @@ class _EndpointPageViewState extends State<EndpointPageView>
       menuChildren: [
         MenuItemButton(
           leadingIcon: const Icon(Icons.cleaning_services_outlined, size: 18),
-          onPressed: _busy ? null : () => _purge(table),
+          onPressed: _busy ? null : () => _lc.purge(context, table),
           child: Text(tr('ep.purgeItems')),
         ),
         if (boundId != null)
           MenuItemButton(
             leadingIcon: const Icon(Icons.restart_alt, size: 18),
-            onPressed: _busy ? null : () => _recreate(boundId, provision: false),
+            onPressed: _busy ? null : () => _lc.recreate(context, boundId, provision: false),
             child: Text(tr('ep.recreateTable')),
           ),
         MenuItemButton(
           leadingIcon: Icon(Icons.delete_outline, size: 18, color: scheme.error),
-          onPressed: _busy ? null : () => _delete(table),
+          onPressed: _busy ? null : () => _lc.delete(context, table),
           child: Text(tr('ep.deleteTable'), style: TextStyle(color: scheme.error)),
         ),
       ],
     );
-  }
-
-  // Picks which bound config should author a recreate/provision of this table.
-  String? _authoringConfig(List<Map> usedBy, String? kind) {
-    if (usedBy.isEmpty) return null;
-    for (final u in usedBy) {
-      if (u['id'] == widget.config.id) return u['id']?.toString(); // the viewed config
-    }
-    if (kind == 'v1' || kind == 'v2') {
-      for (final u in usedBy) {
-        if (u['version']?.toString() == kind) return u['id']?.toString(); // version match
-      }
-    }
-    return usedBy.first['id']?.toString();
   }
 
   Widget _actionBtn(String label, Color? color, VoidCallback? onTap) => OutlinedButton(
@@ -439,417 +441,12 @@ class _EndpointPageViewState extends State<EndpointPageView>
 
   String _countLine(int? items, int? size) {
     final parts = <String>[];
-    if (items != null && items >= 0) parts.add('${_fmt(items)} items');
-    if (size != null && size > 0) parts.add(_bytes(size));
+    if (items != null && items >= 0) parts.add(trp('ep.nItems', {'n': TableLifecycle.fmtInt(items)}));
+    if (size != null && size > 0) parts.add(TableLifecycle.fmtBytes(size));
     return parts.join(' · ');
   }
 
-  // ---- purge (empty items) / delete (drop table) — act on any table by name ----
-
-  Future<void> _purge(String table) async {
-    if (_busy) return;
-    setState(() => _busy = true); // gate the row menus during the whole flow
-    try {
-      final pre = await widget.core.tableInspect(widget.config, table);
-      if (!mounted) return;
-      if (pre['ok'] != true) {
-        _toast('${pre['error'] ?? tr('ep.inspectFailed')}', error: true);
-        return;
-      }
-      if (pre['allowed'] != true) {
-        _toast('${pre['reason'] ?? tr('ep.notAllowed')}', error: true);
-        return;
-      }
-      if (await _confirmDestroy(pre: pre, table: table, isDelete: false) != true || !mounted) {
-        return;
-      }
-      final progress = _progressDialog(tr('ep.purgingItems'));
-      Map<String, dynamic> res;
-      try {
-        res = await widget.core.tablePurge(widget.config, table);
-      } catch (e) {
-        res = {'ok': false, 'error': '$e'};
-      }
-      if (mounted) Navigator.of(context, rootNavigator: true).maybePop();
-      await progress;
-      if (!mounted) return;
-      if (res['ok'] == true) {
-        final n = (res['deleted'] as num?)?.toInt() ?? 0;
-        _toast('Purged $n item(s) from "$table"');
-        _load();
-      } else {
-        _toast('${res['error'] ?? tr('ep.purgeFailed')}', error: true);
-      }
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
-  }
-
-  Future<void> _delete(String table) async {
-    if (_busy) return;
-    setState(() => _busy = true); // gate the row menus during the whole flow
-    try {
-      final pre = await widget.core.tableInspect(widget.config, table);
-      if (!mounted) return;
-      if (pre['ok'] != true) {
-        _toast('${pre['error'] ?? tr('ep.inspectFailed')}', error: true);
-        return;
-      }
-      if (pre['allowed'] != true) {
-        _toast('${pre['reason'] ?? tr('ep.notAllowed')}', error: true);
-        return;
-      }
-      if (await _confirmDestroy(pre: pre, table: table, isDelete: true) != true || !mounted) {
-        return;
-      }
-      final progress = _progressDialog(tr('ep.deletingTable'));
-      Map<String, dynamic> res;
-      try {
-        res = await widget.core.tableDelete(widget.config, table);
-      } catch (e) {
-        res = {'ok': false, 'error': '$e'};
-      }
-      if (mounted) Navigator.of(context, rootNavigator: true).maybePop();
-      await progress;
-      if (!mounted) return;
-      if (res['ok'] == true) {
-        _toast('${tr('ep.deletedTable')} "$table"');
-        _load();
-      } else {
-        _toast('${res['error'] ?? tr('ep.deleteFailed')}', error: true);
-      }
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
-  }
-
-  Future<void> _progressDialog(String label) => showDialog<void>(
-        context: context,
-        barrierDismissible: false,
-        builder: (_) => AlertDialog(
-          content: Row(mainAxisSize: MainAxisSize.min, children: [
-            const SizedBox(
-                width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.5)),
-            const SizedBox(width: 16),
-            Text(label),
-          ]),
-        ),
-      );
-
-  // Confirmation for Purge/Delete with the same friction ladder as Recreate:
-  // non-loopback (or any Delete) → type the table name; large/old table → an extra
-  // acknowledgement checkbox.
-  Future<bool?> _confirmDestroy(
-      {required Map<String, dynamic> pre,
-      required String table,
-      required bool isDelete}) async {
-    final scheme = Theme.of(context).colorScheme;
-    final endpoint = pre['endpoint']?.toString() ?? '';
-    final loopback = pre['loopback'] == true;
-    final itemCount = (pre['itemCount'] as num?)?.toInt() ?? -1;
-    final ageDays = (pre['ageDays'] as num?)?.toInt() ?? -1;
-    final deps = ((pre['dependents'] as List?) ?? []).cast<Map>();
-    final runningDeps = deps.where((d) => d['running'] == true).toList();
-    // Delete drops the table entirely → always type the name. Purge keeps the table
-    // → require the name only on a non-loopback (possibly shared) endpoint.
-    final needsName = isDelete || !loopback;
-    // An unknown item count (DescribeTable failed, or DynamoDB's ~6h-stale ItemCount
-    // reads 0 for a freshly bulk-loaded table) must NOT skip friction — treat it as big.
-    final bigOrOld = (itemCount < 0) || (itemCount > 100000) || (ageDays > 30);
-    final countStr = itemCount < 0 ? tr('ep.unknownItemCount') : '~${_fmt(itemCount)} items';
-    final nameCtrl = TextEditingController();
-    var ack = false;
-    try {
-      return await showDialog<bool>(
-        context: context,
-        builder: (ctx) => StatefulBuilder(builder: (ctx, setD) {
-          final ok = (!needsName || nameCtrl.text == table) && (!bigOrOld || ack);
-          return AlertDialog(
-            title: Text(isDelete
-                ? '${tr('ep.deleteTable')} "$table"?'
-                : '${tr('ep.purgeAllItemsFrom')} "$table"?'),
-            content: SizedBox(
-              width: 460,
-              child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(isDelete
-                        ? trp('danger.deleteTableBody',
-                            {'endpoint': endpoint, 'count': countStr})
-                        : trp('danger.purgeItemsBody',
-                            {'endpoint': endpoint, 'count': countStr})),
-                    if (runningDeps.isNotEmpty) ...[
-                      const SizedBox(height: 10),
-                      Text(
-                        isDelete
-                            ? trp('danger.deleteStopsConfigs',
-                                {'n': '${runningDeps.length}'})
-                            : '${runningDeps.length} ${tr('ep.runningConfigsStayUp')}',
-                        style: TextStyle(fontSize: 13, color: scheme.onSurfaceVariant),
-                      ),
-                      const SizedBox(height: 8),
-                      Wrap(spacing: 8, runSpacing: 4, children: [
-                        for (final d in runningDeps)
-                          Chip(
-                            visualDensity: VisualDensity.compact,
-                            avatar: const Icon(Icons.circle, size: 10, color: _green),
-                            label: Text('${d['name']}'),
-                          ),
-                      ]),
-                    ],
-                    if (needsName) ...[
-                      const SizedBox(height: 12),
-                      if (!loopback) ...[
-                        Container(
-                          padding: const EdgeInsets.all(10),
-                          decoration: BoxDecoration(
-                            color: Colors.orange.withValues(alpha: 0.12),
-                            borderRadius: BorderRadius.circular(6),
-                          ),
-                          child: Row(children: [
-                            const Icon(Icons.warning_amber, size: 18, color: Colors.orange),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                  trp('danger.sharedEnvWarning', {'endpoint': endpoint}),
-                                  style: TextStyle(
-                                      fontSize: 12.5, color: Colors.orange.shade900)),
-                            ),
-                          ]),
-                        ),
-                        const SizedBox(height: 12),
-                      ],
-                      Text(tr('ep.typeTableName'),
-                          style: TextStyle(fontSize: 13, color: scheme.onSurfaceVariant)),
-                      const SizedBox(height: 6),
-                      TextField(
-                        controller: nameCtrl,
-                        autofocus: true,
-                        decoration: InputDecoration(
-                            hintText: table,
-                            border: const OutlineInputBorder(),
-                            isDense: true),
-                        onChanged: (_) => setD(() {}),
-                      ),
-                    ],
-                    if (bigOrOld) ...[
-                      const SizedBox(height: 6),
-                      CheckboxListTile(
-                        contentPadding: EdgeInsets.zero,
-                        dense: true,
-                        controlAffinity: ListTileControlAffinity.leading,
-                        value: ack,
-                        onChanged: (v) => setD(() => ack = v ?? false),
-                        title: Text(
-                          'I understand this table has '
-                          '${itemCount < 0 ? 'many' : '~${_fmt(itemCount)}'} items'
-                          '${ageDays > 0 ? ' and was created $ageDays days ago' : ''}.',
-                          style: const TextStyle(fontSize: 12.5),
-                        ),
-                      ),
-                    ],
-                  ]),
-            ),
-            actions: [
-              TextButton(
-                  onPressed: () => Navigator.pop(ctx, false), child: Text(tr('ep.cancel'))),
-              FilledButton(
-                style: FilledButton.styleFrom(backgroundColor: scheme.error),
-                onPressed: ok ? () => Navigator.pop(ctx, true) : null,
-                child: Text(isDelete ? tr('ep.delete') : tr('ep.purge')),
-              ),
-            ],
-          );
-        }),
-      );
-    } finally {
-      nameCtrl.dispose();
-    }
-  }
-
-  // ---- recreate / provision (reuses the existing precheck + async recreate) ----
-
-  Future<void> _recreate(String configId, {required bool provision}) async {
-    final pre = widget.core.tablePrecheck(configId);
-    if (pre['ok'] != true) {
-      _toast('${pre['error'] ?? tr('ep.precheckFailed')}', error: true);
-      return;
-    }
-    if (pre['allowed'] != true) {
-      _toast('${pre['reason'] ?? tr('ep.notAllowed')}', error: true);
-      return;
-    }
-    final go = await _confirm(pre: pre, provision: provision);
-    if (go != true || !mounted) return;
-
-    setState(() => _busy = true);
-    final progress = showDialog<void>(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => AlertDialog(
-        content: Row(mainAxisSize: MainAxisSize.min, children: [
-          const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.5)),
-          const SizedBox(width: 16),
-          Text(provision ? tr('ep.provisioningTable') : tr('ep.recreatingTable')),
-        ]),
-      ),
-    );
-    Map<String, dynamic> res;
-    try {
-      res = await widget.core.tableRecreate(configId);
-    } catch (e) {
-      res = {'ok': false, 'error': '$e'};
-    }
-    if (mounted) Navigator.of(context, rootNavigator: true).maybePop();
-    await progress;
-    if (!mounted) return;
-    setState(() => _busy = false);
-    if (res['ok'] == true) {
-      final warn = res['warning'];
-      _toast(provision
-          ? tr('ep.tableProvisioned')
-          : (warn != null ? '${tr('ep.tableRecreated')} — $warn' : tr('ep.tableRecreated')));
-      _load();
-    } else {
-      _toast('${res['error'] ?? tr('ep.operationFailed')}', error: true);
-    }
-  }
-
-  Future<bool?> _confirm({required Map<String, dynamic> pre, required bool provision}) async {
-    final scheme = Theme.of(context).colorScheme;
-    final table = pre['table']?.toString() ?? '';
-    final endpoint = pre['endpoint']?.toString() ?? '';
-    final loopback = pre['loopback'] == true;
-    final itemCount = (pre['itemCount'] as num?)?.toInt() ?? -1;
-    final ageDays = (pre['ageDays'] as num?)?.toInt() ?? -1;
-    final version = pre['version']?.toString() ?? '';
-    final deps = ((pre['dependents'] as List?) ?? []).cast<Map>();
-    final runningDeps = deps.where((d) => d['running'] == true).toList();
-    final needsName = !loopback && !provision;
-    final nameCtrl = TextEditingController();
-    final countStr = itemCount < 0 ? tr('ep.unknownItemCount') : '~${_fmt(itemCount)} items';
-    // Extra friction when destroying a large or old table — recreate only, since
-    // provision creates an empty table and there is nothing to lose.
-    final bigOrOld = !provision && ((itemCount < 0) || (itemCount > 100000) || (ageDays > 30));
-    var ack = false;
-
-    try {
-      return await showDialog<bool>(
-      context: context,
-      builder: (ctx) => StatefulBuilder(builder: (ctx, setD) {
-        final ok = (!needsName || nameCtrl.text == table) && (!bigOrOld || ack);
-        return AlertDialog(
-          title: Text(provision ? '${tr('ep.provisionTable')} "$table"?' : '${tr('ep.recreateTable')} "$table"?'),
-          content: SizedBox(
-            width: 460,
-            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(provision
-                  ? trp('danger.provisionTableBody', {
-                      'endpoint': endpoint,
-                      'version': version.isEmpty
-                          ? ''
-                          : trp('danger.versionKeys', {'version': version}),
-                    })
-                  : trp('danger.recreateTableBody',
-                      {'endpoint': endpoint, 'count': countStr})),
-              if (runningDeps.isNotEmpty) ...[
-                const SizedBox(height: 10),
-                Text(
-                  trp(provision ? 'danger.provisionStepsBody' : 'danger.recreateStepsBody',
-                      {'n': '${runningDeps.length}'}),
-                  style: TextStyle(fontSize: 13, color: scheme.onSurfaceVariant),
-                ),
-                const SizedBox(height: 8),
-                Wrap(spacing: 8, runSpacing: 4, children: [
-                  for (final d in runningDeps)
-                    Chip(
-                      visualDensity: VisualDensity.compact,
-                      avatar: const Icon(Icons.circle, size: 10, color: _green),
-                      label: Text('${d['name']}'),
-                    ),
-                ]),
-              ],
-              if (needsName) ...[
-                const SizedBox(height: 12),
-                Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: Colors.orange.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                  child: Row(children: [
-                    const Icon(Icons.warning_amber, size: 18, color: Colors.orange),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(trp('danger.sharedEnvWarning', {'endpoint': endpoint}),
-                          style: TextStyle(fontSize: 12.5, color: Colors.orange.shade900)),
-                    ),
-                  ]),
-                ),
-                const SizedBox(height: 12),
-                Text(tr('ep.typeTableName'), style: TextStyle(fontSize: 13, color: scheme.onSurfaceVariant)),
-                const SizedBox(height: 6),
-                TextField(
-                  controller: nameCtrl,
-                  autofocus: true,
-                  decoration: InputDecoration(hintText: table, border: const OutlineInputBorder(), isDense: true),
-                  onChanged: (_) => setD(() {}),
-                ),
-              ],
-              if (bigOrOld) ...[
-                const SizedBox(height: 6),
-                CheckboxListTile(
-                  contentPadding: EdgeInsets.zero,
-                  dense: true,
-                  controlAffinity: ListTileControlAffinity.leading,
-                  value: ack,
-                  onChanged: (v) => setD(() => ack = v ?? false),
-                  title: Text(
-                    'I understand this table has '
-                    '${itemCount < 0 ? 'many' : '~${_fmt(itemCount)}'} items'
-                    '${ageDays > 0 ? ' and was created $ageDays days ago' : ''}.',
-                    style: const TextStyle(fontSize: 12.5),
-                  ),
-                ),
-              ],
-            ]),
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(tr('ep.cancel'))),
-            FilledButton(
-              style: FilledButton.styleFrom(
-                  backgroundColor: provision ? scheme.primary : scheme.error),
-              onPressed: ok ? () => Navigator.pop(ctx, true) : null,
-              child: Text(provision ? tr('ep.provision') : tr('ep.recreate')),
-            ),
-          ],
-        );
-      }),
-      );
-    } finally {
-      nameCtrl.dispose();
-    }
-  }
-
   // ---- helpers ----
-
-  String _fmt(int n) {
-    final s = n.toString();
-    final b = StringBuffer();
-    for (var i = 0; i < s.length; i++) {
-      if (i > 0 && (s.length - i) % 3 == 0) b.write(',');
-      b.write(s[i]);
-    }
-    return b.toString();
-  }
-
-  String _bytes(int n) {
-    if (n < 1024) return '$n B';
-    if (n < 1024 * 1024) return '${(n / 1024).toStringAsFixed(0)} KB';
-    if (n < 1024 * 1024 * 1024) return '${(n / (1024 * 1024)).toStringAsFixed(1)} MB';
-    return '${(n / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB';
-  }
 
   void _toast(String msg, {bool error = false}) {
     if (!mounted) return;

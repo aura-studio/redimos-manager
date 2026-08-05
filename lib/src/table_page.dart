@@ -88,13 +88,20 @@ class TablePageView extends StatefulWidget {
   // returns to the config's table.
   final String? tableOverride;
   final VoidCallback? onExitBrowse;
+
+  /// Endpoint Browser mode: the override IS the view's purpose (the endpoint is
+  /// the authority on its own data), so item writes are offered for the override
+  /// table on non-AWS endpoints — unlike an instance browsing a foreign table.
+  /// Also hides the read-only chip / back button (selection lives in the host).
+  final bool allowOverrideWrites;
   const TablePageView(
       {super.key,
       required this.core,
       required this.config,
       required this.running,
       this.tableOverride,
-      this.onExitBrowse});
+      this.onExitBrowse,
+      this.allowOverrideWrites = false});
 
   @override
   State<TablePageView> createState() => _TablePageViewState();
@@ -318,9 +325,10 @@ class _TablePageViewState extends State<TablePageView>
       child: SingleChildScrollView(
       padding: const EdgeInsets.all(12),
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        // The header (AWS lock chip / Endpoint danger controls) always renders,
-        // even when the table can't be read — so the safety state stays legible
-        // and a table that was just deleted can still be recreated from here.
+        // The header (AWS read-only chip / foreign-browse controls) always
+        // renders, even when the table can't be read — so the safety state
+        // stays legible and a table that was just deleted can still be
+        // recreated from here.
         _headerRow(),
         const SizedBox(height: 12),
         if (_loadingMeta && _meta == null)
@@ -362,12 +370,15 @@ class _TablePageViewState extends State<TablePageView>
     final ep = widget.config.endpoint.trim();
     if (ep.isEmpty) return true; // default AWS resolver
     final host = (Uri.tryParse(ep)?.host ?? '').toLowerCase();
-    return host == 'amazonaws.com' || host.endsWith('.amazonaws.com'); // explicit AWS host
+    return host == 'amazonaws.com' ||
+        host.endsWith('.amazonaws.com') ||
+        host.endsWith('.amazonaws.com.cn'); // explicit AWS host (incl. China partition)
   }
 
   // Browse-any-table: the Endpoint tab can point this tab at another table on the
-  // same endpoint. Then we browse that table (read-only) via a config copy with the
-  // table swapped; the endpoint/creds stay the config's own.
+  // same endpoint. Then we browse that table via a config copy with the table
+  // swapped; the endpoint/creds stay the config's own. Writes on such a foreign
+  // table are allowed only in endpoint Browser mode (allowOverrideWrites).
   bool get _foreignBrowse =>
       widget.tableOverride != null && widget.tableOverride != widget.config.table;
   String get _effTable => widget.tableOverride ?? widget.config.table;
@@ -384,7 +395,15 @@ class _TablePageViewState extends State<TablePageView>
             overflow: TextOverflow.ellipsis,
             style: const TextStyle(fontSize: 15.5, fontWeight: FontWeight.w600)),
       ),
-      if (_foreignBrowse) ...[
+      // Instance browsing a foreign table: read-only chip + back button. The
+      // endpoint Browser owns its selection, so neither shows there: on non-AWS
+      // endpoints allowOverrideWrites suppresses them, and on AWS the amber
+      // chip below carries the read-only message — an endpoint Browser never
+      // supplies onExitBrowse (there is no config table to go back to), which
+      // is the marker for the transient instance case.
+      if (_foreignBrowse &&
+          !widget.allowOverrideWrites &&
+          widget.onExitBrowse != null) ...[
         const SizedBox(width: 10),
         Chip(
           visualDensity: VisualDensity.compact,
@@ -396,6 +415,15 @@ class _TablePageViewState extends State<TablePageView>
           onPressed: () => widget.onExitBrowse?.call(),
           icon: const Icon(Icons.arrow_back, size: 16),
           label: Text('${tr('tbl.backTo')} ${widget.config.table}'),
+        ),
+      ],
+      if (_awsMode) ...[
+        const SizedBox(width: 10),
+        Chip(
+          visualDensity: VisualDensity.compact,
+          avatar: Icon(Icons.lock_outline, size: 15, color: Colors.amber.shade700),
+          label: Text(tr('ep.awsReadOnly'),
+              style: TextStyle(color: Colors.amber.shade700)),
         ),
       ],
       const Spacer(),
@@ -756,11 +784,15 @@ class _TablePageViewState extends State<TablePageView>
     return const SizedBox.shrink(); // success shows no banner (AWS parity)
   }
 
-  // Whether item-level writes are offered here (endpoint mode, base table only,
-  // and not while browsing another table read-only via the Endpoint tab).
+  // Whether item-level writes are offered here (endpoint mode, base table only;
+  // a foreign table is writable only in the endpoint Browser, where the endpoint
+  // is the authority on its own data — an instance browsing another table stays
+  // read-only).
   bool get _canWriteItems {
     final t = _target;
-    return !_awsMode && !_foreignBrowse && (t == null || t.isTable);
+    return !_awsMode &&
+        (!_foreignBrowse || widget.allowOverrideWrites) &&
+        (t == null || t.isTable);
   }
 
   Widget _resultsCard() {
@@ -1081,7 +1113,7 @@ class _TablePageViewState extends State<TablePageView>
         _toast(tr('tbl.projectionKeyMissing'), error: true);
         return;
       }
-      final res = widget.core.tableGetItem(widget.config, key);
+      final res = widget.core.tableGetItem(_effCfg, key);
       if (res['ok'] == true && res['item'] is Map) {
         initial = (res['item'] as Map).cast<String, dynamic>();
       } else {
@@ -1093,13 +1125,13 @@ class _TablePageViewState extends State<TablePageView>
     final saved = await Navigator.of(context).push<bool>(MaterialPageRoute(
       fullscreenDialog: true,
       builder: (_) => ItemEditorPage(
-        table: widget.config.table,
+        table: _effTable,
         target: t,
         isNew: isNew,
         initial: initial,
         onSave: (av) async {
           if (!await _confirmRawWrite('Write')) return ''; // '' = cancelled
-          final res = widget.core.tablePutItem(widget.config, av);
+          final res = widget.core.tablePutItem(_effCfg, av);
           return res['ok'] == true ? null : '${res['error'] ?? tr('tbl.saveFailed')}';
         },
       ),
@@ -1184,7 +1216,7 @@ class _TablePageViewState extends State<TablePageView>
         content: SizedBox(
           width: 440,
           child: Text(
-            'This permanently deletes ${keys.length} item(s) from "${widget.config.table}", '
+            'This permanently deletes ${keys.length} item(s) from "$_effTable", '
             'writing directly to DynamoDB and bypassing redimos’s encoding — for redimos data, '
             'prefer the Browser or Console tab.',
           ),
@@ -1202,7 +1234,7 @@ class _TablePageViewState extends State<TablePageView>
     if (go != true || !mounted) return;
     var failed = 0;
     for (final k in keys) {
-      final res = widget.core.tableDeleteItem(widget.config, k);
+      final res = widget.core.tableDeleteItem(_effCfg, k);
       if (res['ok'] != true) failed++;
     }
     if (!mounted) return;
@@ -1225,7 +1257,7 @@ class _TablePageViewState extends State<TablePageView>
       final home = Platform.environment['HOME'] ?? '';
       if (home.isEmpty) throw const FileSystemException('no HOME');
       final ts = DateTime.now().millisecondsSinceEpoch;
-      final path = '$home/Downloads/redimos-${widget.config.table}-$ts.csv';
+      final path = '$home/Downloads/redimos-$_effTable-$ts.csv';
       await File(path).writeAsString(csv);
       _toast('${tr('tbl.exported')} ${rows.length} ${tr('tbl.rowsSuffix')} → $path');
     } catch (_) {

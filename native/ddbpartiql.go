@@ -20,12 +20,31 @@ type partiqlReq struct {
 	NextToken string `json:"nextToken"`
 }
 
+// partiqlAwsBlocked reports whether the AWS read-only wall must refuse this
+// statement: the endpoint is AWS (empty = default resolver, or an
+// amazonaws.com host — same rule as awsModeForEndpoint) and the statement is
+// not a SELECT. Kept as a standalone predicate so the rule is unit-testable
+// fully offline (no network round-trip needed to observe the guard).
+func partiqlAwsBlocked(endpoint, stmt string) bool {
+	return awsModeForEndpoint(endpoint) &&
+		!strings.HasPrefix(strings.ToUpper(strings.TrimSpace(stmt)), "SELECT")
+}
+
 // partiqlExec runs one PartiQL statement. SELECTs return rows/cols; write
-// statements return ok with zero rows (the guard/confirmation lives in the UI).
+// statements return ok with zero rows (the confirmation lives in the UI).
+// AWS endpoints are read-only: non-SELECT statements are refused here as well
+// (defense in depth — the PartiQL tab gates them too, and R7 requires AWS to
+// be read-only for destructive ops).
 func partiqlExec(req *partiqlReq) map[string]any {
 	stmt := strings.TrimSpace(req.Statement)
 	if stmt == "" {
 		return map[string]any{"ok": false, "error": "ValidationException: statement is empty"}
+	}
+	if partiqlAwsBlocked(req.Config.Endpoint, stmt) {
+		return map[string]any{
+			"ok":    false,
+			"error": "this endpoint is AWS (read-only); only SELECT statements are allowed",
+		}
 	}
 	payload := map[string]any{"Statement": stmt}
 	if req.Limit > 0 {

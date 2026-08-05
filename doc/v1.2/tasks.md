@@ -43,7 +43,7 @@
 - [x] 2.5 `rm_load` also returns `endpoints[]`+`instances[]`; Dart `DdbEndpoint`,
       `ProxyInstance` models; `native.dart load()` parses them.
 
-## Phase 3 — Two-section sidebar + nav rework  · IN PROGRESS
+## Phase 3 — Two-section sidebar + nav rework  · DONE
 
 - [x] 3.1 HomePage state: `_endpoints`, `_selEndpointId`, `_navCollapsed`;
       `_reload()` populates the lists; `~/.redimos/nav` persist helpers. (Instances
@@ -51,24 +51,24 @@
 - [x] 3.2 Sidebar `_configList()`: two sections (Instances via `_configTile`,
       Endpoints via `_endpointTile`) + colored section headers + New-config/collapse
       header.
-- [x] 3.3 Collapsed rail `_navRail()` (58px): expand toggle + status-dot items with
-      name tooltips; body width toggles 232 ↔ 58; state persisted to `~/.redimos/nav`.
+- [x] 3.3 Collapsed rail `_navRail()` (64px): expand toggle + status-dot items with
+      name tooltips; body width toggles 236 ↔ 64; state persisted to `~/.redimos/nav`.
 - [x] 3.4 `_detail()`: branch on `_selEndpointId` — endpoint selected shows
       `_endpointDetail` (header + the endpoint's table list / lifecycle ops over
       `endpoint.toStorageConfig()`); instance selected keeps the existing tab detail.
-- [~] 3.5 Instance tab set: Playground ADDED (now 9 tabs: Configure·Monitor·Logs·
+- [x] 3.5 Instance tab set: Playground ADDED (now 9 tabs: Configure·Monitor·Logs·
       Endpoint·Table·PartiQL·Console·Browser·Playground). *Deliberate deviation:*
       Endpoint/Table/PartiQL were kept on the instance rather than removed — the
       endpoint now has its OWN copy of those views (P4), so trimming the instance
       would only remove convenience, not capability. Left as-is to avoid regressing
       a working layout; a later cleanup can drop them if the endpoint view fully
-      subsumes them.
+      subsumes them. *(Deviation re-confirmed with the user on 2026-08-05: keep.)*
 - [-] 3.6 Local DynamoDB shown under the Endpoints section (kind=local). **Not
       implemented — superseded, not deferred.** P6.1 (`c907a47`) retired the entity
       R9 targeted: an endpoint is a passive storage record with a single Overview
       tab, ruling out the Configure/Monitor/Logs R9 assumed (a backend is not a
       managed process), and the app now asserts that to the user unconditionally
-      (`ep.ovNoProcessNote`, `endpoint_detail.dart:262`). The Local DynamoDB is the
+      (`ep.ovNoProcessNote`, `endpoint_detail.dart:257`). The Local DynamoDB is the
       one backend that IS a managed process, so listing it here would hand one
       privileged row the tabs P6.1 ruled out for every other row — and make that
       row's own Overview banner false. It keeps its dedicated panel instead.
@@ -84,7 +84,7 @@
       Collapse rail + endpoint-detail implemented & analyze-clean (click-verify by
       user, screencapture flaky this session). Commit G3.
 
-## Phase 4 — Endpoint Browser (merge Tables+Explorer)
+## Phase 4 — Endpoint Browser (merge Tables+Explorer)  · DONE (refined 2026-08-05)
 
 - [x] 4.1 `endpoint_detail.dart` `EndpointDetailView`: gives an endpoint its own
       tab set bound to the backend — **Tables** (reuse `endpoint_page` list +
@@ -95,15 +95,42 @@
       one entity, less code, no regression. A split-pane refinement is optional.)*
 - [x] 4.2 Endpoint detail (3.4) now renders `EndpointDetailView` (header + the tab
       set above) instead of the bare table list.
-- [x] 4.3 AWS endpoint stays read-only: `table_page`/`partiql_page` already gate
-      writes on `awsModeForEndpoint` + a read-only chip; the native `ddbHost` also
-      re-guards every write. Playground shows a read-only chip on AWS.
+- [x] 4.3 AWS endpoint stays read-only: `table_page` gates item writes on
+      `awsModeForEndpoint` + a read-only chip; `partiql_page` gates non-SELECT
+      statements on AWS in Dart (write templates hidden, amber chip) since the
+      2026-08-05 round (4.7), with the native `partiqlExec` re-guarding as defense
+      in depth; the native `ddbHost`/Playground re-guard every other write. (The
+      original claim that `partiql_page` already gated writes was false — fixed.)
 - [x] 4.4 i18n: reused `tab.endpoint/table/partiql` + new `tab.playground`.
 - [x] 4.5 **TEST**: `flutter analyze` clean; build+launch OK. Enablers verified:
       the Explorer's empty-table gate now keys off the EFFECTIVE table so an
       endpoint (empty own-table) becomes usable once a table is browsed; PartiQL
       gained `allowNoTable` so it works on an endpoint (table named in the
       statement). (Endpoint click-through left to the user.)
+- [x] 4.6 **R7 merged Browser** (2026-08-05): the optional split-pane refinement of
+      4.1, promoted to the required R7 shape — `endpoint_browser.dart` two-pane view
+      (left: Tables sidebar with filter + per-row right-click/⋮ MenuAnchor lifecycle
+      menu; right: Explorer = `TablePageView` driven by the selection). Shared
+      lifecycle ops extracted to `table_lifecycle.dart` (purge/recreate/delete +
+      friction ladders) and reused by `endpoint_page.dart` (−400 lines). Endpoint
+      detail tabs 5→4: Overview·Browser·PartiQL·Playground (the old separate
+      Tables/Explorer tabs and the stale `animateTo(1)` jump are gone). Non-AWS
+      endpoints offer item writes in the Explorer (`allowOverrideWrites`); AWS shows
+      no destructive affordances and the native layer re-guards. **TEST**: analyze
+      clean; build+launch click-through against live AWS (15 tables listed, row
+      select → read-only Explorer with only the AWS chip) and a local endpoint
+      (⋮ menu Browse/Purge/Recreate/Delete; Explorer with Create item) — verified
+      via screenshots.
+- [x] 4.7 **PartiQL AWS gate** (2026-08-05): `partiql_page` `_awsMode` mirror (empty
+      endpoint or amazonaws.com host) refuses non-SELECT in `_run()` with
+      `pq.awsReadOnlyReject` and hides the write templates behind Templates; native
+      `partiqlExec` (native/ddbpartiql.go) refuses non-SELECT on AWS before any
+      network call via the extracted `partiqlAwsBlocked(endpoint, stmt)` predicate;
+      `native/ddbpartiql_test.go` covers AWS-write rejection and empty statement at
+      the exec level plus the full guard matrix (SELECTs pass, writes blocked,
+      non-AWS never gated) as an offline predicate table test. **TEST**:
+      `go vet`+`go test` green; UI-verified: DELETE on the AWS endpoint shows the
+      read-only refusal.
 
 ## Phase 5 — Playground (JS + Go)
 
@@ -149,7 +176,7 @@
       recreate/provision table, shared-env warning, PartiQL write, folder delete)
       moved to `tr()`/new `trp()` placeholder helper; the only literals left are
       product/tech identifiers (Java/Docker/LocalStack). `1.6` leftovers done.
-- [~] 6.3 Adversarial review of the Playground native code. Two real findings
+- [x] 6.3 Adversarial review of the Playground native code. Two real findings
       fixed + verified on the shipped dylib:
       (a) **Read-only bypass** — `ddb.call("ExecuteStatement"/"ExecuteTransaction"/
       "BatchExecuteStatement", …)` mutated an AWS (read-only) endpoint because
@@ -196,3 +223,28 @@ runtime (5.1–5.4) is independent of P3/P4 and can be built in parallel; its UI
   Playground), `playgroundRun` FFI, `pg.*` i18n. yaegi limits mapped empirically
   (no comma-ok asserts; no multi-return `:=` in a loop) and every sample verified
   by ctypes probe of the shipped dylib. analyze clean; app builds+launches.
+- 2026-08-05 R7 completion round (4.6/4.7): merged two-pane Browser
+  (`endpoint_browser.dart` + shared `table_lifecycle.dart`, endpoint tabs 5→4),
+  PartiQL AWS gate in Dart + native `partiqlExec` (+offline go tests), i18n
+  `epb.*`/`pq.awsReadOnlyReject`. Full gates green (flutter analyze/test, go
+  vet/test) and UI click-through verified via screenshots against live AWS and a
+  local endpoint. Docs reconciled to the delivered state (rail 236/64, tab sets,
+  4.3 claim, 3.5/6.3 closed; 6.5 stays open — user declined the release).
+- 2026-08-05 Adversarial review round (14-agent workflow, 4 dimensions +
+  per-finding refutation): 9 confirmed findings fixed, 1 refuted (no change).
+  (a) HIGH stale-config: `TableLifecycle.config` made non-final; both hosts
+  (endpoint_page, endpoint_browser) now refresh `_lc.config` in
+  `didUpdateWidget` so ops never run against a stale selection.
+  (b) PartiQL tests made truly offline: the two transport-error tests replaced
+  by a `partiqlAwsBlocked` predicate table test (extracted from `partiqlExec`).
+  (c) `endpoint_detail._isAws` now mirrors `awsModeForEndpoint` (empty endpoint
+  OR amazonaws.com host) instead of `kind == 'aws'`, which missed explicit AWS
+  URLs. (d) table_lifecycle hardcoded English (purge toast, `~N items`, ack
+  checkbox) → `trp()` keys (`ep.purgedItems/approxItems/nItems/ackUnderstand/
+  ackCountMany/ackAge`); row tooltips use `ep.nItems`. (e) AWS Browser
+  empty-state shows the read-only hint variant (`epb.pickTableHintAws`).
+  (f) Docs: R6 supersession note; design.md Local-DDB panel placement (docked
+  at sidebar bottom, not the instance page); tasks.md line ref recomputed.
+  Bonus hardening surfaced while testing: the AWS wall now also covers the
+  China partition (`*.amazonaws.com.cn`) in the native `isAwsHost` and all four
+  Dart mirrors. Full gates re-run green (flutter analyze/test, go vet/test).

@@ -1095,7 +1095,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
             height: 50,
             child: TabBar(
               controller: _tabs,
-              // Eight equal-width tabs sharing the full width.
+              // Nine equal-width tabs sharing the full width.
               labelColor: Theme.of(context).colorScheme.primary,
               unselectedLabelColor: Theme.of(context).textTheme.bodySmall?.color,
               indicatorColor: Theme.of(context).colorScheme.primary,

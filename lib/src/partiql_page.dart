@@ -97,13 +97,29 @@ class _PartiqlPageViewState extends State<PartiqlPageView>
         (tr('pq.tplScanTable'), 'SELECT * FROM $_q'),
         (tr('pq.tplQueryByPk'), "SELECT * FROM $_q WHERE pk = ?"),
         (tr('pq.tplCountItems'), 'SELECT COUNT(*) FROM $_q'),
-        (tr('pq.tplInsertItem'), "INSERT INTO $_q VALUE {'pk': ?, 'sk': ?}"),
-        (tr('pq.tplUpdateItem'), "UPDATE $_q SET attr = ? WHERE pk = ? AND sk = ?"),
-        (tr('pq.tplDeleteItem'), 'DELETE FROM $_q WHERE pk = ? AND sk = ?'),
+        // Write templates only off AWS — on an AWS endpoint they would run
+        // into the read-only wall anyway (R7).
+        if (!_awsMode) ...[
+          (tr('pq.tplInsertItem'), "INSERT INTO $_q VALUE {'pk': ?, 'sk': ?}"),
+          (tr('pq.tplUpdateItem'), "UPDATE $_q SET attr = ? WHERE pk = ? AND sk = ?"),
+          (tr('pq.tplDeleteItem'), 'DELETE FROM $_q WHERE pk = ? AND sk = ?'),
+        ],
       ];
 
   bool get _isSelect =>
       _stmt.text.trimLeft().toUpperCase().startsWith('SELECT');
+
+  // AWS mode (no endpoint) is read-only for writes — same wall as the Table /
+  // Browser views: the manager can't tell a test account from production, so
+  // only SELECT may run. The native partiqlExec re-guards regardless.
+  bool get _awsMode {
+    final ep = widget.config.endpoint.trim();
+    if (ep.isEmpty) return true; // default AWS resolver
+    final host = (Uri.tryParse(ep)?.host ?? '').toLowerCase();
+    return host == 'amazonaws.com' ||
+        host.endsWith('.amazonaws.com') ||
+        host.endsWith('.amazonaws.com.cn'); // explicit AWS host (incl. China partition)
+  }
 
   // ---- execution ----
 
@@ -111,6 +127,16 @@ class _PartiqlPageViewState extends State<PartiqlPageView>
     final stmt = _stmt.text.trim();
     if (stmt.isEmpty || _running) return;
     if (!_isSelect) {
+      if (_awsMode) {
+        // R7: AWS endpoints are read-only for destructive ops — refuse here
+        // instead of running the statement (native re-guards as well).
+        setState(() {
+          _res = null;
+          _startedAt = null;
+          _error = tr('pq.awsReadOnlyReject');
+        });
+        return;
+      }
       final ok = await showDialog<bool>(
         context: context,
         builder: (ctx) => AlertDialog(
@@ -210,6 +236,15 @@ class _PartiqlPageViewState extends State<PartiqlPageView>
       const SizedBox(width: 12),
       Text(widget.config.table,
           style: TextStyle(fontSize: 13, color: Theme.of(context).hintColor)),
+      if (_awsMode) ...[
+        const SizedBox(width: 10),
+        Chip(
+          visualDensity: VisualDensity.compact,
+          avatar: Icon(Icons.lock_outline, size: 15, color: Colors.amber.shade700),
+          label: Text(tr('ep.awsReadOnly'),
+              style: TextStyle(color: Colors.amber.shade700)),
+        ),
+      ],
       const Spacer(),
       PopupMenuButton<String>(
         tooltip: tr('pq.statementTemplates'),

@@ -26,6 +26,11 @@ DynamoDB storage) as eight flat tabs.
 - **R6 — Per-entity views.** Selecting an instance shows its proxy views
   (Configure/Monitor/Logs + Redis Browser + Console); selecting an endpoint shows
   its storage views (Configure/Monitor/Logs + DynamoDB Browser + PartiQL).
+  *(As delivered, both sides diverge from this sketch — see [tasks](tasks.md) 3.5
+  and 6.1: the instance keeps its storage tabs too (9 tabs incl. Playground, a
+  deliberate deviation), and an endpoint — being passive storage, not a managed
+  process — gets Overview · Browser · PartiQL · Playground instead of
+  Configure/Monitor/Logs.)*
 - **R7 — Endpoint Browser.** The endpoint's three former storage tabs
   (Tables/Explorer/PartiQL) become two: **Browser** (a Tables sidebar + an item
   Explorer merged into one view; table lifecycle ops in the Tables right-click)
