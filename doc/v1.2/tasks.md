@@ -82,6 +82,12 @@
       section — deliberately its own section, not this list (§5 scores the generic
       BACKENDS and per-config placements down) — gated on the explicit `ddbSource`
       field replacing URL-substring dependency detection. Post-1.2.
+      *2026-08-05 supersession (separate-monitor-logs): the user placed the
+      engine's Monitor/Logs on the kind=local endpoint detail page bound to the
+      engine (two extra tabs), so `ep.ovNoProcessNote` is no longer unconditional
+      — the engine-bound endpoint shows `ep.ovLocalEngineNote` instead. The
+      control surface (start/stop/config) still lives in the docked panel; the
+      rest of the redesign doc remains post-1.2.*
 - [x] 3.7 i18n: nav strings added to `i18n.dart` (`nav.instances/endpoints/collapse/
       expand/noneYet`).
 - [x] 3.8 **TEST**: `flutter analyze` clean; macOS build + launch → two sections
@@ -181,6 +187,10 @@
       reachability probe (times `epListTables` → Reachable ✓ N tables · Xms / ✗
       error, Re-check button) + an honest note that an endpoint is storage, not a
       managed process (CPU/logs live on the Instances). AWS shows a read-only note.
+      *(2026-08-05 separate-monitor-logs: the note now keys off `managedEngine` —
+      the engine-bound local endpoint shows `ep.ovLocalEngineNote` and hosts the
+      engine's Monitor/Logs as two extra tabs; other endpoints keep this note and
+      4 tabs.)*
 - [x] 6.2 i18n completion: all remaining danger/confirm dialog bodies (delete/
       recreate/provision table, shared-env warning, PartiQL write, folder delete)
       moved to `tr()`/new `trp()` placeholder helper; the only literals left are
@@ -270,3 +280,32 @@ runtime (5.1–5.4) is independent of P3/P4 and can be built in parallel; its UI
   3-agent read-only workflow: no test references, no other animateTo/index
   couplings, item_editor still reachable via the endpoint Explorer, all native
   FFI bindings still used.
+- 2026-08-05 Monitor/Logs entity separation (separate-monitor-logs, bug-fix
+  round): the instance Monitor/Logs now show only the redimos proxy (the
+  LOCAL DYNAMODB sections were removed from both tabs); the engine's Monitor/
+  Logs moved onto the kind=local endpoint detail page bound to the engine as
+  two extra tabs — 6 tabs there (Overview·Browser·PartiQL·Playground·Monitor·
+  Logs) via new `DdbMonitorView`/`DdbLogsView` in `lib/src/ddb_views.dart`, with
+  the shared dashboard grammar extracted to `lib/src/monitor_widgets.dart`; the
+  engine-bound Overview swaps `ep.ovNoProcessNote` for `ep.ovLocalEngineNote`.
+  Supersedes, for the Monitor/Logs placement only, the 3.6/6.1/R9 records and
+  `doc/local-ddb-ui-redesign.md` (supersession notes added to all four). Gates
+  green (flutter analyze/test, go vet/test); UI click-through verified via
+  screenshots: instance proxy-only, local endpoint 6 tabs with live engine
+  dashboard + log tail, AWS endpoint 4 tabs, no TabController asserts on entity
+  switches.
+- 2026-08-05 separate-monitor-logs adversarial review round (3 read-only
+  reviewers + per-finding refutation workflow): 3 confirmed findings fixed.
+  (a) Engine Logs freeze — `_pull` gated on length only, which never changes
+  again once the native 800-line ring fills → shared `linesEqual` content gate
+  in `monitor_widgets.dart`, applied to the engine Logs tab AND the instance
+  Logs tab (same inherited heuristic). (b) `_ddbForEndpoint` substring match —
+  a port that is a string prefix of another port (`:4566` vs `:45660`) or a
+  stopped engine's stale live port could bind an unrelated kind=local endpoint
+  → port-bounded regex `(localhost|127\.0\.0\.1):<p>(?![0-9])` and the live
+  port only counts while the engine is running. (c) Sparkline freeze at the
+  90-sample cap — the poll loop mutates the histories in place, so a painter
+  sharing the list object could never see old != new in `shouldRepaint`
+  (inherited from HEAD on both dashboards) → `SparkTile` snapshots
+  `List.of(data)` for the painter. Re-verified: analyze/test + vet/test green,
+  rebuild, live repaint delta proven by two screenshots 5s apart.

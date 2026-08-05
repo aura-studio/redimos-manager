@@ -12,6 +12,7 @@ import 'src/cmd_console.dart';
 import 'src/endpoint_detail.dart';
 import 'src/i18n.dart';
 import 'src/models.dart';
+import 'src/monitor_widgets.dart';
 import 'src/native.dart';
 import 'src/playground_page.dart';
 import 'src/ui_theme.dart';
@@ -325,15 +326,31 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     });
   }
 
-  // A config is wired to the managed Local DynamoDB when its endpoint points at
-  // that engine's port on localhost.
-  bool _usesLocalDdb(RedimosConfig c) {
+  // The managed Local DynamoDB engine a kind=local endpoint IS bound to: its
+  // endpoint URL names the engine's port on localhost. Candidate ports: the
+  // configured one (where the engine starts) plus, WHILE RUNNING, the live
+  // port — rm_ddb_set persists a new port without restarting, so a running
+  // engine may still sit on the old one; a STOPPED engine's stale live port
+  // must not bind an unrelated endpoint that happens to use it. Matches are
+  // port-bounded ("localhost:8079" never grabs ":80790"). Same substring
+  // lineage as the instance-side _usesLocalDdb before the 2026-08-05
+  // separation; the native twin configUsesLocalDdb (localddb.go) stays — it
+  // drives cascade restarts. Keys off kind + ports (stable across engine
+  // stop/start), so an open endpoint page's tab count never flaps with
+  // engine lifecycle.
+  LocalDdbInfo? _ddbForEndpoint(DdbEndpoint e) {
     final ddb = _ddb;
-    if (ddb == null) return false;
-    final ep = c.endpoint.toLowerCase();
-    if (ep.isEmpty) return false;
-    final p = ddb.config.port;
-    return ep.contains('localhost:$p') || ep.contains('127.0.0.1:$p');
+    if (ddb == null || e.kind != 'local') return null;
+    final ep = e.endpoint.toLowerCase();
+    if (ep.isEmpty) return null;
+    final ports = <int>{ddb.config.port, if (ddb.status == 'running') ddb.port};
+    for (final p in ports) {
+      if (p <= 0) continue;
+      if (RegExp('(localhost|127\\.0\\.0\\.1):$p(?![0-9])').hasMatch(ep)) {
+        return ddb;
+      }
+    }
+    return null;
   }
 
   RedimosConfig? get _selected {
@@ -1057,11 +1074,18 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
 
   // Right pane for a selected endpoint: its own tab set (Tables · Explorer ·
   // PartiQL · Playground) bound directly to the DynamoDB backend — see
-  // EndpointDetailView.
+  // EndpointDetailView. A kind=local endpoint that IS the managed Local
+  // DynamoDB engine additionally gets its Monitor/Logs tabs (the engine
+  // telemetry used to be mixed into the instance page — since 2026-08-05 it
+  // lives on this, the entity that owns it).
   Widget _endpointDetail(DdbEndpoint e) => EndpointDetailView(
         key: ValueKey('endpoint-detail-${e.id}'),
         core: _core!,
         endpoint: e,
+        ddb: _ddbForEndpoint(e),
+        ddbCpuHist: _ddbCpuHist,
+        ddbMemHist: _ddbMemHist,
+        ddbDiskHist: _ddbDiskHist,
       );
 
   Widget _detail() {
@@ -1119,26 +1143,21 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                   onSave: _save,
                   onDelete: _delete,
                 ),
-                // monitor
+                // monitor — the redimos proxy's own telemetry only; the Local
+                // DynamoDB engine's dashboard lives on the local endpoint page
                 MonitorView(
                   status: st,
                   cpuHist: _cpuHist[c.id] ?? const [],
                   memHist: _memHist[c.id] ?? const [],
                   opsHist: _opsHist[c.id] ?? const [],
                   embedded: true,
-                  ddb: _usesLocalDdb(c) ? _ddb : null,
-                  ddbCpuHist: _ddbCpuHist,
-                  ddbMemHist: _ddbMemHist,
-                  ddbDiskHist: _ddbDiskHist,
                 ),
-                // logs — plus the Local DynamoDB engine's log when this config
-                // is wired to it (mirrors the Monitor tab's two sections)
+                // logs — the proxy's own log tail
                 LogsView(
                   core: _core!,
                   configId: logsConfigId,
                   status: st,
                   embedded: true,
-                  ddb: _usesLocalDdb(c) ? _ddb : null,
                 ),
                 // cmd — interactive redis-cli against the running proxy
                 CmdConsole(
@@ -1787,10 +1806,6 @@ class LogsView extends StatefulWidget {
   final bool expanded;
   final VoidCallback? onToggle;
   final bool embedded; // headerless body that fills the tab and scrolls
-  // Non-null when the selected config is wired to the managed Local DynamoDB:
-  // the embedded tab then shows a second LOCAL DYNAMODB log section (mirrors
-  // the Monitor tab's two-section layout).
-  final LocalDdbInfo? ddb;
   const LogsView({
     super.key,
     required this.core,
@@ -1799,7 +1814,6 @@ class LogsView extends StatefulWidget {
     this.expanded = true,
     this.onToggle,
     this.embedded = false,
-    this.ddb,
   });
   @override
   State<LogsView> createState() => _LogsViewState();
@@ -1807,13 +1821,11 @@ class LogsView extends StatefulWidget {
 
 class _LogsViewState extends State<LogsView> {
   List<String> _lines = [];
-  List<String> _ddbLines = [];
   Timer? _t;
   final _scroll = ScrollController();
-  final _ddbScroll = ScrollController();
-  // Per-section collapse state for the embedded two-section layout.
-  bool _redimosOpen = true;
-  bool _ddbOpen = true;
+  // Collapse state for the embedded single-section layout (proxy log only —
+  // the engine's log moved to the local endpoint page on 2026-08-05).
+  bool _open = true;
 
   @override
   void initState() {
@@ -1826,7 +1838,6 @@ class _LogsViewState extends State<LogsView> {
   void dispose() {
     _t?.cancel();
     _scroll.dispose();
-    _ddbScroll.dispose();
     super.dispose();
   }
 
@@ -1842,23 +1853,11 @@ class _LogsViewState extends State<LogsView> {
     } else {
       try {
         final l = widget.core.logs(widget.configId!);
-        if (l.length != _lines.length) {
+        if (!linesEqual(l, _lines)) {
           setState(() => _lines = l);
           if (widget.embedded) _jumpToEnd(_scroll);
         }
       } catch (_) {}
-    }
-    // The backing engine's own log, shown alongside when this config uses it.
-    if (widget.ddb != null) {
-      try {
-        final l = widget.core.ddbLogs();
-        if (l.length != _ddbLines.length) {
-          setState(() => _ddbLines = l);
-          if (widget.embedded) _jumpToEnd(_ddbScroll);
-        }
-      } catch (_) {}
-    } else if (_ddbLines.isNotEmpty) {
-      setState(() => _ddbLines = []);
     }
   }
 
@@ -1874,10 +1873,6 @@ class _LogsViewState extends State<LogsView> {
         : _lines;
     if (widget.embedded) {
       final scheme = Theme.of(context).colorScheme;
-      final ddb = widget.ddb;
-      final ddbTail = _ddbLines.length > maxTail
-          ? _ddbLines.sublist(_ddbLines.length - maxTail)
-          : _ddbLines;
 
       Widget logCard(List<String> lines, ScrollController sc) => Container(
             width: double.infinity,
@@ -1936,35 +1931,17 @@ class _LogsViewState extends State<LogsView> {
           : (st.isRunning
               ? 'running · pid ${st.pid} · ${st.uptimeSec}s'
               : st.status + (st.exitMsg.isNotEmpty ? ' · ${st.exitMsg}' : ''));
-      final ddbLine = ddb == null
-          ? null
-          : (ddb.status == 'running'
-              ? 'running · pid ${ddb.pid} · ${ddb.uptimeSec}s'
-              : ddb.status + (ddb.exitMsg.isNotEmpty ? ' · ${ddb.exitMsg}' : ''));
 
       return Padding(
         padding: const EdgeInsets.all(12),
         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          header(Icons.dns, 'REDIMOS', stLine, _redimosOpen, () {
-            setState(() => _redimosOpen = !_redimosOpen);
-            if (_redimosOpen) _jumpToEnd(_scroll);
+          header(Icons.dns, 'REDIMOS', stLine, _open, () {
+            setState(() => _open = !_open);
+            if (_open) _jumpToEnd(_scroll);
           }),
-          if (_redimosOpen) ...[
+          if (_open) ...[
             const SizedBox(height: 8),
             Expanded(child: logCard(tail, _scroll)),
-          ],
-          // Second section when this config is wired to the managed Local
-          // DynamoDB — same split as the Monitor tab.
-          if (ddb != null) ...[
-            const SizedBox(height: 14),
-            header(Icons.storage, 'LOCAL DYNAMODB', ddbLine, _ddbOpen, () {
-              setState(() => _ddbOpen = !_ddbOpen);
-              if (_ddbOpen) _jumpToEnd(_ddbScroll);
-            }),
-            if (_ddbOpen) ...[
-              const SizedBox(height: 8),
-              Expanded(child: logCard(ddbTail, _ddbScroll)),
-            ],
           ],
         ]),
       );
@@ -2025,12 +2002,6 @@ class MonitorView extends StatelessWidget {
   final bool expanded;
   final VoidCallback? onToggle;
   final bool embedded; // headerless, always-shown tiles (for the tab layout)
-  // The managed Local DynamoDB, shown as its own section when this config points
-  // at it. null = the config isn't wired to the local engine.
-  final LocalDdbInfo? ddb;
-  final List<double> ddbCpuHist;
-  final List<double> ddbMemHist;
-  final List<double> ddbDiskHist;
   const MonitorView({
     super.key,
     required this.status,
@@ -2040,25 +2011,7 @@ class MonitorView extends StatelessWidget {
     this.expanded = true,
     this.onToggle,
     this.embedded = false,
-    this.ddb,
-    this.ddbCpuHist = const [],
-    this.ddbMemHist = const [],
-    this.ddbDiskHist = const [],
   });
-
-  String _fmtUptime(int s) {
-    if (s < 60) return '${s}s';
-    if (s < 3600) return '${s ~/ 60}m ${s % 60}s';
-    return '${s ~/ 3600}h ${(s % 3600) ~/ 60}m';
-  }
-
-  // Bytes/sec → a compact human rate (e.g. "0 B/s", "812 KB/s", "3.4 MB/s").
-  String _fmtRate(double bytesPerSec) {
-    final b = bytesPerSec;
-    if (b < 1024) return '${b.round()} B/s';
-    if (b < 1024 * 1024) return '${(b / 1024).round()} KB/s';
-    return '${(b / (1024 * 1024)).toStringAsFixed(1)} MB/s';
-  }
 
   // UNREACHABLE: only the embedded==false branch of build() calls this, and the
   // sole MonitorView construction passes embedded: true. Its Latency/Health tiles
@@ -2069,43 +2022,43 @@ class MonitorView extends StatelessWidget {
       spacing: 10,
       runSpacing: 10,
       children: [
-        _SparkTile(
+        SparkTile(
           label: tr('home.cpu'),
           value: running ? '${st!.cpuPercent.toStringAsFixed(1)} %' : '—',
           data: cpuHist,
           color: const Color(0xFF7FB2E6),
         ),
-        _SparkTile(
+        SparkTile(
           label: tr('home.memory'),
           value: running ? '${(st!.memBytes / (1024 * 1024)).round()} MB' : '—',
           data: memHist,
           color: const Color(0xFF57CF92),
         ),
-        _SparkTile(
+        SparkTile(
           label: tr('home.opsPerSec'),
           value: running && st!.metricsOk ? st.opsPerSec.toStringAsFixed(0) : '—',
           data: opsHist,
           color: const Color(0xFFD9A85B),
         ),
-        _InfoTile(label: tr('home.uptime'), value: running ? _fmtUptime(st!.uptimeSec) : '—'),
-        _InfoTile(label: tr('home.restarts'), value: '${st?.restarts ?? 0}'),
-        _InfoTile(label: tr('home.port'), value: running ? '${st!.port}' : '—'),
-        _InfoTile(
+        InfoTile(label: tr('home.uptime'), value: running ? fmtUptime(st!.uptimeSec) : '—'),
+        InfoTile(label: tr('home.restarts'), value: '${st?.restarts ?? 0}'),
+        InfoTile(label: tr('home.port'), value: running ? '${st!.port}' : '—'),
+        InfoTile(
             label: tr('home.engine'),
             value: (st?.runMode ?? 'native') == 'docker' ? 'Docker' : tr('home.native')),
-        _InfoTile(
+        InfoTile(
             label: tr('home.autoRestartLabel'),
             value: (st?.autoRestart ?? false) ? tr('home.on') : tr('home.off')),
         // ── redimos /metrics ───────────────────────────────
-        _InfoTile(
+        InfoTile(
             label: tr('home.latency'),
             value: running && st!.metricsOk
                 ? '${st.avgLatencyMs.toStringAsFixed(2)} ms'
                 : '—'),
-        _InfoTile(
+        InfoTile(
             label: tr('home.throttled'),
             value: running && st!.metricsOk ? '${st.throttled}' : '—'),
-        _InfoTile(
+        InfoTile(
             label: tr('home.health'),
             value: !running || !st!.metricsOk
                 ? '—'
@@ -2116,57 +2069,23 @@ class MonitorView extends StatelessWidget {
     );
   }
 
-  // A section eyebrow: icon + label on the left, an optional badge right-aligned.
-  // The badge carries state that has no tile of its own (currently "adopted").
-  Widget _sectionHeader(BuildContext context, IconData icon, String label,
-      {String? badge}) {
-    final scheme = Theme.of(context).colorScheme;
-    return Row(children: [
-      Icon(icon, size: 16, color: scheme.onSurfaceVariant),
-      const SizedBox(width: 8),
-      Text(label,
-          style: TextStyle(
-              fontSize: 12,
-              letterSpacing: 1.3,
-              fontWeight: FontWeight.w700,
-              color: scheme.onSurfaceVariant)),
-      if (badge != null) ...[
-        const Spacer(),
-        Text(badge,
-            style: TextStyle(
-                fontSize: 11, color: Theme.of(context).textTheme.bodySmall?.color)),
-      ],
-    ]);
-  }
-
-  // The longest tile value on screen (the DDB "runtime · product" engine label);
-  // shared as the fit reference by every info tile in both sections so all
-  // values render at one identical, width-adaptive size. Null (no local DDB
-  // section) means nothing long is on screen — tiles stay at the full 17px.
-  String? get _fitRef => ddb != null ? _ddbEngineLabel(ddb!.config.engine) : null;
-
-  // Lay out a fixed set of info tiles as equal-width columns that fill the whole
-  // pane (every tile the same size, the row stretching edge-to-edge) in both the
-  // initial window and full screen — instead of fixed-width tiles clustered on
-  // the left. 12px gutters between tiles.
-  Widget _tileRow(List<Widget> tiles) {
-    final children = <Widget>[];
-    for (var i = 0; i < tiles.length; i++) {
-      if (i > 0) children.add(const SizedBox(width: 12));
-      children.add(Expanded(child: tiles[i]));
-    }
-    return Row(crossAxisAlignment: CrossAxisAlignment.start, children: children);
-  }
+  // The longest tile value on screen — the proxy's own Engine tile value
+  // ("Docker" / the native label). With the Local DynamoDB section gone from
+  // this view (its dashboard now lives on the local endpoint page), the proxy
+  // engine label is the fit reference every tile shares so all values render
+  // at one identical, width-adaptive size.
+  String get _fitRef =>
+      (status?.runMode ?? 'native') == 'docker' ? 'Docker' : tr('home.native');
 
   // Dashboard layout for the tab: a section header, three sparkline cards across
   // the top, the smaller info tiles in a grid below.
   Widget _dashboard(BuildContext context, InstanceStatus? st, bool running) {
     Widget spark(String label, String value, List<double> data, Color color) =>
-        _SparkTile(label: label, value: value, data: data, color: color, width: null, sparkHeight: 48);
+        SparkTile(label: label, value: value, data: data, color: color, width: null, sparkHeight: 48);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _sectionHeader(context, Icons.dns, 'REDIMOS',
+        sectionHeader(context, Icons.dns, 'REDIMOS',
             badge: (st?.adopted ?? false) ? tr('home.adopted') : null),
         const SizedBox(height: 12),
         IntrinsicHeight(
@@ -2185,23 +2104,21 @@ class MonitorView extends StatelessWidget {
           ]),
         ),
         const SizedBox(height: 12),
-        // Every tile in BOTH rows shares one fit reference — the longest value
-        // on screen (the DDB engine label). All values therefore render at one
-        // identical size: full 17px when the reference fits the tile width,
-        // uniformly smaller when the window narrows. No tile ever stands out
-        // bigger or smaller than its neighbours.
-        _tileRow([
+        // Every tile shares one fit reference — the proxy's own Engine label —
+        // so all values render at one identical size: full 17px when the
+        // reference fits the tile width, uniformly smaller when the window
+        // narrows. No tile ever stands out bigger or smaller than its
+        // neighbours.
+        tileRow([
           // Dynamic metrics first …
-          _InfoTile(label: tr('home.uptime'), fitReference: _fitRef, value: running ? _fmtUptime(st!.uptimeSec) : '—'),
-          _InfoTile(label: tr('home.restarts'), fitReference: _fitRef, value: '${st?.restarts ?? 0}'),
-          _InfoTile(
+          InfoTile(label: tr('home.uptime'), fitReference: _fitRef, value: running ? fmtUptime(st!.uptimeSec) : '—'),
+          InfoTile(label: tr('home.restarts'), fitReference: _fitRef, value: '${st?.restarts ?? 0}'),
+          InfoTile(
               label: tr('home.latency'),
               fitReference: _fitRef,
               value: running && st!.metricsOk ? '${st.avgLatencyMs.toStringAsFixed(2)} ms' : '—'),
-          // Status (col 4) mirrors the DDB section's Status tile so the two rows
-          // align on this column too.
-          _InfoTile(label: tr('home.status'), fitReference: _fitRef, value: running ? tr('home.running') : (st?.status ?? 'stopped')),
-          _InfoTile(
+          InfoTile(label: tr('home.status'), fitReference: _fitRef, value: running ? tr('home.running') : (st?.status ?? 'stopped')),
+          InfoTile(
               label: tr('home.health'),
               fitReference: _fitRef,
               value: !running || !st!.metricsOk
@@ -2213,92 +2130,11 @@ class MonitorView extends StatelessWidget {
           // PID/Container id: in docker run-mode the value was still the host
           // PID (never the container id), so the "Container" label was wrong —
           // and the port is the more useful thing to see here anyway.
-          _InfoTile(label: tr('home.port'), fitReference: _fitRef, value: running ? '${st!.port}' : '—'),
-          _InfoTile(
+          InfoTile(label: tr('home.port'), fitReference: _fitRef, value: running ? '${st!.port}' : '—'),
+          InfoTile(
               label: tr('home.engine'),
               fitReference: _fitRef,
-              value: (st?.runMode ?? 'native') == 'docker' ? 'Docker' : tr('home.native')),
-        ]),
-        if (ddb != null) _ddbSection(context, ddb!),
-      ],
-    );
-  }
-
-  // A separated "Local DynamoDB" section — the backing engine's own metrics,
-  // kept distinct from the redimos instance metrics above.
-  Widget _ddbSection(BuildContext context, LocalDdbInfo d) {
-    final up = d.status == 'running';
-    // "runtime · product" — mirrors the config dropdown labels so the tile says
-    // both how it runs and which backend (e.g. "Docker · LocalStack").
-    final engine = _ddbEngineLabel(d.config.engine);
-    // Same sparkHeight (48) as the redimos dashboard so every chart box across
-    // both sections is an identical size.
-    Widget spark(String label, String value, List<double> data, Color color) =>
-        _SparkTile(label: label, value: value, data: data, color: color, width: null, sparkHeight: 48);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        const SizedBox(height: 20),
-        const Divider(height: 1),
-        const SizedBox(height: 14),
-        _sectionHeader(context, Icons.storage, 'LOCAL DYNAMODB',
-            badge: d.adopted ? tr('home.adopted') : null),
-        const SizedBox(height: 12),
-        IntrinsicHeight(
-          child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-            Expanded(
-                child: spark(tr('home.cpu'), up ? '${d.cpuPercent.toStringAsFixed(1)} %' : '—',
-                    ddbCpuHist, const Color(0xFF7FB2E6))),
-            const SizedBox(width: 12),
-            Expanded(
-                child: spark(tr('home.memory'), up ? '${(d.memBytes / (1024 * 1024)).round()} MB' : '—',
-                    ddbMemHist, const Color(0xFF57CF92))),
-            const SizedBox(width: 12),
-            Expanded(
-                child: spark(tr('home.diskIo'), up ? _fmtRate(d.diskPerSec) : '—',
-                    ddbDiskHist, const Color(0xFFD9A85B))),
-          ]),
-        ),
-        const SizedBox(height: 12),
-        _tileRow([
-          // Dynamic first … These 7 tiles mirror the redimos section's 7 so the
-          // two rows align column-for-column: Uptime · Restarts · Latency · (a
-          // section-specific pair) · Port · Engine. Every tile shares the same
-          // fit reference (the engine label) so both rows render at one size.
-          _InfoTile(label: tr('home.uptime'), fitReference: engine, value: up ? _fmtUptime(d.uptimeSec) : '—'),
-          _InfoTile(label: tr('home.restarts'), fitReference: engine, value: '${d.restarts}'),
-          // Latency sits at column 3 to line up with the redimos Latency tile.
-          // Unlike that one (scraped from redimos's own /metrics), this number is
-          // MEASURED here: a timed ListTables round-trip against the engine. The
-          // two are therefore not comparable across engines — LocalStack is
-          // intrinsically slower than java. Gated on probeOk exactly as the
-          // redimos tile gates on metricsOk.
-          _InfoTile(
-              label: tr('home.latency'),
-              fitReference: engine,
-              value: up && d.probeOk ? '${d.latencyMs.toStringAsFixed(2)} ms' : '—'),
-          _InfoTile(label: tr('home.status'), fitReference: engine, value: up ? tr('home.running') : d.status),
-          // PID (col 5). Health would only re-derive from `up` — the same boolean
-          // the Status tile beside it already shows — so it carried no information
-          // here. The `d.pid > 0` guard is load-bearing, not defensive: an ADOPTED
-          // docker/localstack DDB is never assigned a pid (tryAdoptDocker), so it
-          // reads 0 for its whole life. Note that in docker mode this is the
-          // `docker run` CLI shim's host pid, not the container's — the same reason
-          // the redimos side dropped its own PID tile for Port (see below).
-          _InfoTile(label: tr('home.pid'), fitReference: engine, value: up && d.pid > 0 ? '${d.pid}' : '—'),
-          // Port + Engine last, aligning with the redimos section's Port + Engine
-          // tiles above. (DDB says "Engine" because the choice is a different
-          // backend product — dynamodb-local vs LocalStack — not just a run mode.)
-          // The LIVE port while up, matching the redimos tile above and the port
-          // the Latency tile actually probed: rm_ddb_set persists a new port
-          // without restarting, so config.port can name a port nothing is bound
-          // to. Falls back to the configured one when stopped, which is then the
-          // only port there is.
-          _InfoTile(
-              label: tr('home.port'),
-              fitReference: engine,
-              value: up && d.port > 0 ? '${d.port}' : '${d.config.port}'),
-          _InfoTile(label: tr('home.engine'), fitReference: engine, value: engine),
+              value: _fitRef),
         ]),
       ],
     );
@@ -2354,147 +2190,12 @@ class MonitorView extends StatelessWidget {
 }
 
 // The "running / start" green. greenAccent is bright on dark surfaces but too
-// pale on a light background, so use a deeper green there.
+// pale on a light background, so use a deeper green there. Panel-only (the
+// sidebar LocalDdbPanel) — the dashboard tile grammar lives in
+// src/monitor_widgets.dart since the 2026-08-05 separation.
 Color goGreen(BuildContext context) => Theme.of(context).brightness == Brightness.dark
     ? Colors.greenAccent
     : const Color(0xFF12994F);
-
-Color _tileColor(BuildContext context) =>
-    Theme.of(context).colorScheme.surfaceContainerHighest;
-Color? _tileLabelColor(BuildContext context) =>
-    Theme.of(context).textTheme.bodySmall?.color;
-
-class _SparkTile extends StatelessWidget {
-  final String label;
-  final String value;
-  final List<double> data;
-  final Color color;
-  final double? width; // null = fill the parent (e.g. inside Expanded)
-  final double sparkHeight;
-  const _SparkTile(
-      {required this.label,
-      required this.value,
-      required this.data,
-      required this.color,
-      this.width = 220,
-      this.sparkHeight = 26});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: width,
-      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-      decoration: BoxDecoration(
-        color: _tileColor(context),
-        borderRadius: BorderRadius.circular(9),
-      ),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(label, style: TextStyle(fontSize: 11, color: _tileLabelColor(context))),
-        const SizedBox(height: 2),
-        Text(value, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w500)),
-        const SizedBox(height: 8),
-        SizedBox(
-          height: sparkHeight,
-          width: double.infinity,
-          child: CustomPaint(painter: _SparklinePainter(data, color)),
-        ),
-      ]),
-    );
-  }
-}
-
-// DDB Engine tile label: "runtime · product". Shared so the redimos Engine tile
-// can fit itself to the same reference and render at the same size.
-String _ddbEngineLabel(String engine) => switch (engine) {
-      'docker' => 'Docker · dynamodb-local',
-      'localstack' => 'Docker · LocalStack',
-      _ => 'Java · local',
-    };
-
-class _InfoTile extends StatelessWidget {
-  final String label;
-  final String value;
-  // When set, the value is scaled to fit one line via a FittedBox whose width is
-  // pinned to this reference string. Every tile of the same width passing the
-  // SAME reference scales by the same factor → identical font size, no wrapping,
-  // no truncation, no taller tile. Used to keep the two Engine tiles equal.
-  final String? fitReference;
-  const _InfoTile({required this.label, required this.value, this.fitReference});
-
-  @override
-  Widget build(BuildContext context) {
-    const valueStyle = TextStyle(fontSize: 17, fontWeight: FontWeight.w500);
-    Widget valueWidget;
-    if (fitReference == null) {
-      valueWidget = Text(value, maxLines: 1, overflow: TextOverflow.ellipsis, style: valueStyle);
-    } else {
-      // Stack an invisible copy of the (longer) reference under the value so the
-      // FittedBox always scales against the reference's width — both Engine tiles
-      // therefore shrink by the exact same factor.
-      valueWidget = FittedBox(
-        fit: BoxFit.scaleDown,
-        alignment: Alignment.centerLeft,
-        child: Stack(children: [
-          Opacity(
-            opacity: 0,
-            child: Text(fitReference!, maxLines: 1, softWrap: false, style: valueStyle),
-          ),
-          Text(value, maxLines: 1, softWrap: false, style: valueStyle),
-        ]),
-      );
-    }
-    return Container(
-      width: 132,
-      padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
-      decoration: BoxDecoration(
-        color: _tileColor(context),
-        borderRadius: BorderRadius.circular(9),
-      ),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(label, style: TextStyle(fontSize: 11, color: _tileLabelColor(context))),
-        const SizedBox(height: 4),
-        Align(alignment: Alignment.centerLeft, child: valueWidget),
-      ]),
-    );
-  }
-}
-
-class _SparklinePainter extends CustomPainter {
-  final List<double> data;
-  final Color color;
-  _SparklinePainter(this.data, this.color);
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    if (data.length < 2) return;
-    var maxV = data.reduce(math.max);
-    if (maxV <= 0) maxV = 1;
-    final dx = size.width / (data.length - 1);
-    final line = Path();
-    for (var i = 0; i < data.length; i++) {
-      final x = i * dx;
-      final y = size.height - (data[i] / maxV).clamp(0.0, 1.0) * size.height;
-      i == 0 ? line.moveTo(x, y) : line.lineTo(x, y);
-    }
-    final area = Path.from(line)
-      ..lineTo((data.length - 1) * dx, size.height)
-      ..lineTo(0, size.height)
-      ..close();
-    canvas.drawPath(area, Paint()..color = color.withValues(alpha: 0.10));
-    canvas.drawPath(
-      line,
-      Paint()
-        ..color = color
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 1.6,
-    );
-  }
-
-  @override
-  bool shouldRepaint(covariant _SparklinePainter old) =>
-      old.data.length != data.length ||
-      (data.isNotEmpty && old.data.isNotEmpty && old.data.last != data.last);
-}
 
 // ---------------------------------------------------------------------------
 // Local DynamoDB panel (sidebar dock): 3 engines × 2 storage modes

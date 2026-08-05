@@ -5,9 +5,17 @@
 // + item Explorer in one two-pane view), PartiQL, and a DynamoDB Playground.
 // On an AWS endpoint every view is read-only (the native layer re-guards writes
 // regardless).
+//
+// One exception to "an endpoint has no process": the kind=local endpoint that
+// IS the managed Local DynamoDB engine. Since the 2026-08-05 separation
+// (separate-monitor-logs) the engine's Monitor and Logs live HERE — as two
+// extra tabs (DdbMonitorView / DdbLogsView, ddb_views.dart) — instead of mixed
+// into whichever instance page happens to proxy it. `ddb != null` is what
+// switches the tab set 4 ↔ 6.
 
 import 'package:flutter/material.dart';
 
+import 'ddb_views.dart';
 import 'endpoint_browser.dart';
 import 'i18n.dart';
 import 'models.dart';
@@ -18,7 +26,23 @@ import 'playground_page.dart';
 class EndpointDetailView extends StatefulWidget {
   final NativeCore core;
   final DdbEndpoint endpoint;
-  const EndpointDetailView({super.key, required this.core, required this.endpoint});
+  // Non-null iff this endpoint is bound to the managed Local DynamoDB engine
+  // (kind=local + host:port match, decided by HomePage._ddbForEndpoint). When
+  // set, the tab set gains Monitor + Logs hosting the engine's own telemetry.
+  // The snapshot PERSISTS across engine stop/start (HomePage keeps the last
+  // non-null rm_ddb_get result), so the tab count never flaps with lifecycle.
+  final LocalDdbInfo? ddb;
+  final List<double> ddbCpuHist;
+  final List<double> ddbMemHist;
+  final List<double> ddbDiskHist;
+  const EndpointDetailView(
+      {super.key,
+      required this.core,
+      required this.endpoint,
+      this.ddb,
+      this.ddbCpuHist = const [],
+      this.ddbMemHist = const [],
+      this.ddbDiskHist = const []});
 
   @override
   State<EndpointDetailView> createState() => _EndpointDetailViewState();
@@ -26,7 +50,22 @@ class EndpointDetailView extends StatefulWidget {
 
 class _EndpointDetailViewState extends State<EndpointDetailView>
     with TickerProviderStateMixin {
-  late final TabController _tabs = TabController(length: 4, vsync: this);
+  bool get _showDdb => widget.ddb != null;
+  late TabController _tabs =
+      TabController(length: _showDdb ? 6 : 4, vsync: this);
+
+  @override
+  void didUpdateWidget(EndpointDetailView old) {
+    super.didUpdateWidget(old);
+    // Rebuild the controller ONLY when the 4 ↔ 6 decision flips (engine first
+    // snapshot arriving, or an engine port reconfig matching a different
+    // endpoint). Engine stop/start does not flip it — _showDdb keys off the
+    // persisted snapshot, not the live status.
+    if ((old.ddb != null) != _showDdb) {
+      _tabs.dispose();
+      _tabs = TabController(length: _showDdb ? 6 : 4, vsync: this);
+    }
+  }
 
   @override
   void dispose() {
@@ -83,6 +122,10 @@ class _EndpointDetailViewState extends State<EndpointDetailView>
             _tab(Icons.grid_view, tr('tab.browser')),
             _tab(Icons.code, tr('tab.partiql')),
             _tab(Icons.science_outlined, tr('tab.playground')),
+            if (_showDdb) ...[
+              _tab(Icons.insights, tr('tab.monitor')),
+              _tab(Icons.terminal, tr('tab.logs')),
+            ],
           ],
         ),
       ),
@@ -92,13 +135,15 @@ class _EndpointDetailViewState extends State<EndpointDetailView>
           controller: _tabs,
           physics: const NeverScrollableScrollPhysics(),
           children: [
-            // Overview — backend metadata + a live reachability probe (an endpoint
-            // has no managed process, so this stands in for Monitor/Logs)
+            // Overview — backend metadata + a live reachability probe. For an
+            // engine-bound endpoint the process surfaces exist (they are THIS
+            // entity's), so the Overview only stands in for storage metadata.
             _EndpointOverview(
               key: ValueKey('ep-overview-${e.id}'),
               core: widget.core,
               endpoint: e,
               config: cfg,
+              managedEngine: _showDdb,
             ),
             // Browser — R7: the endpoint's Tables list (left, lifecycle ops in the
             // right-click menu) merged with the item Explorer (right) in one view.
@@ -121,6 +166,24 @@ class _EndpointDetailViewState extends State<EndpointDetailView>
               config: cfg,
               kind: 'ddb',
             ),
+            if (_showDdb) ...[
+              // Monitor — the managed Local DynamoDB engine's own dashboard
+              // (moved off the instance page 2026-08-05). The histories are
+              // accumulated app-level, so sparklines have continuity from app
+              // start and survive entity switches.
+              DdbMonitorView(
+                key: ValueKey('ep-ddbmon-${e.id}'),
+                ddb: widget.ddb,
+                cpuHist: widget.ddbCpuHist,
+                memHist: widget.ddbMemHist,
+                diskHist: widget.ddbDiskHist,
+              ),
+              // Logs — the engine's live log tail (rm_ddb_logs)
+              DdbLogsView(
+                key: ValueKey('ep-ddblog-${e.id}'),
+                core: widget.core,
+              ),
+            ],
           ],
         ),
       ),
@@ -138,15 +201,23 @@ class _EndpointDetailViewState extends State<EndpointDetailView>
 }
 
 // The endpoint Overview: backend metadata + a live reachability probe. An
-// endpoint is storage, not a process, so this replaces the instance's
-// Monitor/Logs tabs with something meaningful for a backend (is it reachable,
-// how many tables, how fast).
+// endpoint is normally storage, not a process, so this stands in for the
+// instance's Monitor/Logs tabs with something meaningful for a backend (is it
+// reachable, how many tables, how fast). The one backend that IS a managed
+// process — the Local DynamoDB engine — gets its Monitor/Logs as real tabs on
+// this page (managedEngine: true), and its note banner says so instead.
 class _EndpointOverview extends StatefulWidget {
   final NativeCore core;
   final DdbEndpoint endpoint;
   final RedimosConfig config;
+  // True iff this endpoint is bound to the managed Local DynamoDB engine.
+  final bool managedEngine;
   const _EndpointOverview(
-      {super.key, required this.core, required this.endpoint, required this.config});
+      {super.key,
+      required this.core,
+      required this.endpoint,
+      required this.config,
+      this.managedEngine = false});
 
   @override
   State<_EndpointOverview> createState() => _EndpointOverviewState();
@@ -252,7 +323,15 @@ class _EndpointOverviewState extends State<_EndpointOverview>
         const SizedBox(height: 12),
         if (_isAws) _noteBanner(Icons.lock_outline, tr('ep.ovReadOnlyNote'), scheme.tertiary),
         if (_isAws) const SizedBox(height: 10),
-        _noteBanner(Icons.info_outline, tr('ep.ovNoProcessNote'), scheme.outline),
+        // Honesty guard: "an endpoint is storage, not a managed process" is
+        // false for the engine-bound endpoint — its process Monitor/Logs live
+        // in this very page's tabs since the 2026-08-05 separation.
+        _noteBanner(
+            widget.managedEngine ? Icons.dns : Icons.info_outline,
+            widget.managedEngine
+                ? tr('ep.ovLocalEngineNote')
+                : tr('ep.ovNoProcessNote'),
+            scheme.outline),
       ]),
     );
   }

@@ -32,7 +32,11 @@ DynamoDB storage) as eight flat tabs.
   deliberate deviation, then removed on 2026-08-05 once the endpoint views fully
   subsumed them), and an endpoint — being passive storage, not a managed process
   — gets Overview · Browser · PartiQL · Playground instead of
-  Configure/Monitor/Logs.)*
+  Configure/Monitor/Logs. Later the same day, the separate-monitor-logs bug-fix
+  round separated telemetry as well: an instance's Monitor/Logs now show only its
+  redimos proxy, and the managed Local DynamoDB engine's Monitor/Logs live as two
+  extra tabs on the kind=local endpoint page bound to the engine — 6 tabs there,
+  4 on every other endpoint.)*
 - **R7 — Endpoint Browser.** The endpoint's three former storage tabs
   (Tables/Explorer/PartiQL) become two: **Browser** (a Tables sidebar + an item
   Explorer merged into one view; table lifecycle ops in the Tables right-click)
@@ -48,6 +52,11 @@ DynamoDB storage) as eight flat tabs.
   singleton, so it does NOT fold into the Endpoints list; it retains a dedicated
   control surface. Its redesign — `doc/local-ddb-ui-redesign.md`, the pinned LOCAL
   BACKEND section, gated on an explicit `ddbSource` field — is tracked post-1.2.
+  *(2026-08-05, separate-monitor-logs: the user placed the engine's Monitor/Logs
+  on the kind=local endpoint detail page bound to the engine. That supersedes this
+  record — and `doc/local-ddb-ui-redesign.md` — for the Monitor/Logs placement
+  only; the engine keeps its dedicated control panel, and the rest of the redesign
+  (ddbSource, unified list, stop-confirm) remains post-1.2.)*
 
 ## Non-functional / acceptance
 

@@ -36,11 +36,18 @@ back**. v1.2 makes the structure explicit:
 - Instance selected → tabs Configure · Monitor · Logs · Console · Browser ·
   Playground (as delivered; the instance's duplicate storage tabs
   Endpoint/Table/PartiQL were removed on 2026-08-05 — the endpoint views subsume
-  them — tasks 3.5).
+  them — tasks 3.5; Monitor/Logs render the proxy's own telemetry only since the
+  same day's separate-monitor-logs round).
 - Endpoint selected → tabs Overview · Browser · PartiQL · Playground (as
-  delivered; Overview = backend metadata + reachability probe, tasks 6.1).
+  delivered; Overview = backend metadata + reachability probe, tasks 6.1). A
+  kind=local endpoint bound to the managed Local DynamoDB engine additionally
+  gains Monitor + Logs tabs hosting the engine's own telemetry (6 tabs,
+  separate-monitor-logs 2026-08-05).
 - Local DynamoDB → an Endpoint (kind=local) listed in the Endpoints section; its
-  managed-process panel stays docked at the sidebar bottom (tasks 3.6).
+  managed-process panel stays docked at the sidebar bottom (tasks 3.6). Since
+  separate-monitor-logs (2026-08-05) the engine's Monitor/Logs live on the bound
+  local endpoint page; that supersedes doc/local-ddb-ui-redesign.md for placement
+  only.
 
 ## Endpoint Browser (merge)
 

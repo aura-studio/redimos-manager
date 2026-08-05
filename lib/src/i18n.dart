@@ -107,6 +107,12 @@ const Map<String, Map<AppLang, String>> _strings = {
     AppLang.zh:
         '端点是存储后端而非受管进程 —— CPU/内存监控与进程日志在代理它的「实例」上。'
   },
+  'ep.ovLocalEngineNote': {
+    AppLang.en:
+        'This backend is the managed Local DynamoDB engine — its process Monitor and Logs live in this page’s Monitor/Logs tabs.',
+    AppLang.zh:
+        '该后端是受管的 Local DynamoDB 引擎 —— 其进程 Monitor 与 Logs 在本页的 Monitor/Logs 标签页中。'
+  },
 
   // Endpoint Browser (v1.2 R7: merged Tables + Explorer two-pane view)
   'epb.noTableSelected': {AppLang.en: 'No table selected', AppLang.zh: '未选择表'},

@@ -5,6 +5,12 @@
 
 # Local DynamoDB 面板重构调研报告
 
+> **Supersession(2026-08-05,separate-monitor-logs)**:Monitor/Logs 的落位已被取代——
+> 用户决定把引擎的 Monitor/Logs 放到绑定该引擎的 kind=local endpoint 详情页
+> (两个额外 tab,`DdbMonitorView`/`DdbLogsView`),而非本文终态的独立 LOCAL BACKEND
+> 三 tab 页。本文**仅就 Monitor/Logs 落位**被取代;其余部分(`ddbSource` 字段、
+> 统一侧栏列表、停止确认、收编 chip)仍为 post-1.2 的在录方向。
+
 ## 1. 问题定性
 
 突兀感有确切的结构根源,不是审美偏好:Local DynamoDB 是**被依赖的全局后端**,却披着「第 N 个实例」的外衣挤在 redimos 实例列表的视觉容器底部——实体类型错位;同时 config 与它的依赖关系只靠 endpoint URL 子串匹配(`configUsesLocalDdb` 匹配 `localhost:8079`)隐式成立,Configure 页看不出任何关联,用户要手敲 URL 去「碰巧命中」;停它会连坐重启/断掉所有依赖者,UI 却零提示。dock 的样式怪只是症状,**实体身份不明 + 依赖不可见 + 生命周期语义混淆**才是病灶。
