@@ -23,3 +23,13 @@ flutter:
     - family: Righteous
       fonts:
         - asset: assets/fonts/Righteous-Regular.ttf
+    # pixel-fidelity-v23 (CP 4.4/4.5): bundled variable faces so the app and
+    # the mockup captures render with the SAME fonts. The mono family is
+    # deliberately named `monospace` so the 14 bare `fontFamily: 'monospace'`
+    # styles resolve to it without touching each call site.
+    - family: Inter
+      fonts:
+        - asset: assets/fonts/Inter-Variable.ttf
+    - family: monospace
+      fonts:
+        - asset: assets/fonts/JetBrainsMono-Variable.ttf

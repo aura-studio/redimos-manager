@@ -5,8 +5,13 @@
 
 import 'package:flutter/material.dart';
 
-const double kCodeFontSize = 13;
-const double kCodeLineHeight = 1.5;
+import 'ui_tokens.dart';
+
+const double kCodeFontSize = 12.5;
+// CSS pitch is line-height: 21px (mockup .code/.gutter); keep the constant
+// derivation so the gutter's per-line box stays EXACTLY the CSS pitch
+// (CP 5.5 — no cumulative drift between numbers and code).
+const double kCodeLineHeight = 21 / 12.5;
 
 const _jsKeywords = <String>{
   'const', 'let', 'var', 'function', 'return', 'if', 'else', 'for', 'while',
@@ -26,24 +31,26 @@ const _goKeywords = <String>{
 };
 
 class _Palette {
-  final Color plain, comment, str, number, keyword;
-  const _Palette(this.plain, this.comment, this.str, this.number, this.keyword);
+  final Color plain, comment, str, number, keyword, fn;
+  const _Palette(this.plain, this.comment, this.str, this.number, this.keyword, this.fn);
 }
 
-const _dark = _Palette(
-  Color(0xFFD4D4D4), // plain
-  Color(0xFF6A9955), // comment (green)
-  Color(0xFFCE9178), // string
-  Color(0xFFB5CEA8), // number
-  Color(0xFF569CD6), // keyword (blue)
-);
-const _light = _Palette(
-  Color(0xFF1F2328),
-  Color(0xFF6A737D),
-  Color(0xFFB2523B),
-  Color(0xFF0550AE),
-  Color(0xFF8250DF),
-);
+// v2.3: the highlight palette derives from the live AppTokens so the editor
+// tracks the active theme's accent/semantic colours instead of fixed
+// VS-Code/GitHub hexes. Comment/string/number hues keep their classic roles.
+// Mockup .code: kw=accent(600) / str=success / num=warning / cm=text-3 /
+// fn=light #7c3aed · dark #b794f6 (a purple distinct from the accent).
+_Palette _paletteFor(AppTokens t, Brightness b) {
+  final dark = b == Brightness.dark;
+  return _Palette(
+    t.text, // plain
+    t.text3, // comment (mockup .code .cm = text-3)
+    t.success, // string (mockup .code .str = success)
+    t.warning, // number
+    t.accent, // keyword
+    dark ? const Color(0xFFB794F6) : const Color(0xFF7C3AED), // fn (mockup)
+  );
+}
 
 class CodeHighlightController extends TextEditingController {
   String lang; // 'js' | 'go'
@@ -54,7 +61,7 @@ class CodeHighlightController extends TextEditingController {
       {required BuildContext context, TextStyle? style, required bool withComposing}) {
     final base = (style ?? const TextStyle());
     final b = Theme.of(context).brightness;
-    final pal = b == Brightness.dark ? _dark : _light;
+    final pal = _paletteFor(AppTokens.of(context), b);
     return TextSpan(style: base, children: _highlight(text, lang, base, pal));
   }
 }
@@ -157,9 +164,23 @@ List<TextSpan> _highlight(String src, String lang, TextStyle base, _Palette pal)
       final word = src.substring(i, j);
       if (kw.contains(word)) {
         flush();
-        spans.add(TextSpan(text: word, style: base.copyWith(color: pal.keyword)));
+        // Mockup .code .kw{font-weight:600}.
+        spans.add(TextSpan(
+            text: word,
+            style: base.copyWith(color: pal.keyword, fontWeight: FontWeight.w600)));
       } else {
-        buf.write(word);
+        // Mockup .code .fn: an identifier immediately called (`name(`) is a
+        // function name, highlighted purple. Skip whitespace, then check '('.
+        var k = j;
+        while (k < n && (src[k] == ' ' || src[k] == '\t')) {
+          k++;
+        }
+        if (k < n && src[k] == '(') {
+          flush();
+          spans.add(TextSpan(text: word, style: base.copyWith(color: pal.fn)));
+        } else {
+          buf.write(word);
+        }
       }
       i = j;
       continue;
@@ -237,16 +258,20 @@ class _CodeFieldState extends State<CodeField> {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final muted = Theme.of(context).textTheme.bodySmall?.color;
+    final t = AppTokens.of(context);
     const codeStyle = TextStyle(
-        fontFamily: 'monospace', fontSize: kCodeFontSize, height: kCodeLineHeight);
-    final numberStyle = codeStyle.copyWith(color: muted?.withValues(alpha: 0.6));
+        fontFamily: 'monospace',
+        fontSize: kCodeFontSize,
+        height: kCodeLineHeight,
+        // CSS half-leading inside the 21px line box (CP 5.5), matching the
+        // mockup's line-height rendering; Ts.cssLeading for the semantics.
+        leadingDistribution: Ts.cssLeading);
+    final numberStyle = codeStyle.copyWith(color: t.text3);
     final lines = widget.controller.text.split('\n');
     final gutterTextW = _measure('${lines.length}', numberStyle);
     final gutterW = gutterTextW + _kGutterPad.horizontal;
     return Container(
-      color: scheme.surface,
+      color: t.panel,
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: _focus.requestFocus,
@@ -261,8 +286,7 @@ class _CodeFieldState extends State<CodeField> {
               top: 0,
               bottom: 0,
               width: gutterW,
-              child: Container(
-                  color: scheme.surfaceContainerHighest.withValues(alpha: 0.35)),
+              child: Container(color: t.panel2),
             ),
             SingleChildScrollView(
               child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -294,7 +318,7 @@ class _CodeFieldState extends State<CodeField> {
                       border: InputBorder.none,
                       contentPadding: _kFieldPad,
                       hintText: widget.hintText,
-                      hintStyle: codeStyle.copyWith(color: muted?.withValues(alpha: 0.6)),
+                      hintStyle: codeStyle.copyWith(color: t.text3),
                     ),
                   ),
                 ),

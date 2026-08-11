@@ -22,6 +22,7 @@ import 'models.dart';
 import 'native.dart';
 import 'partiql_page.dart';
 import 'playground_page.dart';
+import 'ui_tokens.dart';
 
 class EndpointDetailView extends StatefulWidget {
   final NativeCore core;
@@ -35,6 +36,13 @@ class EndpointDetailView extends StatefulWidget {
   final List<double> ddbCpuHist;
   final List<double> ddbMemHist;
   final List<double> ddbDiskHist;
+  // v2.3: the active screen index, driven by the HomePage-level MidBar tabs
+  // (the per-view TabBar was lifted up so instance and endpoint chrome match).
+  final int screenIndex;
+  // R4.3: endpoint Edit entry (Overview header button), owned by HomePage.
+  final VoidCallback? onEdit;
+  // T12: HomePage's MidBar "＋ Item" CTA bridge into the Browser screen.
+  final GlobalKey? browserKey;
   const EndpointDetailView(
       {super.key,
       required this.core,
@@ -42,162 +50,81 @@ class EndpointDetailView extends StatefulWidget {
       this.ddb,
       this.ddbCpuHist = const [],
       this.ddbMemHist = const [],
-      this.ddbDiskHist = const []});
+      this.ddbDiskHist = const [],
+      this.screenIndex = 0,
+      this.onEdit,
+      this.browserKey});
 
   @override
   State<EndpointDetailView> createState() => _EndpointDetailViewState();
 }
 
-class _EndpointDetailViewState extends State<EndpointDetailView>
-    with TickerProviderStateMixin {
+class _EndpointDetailViewState extends State<EndpointDetailView> {
   bool get _showDdb => widget.ddb != null;
-  late TabController _tabs =
-      TabController(length: _showDdb ? 6 : 4, vsync: this);
-
-  @override
-  void didUpdateWidget(EndpointDetailView old) {
-    super.didUpdateWidget(old);
-    // Rebuild the controller ONLY when the 4 ↔ 6 decision flips (engine first
-    // snapshot arriving, or an engine port reconfig matching a different
-    // endpoint). Engine stop/start does not flip it — _showDdb keys off the
-    // persisted snapshot, not the live status.
-    if ((old.ddb != null) != _showDdb) {
-      _tabs.dispose();
-      _tabs = TabController(length: _showDdb ? 6 : 4, vsync: this);
-    }
-  }
-
-  @override
-  void dispose() {
-    _tabs.dispose();
-    super.dispose();
-  }
 
   DdbEndpoint get e => widget.endpoint;
 
-  String _hostOf(String url) {
-    final u = url.replaceFirst(RegExp(r'^https?://'), '');
-    final slash = u.indexOf('/');
-    return slash < 0 ? u : u.substring(0, slash);
+  // Screen list (Overview / Browser / PartiQL / Playground [+ Monitor + Logs]),
+  // one per MidBar tab. Index-matched with HomePage._endpointTabLabels.
+  List<Widget> get _screens {
+    final cfg = e.toStorageConfig();
+    return [
+      // Overview — backend metadata + a live reachability probe.
+      EndpointOverviewPane(
+        key: ValueKey('ep-overview-${e.id}'),
+        core: widget.core,
+        endpoint: e,
+        config: cfg,
+        managedEngine: _showDdb,
+        onEdit: widget.onEdit,
+      ),
+      // Browser — the Tables list + item Explorer in one two-pane view.
+      EndpointBrowserView(
+        key: widget.browserKey ?? ValueKey('ep-browser-${e.id}'),
+        core: widget.core,
+        config: cfg,
+        endpoint: e,
+      ),
+      // PartiQL — statement editor bound to the endpoint
+      PartiqlPageView(
+        key: ValueKey('ep-partiql-${e.id}'),
+        core: widget.core,
+        config: cfg,
+      ),
+      // Playground — JS/Go against the endpoint's DynamoDB
+      PlaygroundView(
+        key: ValueKey('ep-playground-${e.id}'),
+        core: widget.core,
+        config: cfg,
+        kind: 'ddb',
+      ),
+      if (_showDdb) ...[
+        // Monitor — the managed Local DynamoDB engine's own dashboard.
+        DdbMonitorView(
+          key: ValueKey('ep-ddbmon-${e.id}'),
+          ddb: widget.ddb,
+          cpuHist: widget.ddbCpuHist,
+          memHist: widget.ddbMemHist,
+          diskHist: widget.ddbDiskHist,
+        ),
+        // Logs — the engine's live log tail (rm_ddb_logs)
+        DdbLogsView(
+          key: ValueKey('ep-ddblog-${e.id}'),
+          core: widget.core,
+        ),
+      ],
+    ];
   }
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final cfg = e.toStorageConfig();
-    final kindLabel = switch (e.kind) {
-      'aws' => e.region.isEmpty ? 'AWS' : 'AWS · ${e.region}',
-      'local' => 'Local DynamoDB · ${_hostOf(e.endpoint)}',
-      _ => e.endpoint,
-    };
-    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      SizedBox(
-        height: 50,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: Row(children: [
-            Icon(Icons.dns_outlined, size: 18, color: scheme.primary),
-            const SizedBox(width: 9),
-            Text(e.name.isEmpty ? tr('config.unnamed') : e.name,
-                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
-            const SizedBox(width: 10),
-            Text(kindLabel,
-                style: TextStyle(
-                    fontSize: 12, color: Theme.of(context).textTheme.bodySmall?.color)),
-          ]),
-        ),
-      ),
-      const Divider(height: 1),
-      SizedBox(
-        height: 50,
-        child: TabBar(
-          controller: _tabs,
-          labelColor: scheme.primary,
-          unselectedLabelColor: Theme.of(context).textTheme.bodySmall?.color,
-          indicatorColor: scheme.primary,
-          indicatorWeight: 2.5,
-          dividerColor: Colors.transparent,
-          tabs: [
-            _tab(Icons.dashboard_outlined, tr('tab.overview')),
-            _tab(Icons.grid_view, tr('tab.browser')),
-            _tab(Icons.code, tr('tab.partiql')),
-            _tab(Icons.science_outlined, tr('tab.playground')),
-            if (_showDdb) ...[
-              _tab(Icons.insights, tr('tab.monitor')),
-              _tab(Icons.terminal, tr('tab.logs')),
-            ],
-          ],
-        ),
-      ),
-      const Divider(height: 1),
-      Expanded(
-        child: TabBarView(
-          controller: _tabs,
-          physics: const NeverScrollableScrollPhysics(),
-          children: [
-            // Overview — backend metadata + a live reachability probe. For an
-            // engine-bound endpoint the process surfaces exist (they are THIS
-            // entity's), so the Overview only stands in for storage metadata.
-            _EndpointOverview(
-              key: ValueKey('ep-overview-${e.id}'),
-              core: widget.core,
-              endpoint: e,
-              config: cfg,
-              managedEngine: _showDdb,
-            ),
-            // Browser — R7: the endpoint's Tables list (left, lifecycle ops in the
-            // right-click menu) merged with the item Explorer (right) in one view.
-            EndpointBrowserView(
-              key: ValueKey('ep-browser-${e.id}'),
-              core: widget.core,
-              config: cfg,
-              endpoint: e,
-            ),
-            // PartiQL — statement editor bound to the endpoint
-            PartiqlPageView(
-              key: ValueKey('ep-partiql-${e.id}'),
-              core: widget.core,
-              config: cfg,
-            ),
-            // Playground — JS/Go against the endpoint's DynamoDB
-            PlaygroundView(
-              key: ValueKey('ep-playground-${e.id}'),
-              core: widget.core,
-              config: cfg,
-              kind: 'ddb',
-            ),
-            if (_showDdb) ...[
-              // Monitor — the managed Local DynamoDB engine's own dashboard
-              // (moved off the instance page 2026-08-05). The histories are
-              // accumulated app-level, so sparklines have continuity from app
-              // start and survive entity switches.
-              DdbMonitorView(
-                key: ValueKey('ep-ddbmon-${e.id}'),
-                ddb: widget.ddb,
-                cpuHist: widget.ddbCpuHist,
-                memHist: widget.ddbMemHist,
-                diskHist: widget.ddbDiskHist,
-              ),
-              // Logs — the engine's live log tail (rm_ddb_logs)
-              DdbLogsView(
-                key: ValueKey('ep-ddblog-${e.id}'),
-                core: widget.core,
-              ),
-            ],
-          ],
-        ),
-      ),
-    ]);
+    final screens = _screens;
+    final i = widget.screenIndex.clamp(0, screens.length - 1);
+    // Keep every screen's state alive (scroll position, probe results, editor
+    // contents) across tab switches — an IndexedStack does that without the
+    // TabBarView the chrome used to own.
+    return IndexedStack(index: i, children: screens);
   }
-
-  Widget _tab(IconData icon, String label) => Tab(
-        height: 40,
-        child: Row(mainAxisSize: MainAxisSize.min, children: [
-          Icon(icon, size: 16),
-          const SizedBox(width: 7),
-          Text(label),
-        ]),
-      );
 }
 
 // The endpoint Overview: backend metadata + a live reachability probe. An
@@ -206,24 +133,28 @@ class _EndpointDetailViewState extends State<EndpointDetailView>
 // reachable, how many tables, how fast). The one backend that IS a managed
 // process — the Local DynamoDB engine — gets its Monitor/Logs as real tabs on
 // this page (managedEngine: true), and its note banner says so instead.
-class _EndpointOverview extends StatefulWidget {
+class EndpointOverviewPane extends StatefulWidget {
   final NativeCore core;
   final DdbEndpoint endpoint;
   final RedimosConfig config;
   // True iff this endpoint is bound to the managed Local DynamoDB engine.
   final bool managedEngine;
-  const _EndpointOverview(
+  // R4.3/R4.4: opens the endpoint Edit dialog (owned by HomePage, which knows
+  // how to persist the change via saveConfig and sync sibling instances).
+  final VoidCallback? onEdit;
+  const EndpointOverviewPane(
       {super.key,
       required this.core,
       required this.endpoint,
       required this.config,
-      this.managedEngine = false});
+      this.managedEngine = false,
+      this.onEdit});
 
   @override
-  State<_EndpointOverview> createState() => _EndpointOverviewState();
+  State<EndpointOverviewPane> createState() => _EndpointOverviewPaneState();
 }
 
-class _EndpointOverviewState extends State<_EndpointOverview>
+class _EndpointOverviewPaneState extends State<EndpointOverviewPane>
     with AutomaticKeepAliveClientMixin {
   bool _probing = true;
   bool _reachable = false;
@@ -282,58 +213,101 @@ class _EndpointOverviewState extends State<_EndpointOverview>
   Widget build(BuildContext context) {
     super.build(context);
     final e = widget.endpoint;
-    final scheme = Theme.of(context).colorScheme;
+    final t = AppTokens.of(context);
     return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
+      // Mockup .ov-wrap: 18px 22px padding, 14px column gap.
+      padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 18),
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        _card(
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            _kv(tr('ep.ovBackend'), _backendLabel()),
-            const SizedBox(height: 10),
-            _kv(tr('ep.ovEndpoint'),
-                e.endpoint.trim().isEmpty ? tr('ep.ovAwsDefault') : e.endpoint),
-            if (e.region.trim().isNotEmpty) ...[
-              const SizedBox(height: 10),
-              _kv(tr('ep.ovRegion'), e.region),
-            ],
-          ]),
-        ),
-        const SizedBox(height: 12),
-        _card(
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Row(children: [
-              Text(tr('ep.ovReachability'),
-                  style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600)),
-              const Spacer(),
-              TextButton.icon(
-                onPressed: _probing ? null : _probe,
-                icon: const Icon(Icons.refresh, size: 16),
-                label: Text(tr('ep.ovRecheck')),
-              ),
-            ]),
-            const SizedBox(height: 8),
-            _reachabilityRow(scheme),
-            if (_error != null) ...[
-              const SizedBox(height: 8),
-              SelectableText(_error!,
-                  style: TextStyle(fontSize: 12, color: scheme.error)),
-            ],
-          ]),
-        ),
-        const SizedBox(height: 12),
-        if (_isAws) _noteBanner(Icons.lock_outline, tr('ep.ovReadOnlyNote'), scheme.tertiary),
+        // v2.3: warning/note banners pinned to the TOP of the screen.
+        if (_isAws) _noteBanner(Icons.lock_outline, tr('ep.ovReadOnlyNote'), t.warning),
         if (_isAws) const SizedBox(height: 10),
         // Honesty guard: "an endpoint is storage, not a managed process" is
         // false for the engine-bound endpoint — its process Monitor/Logs live
-        // in this very page's tabs since the 2026-08-05 separation.
+        // in this very page's tabs since the 2026-08-05 separation. Mockup
+        // .note-banner is always the amber warning tint.
         _noteBanner(
             widget.managedEngine ? Icons.dns : Icons.info_outline,
             widget.managedEngine
                 ? tr('ep.ovLocalEngineNote')
                 : tr('ep.ovNoProcessNote'),
-            scheme.outline),
+            t.warning),
+        const SizedBox(height: 14),
+        // Backend identity card (mockup .ov-card: head band + ruled kv rows).
+        _card(t,
+          head: Row(children: [
+            _cardTitle(t, tr('ep.ovBackend')),
+            const Spacer(),
+            if (widget.onEdit != null)
+              _cardAction(t, label: 'Edit', onTap: widget.onEdit),
+          ]),
+          rows: [
+            _kv(t, 'Name', e.name.isEmpty ? '—' : e.name),
+            _kv(t, 'Type', _backendLabel()),
+            _kv(t, tr('ep.ovEndpoint'),
+                e.endpoint.trim().isEmpty ? tr('ep.ovAwsDefault') : e.endpoint),
+            if (e.region.trim().isNotEmpty) _kv(t, tr('ep.ovRegion'), e.region),
+            if (e.accessKeyId.trim().isNotEmpty)
+              _kv(t, 'Credential', 'AK •••${_tail(e.accessKeyId)}'),
+            _kv(t, 'Tables', _tableCount == null ? '—' : '$_tableCount'),
+            _kv(t, 'Items', '—'), // R5.x: item counts need a per-table scan — not polled.
+            // Mockup renders Status as a dot + label in the value cell.
+            _reachRow(t, 'Status', _reachStatusWidget(t)),
+          ],
+        ),
+        const SizedBox(height: 14),
+        // Reachability card: four rows (Status / Tables / Latency / Error) +
+        // a Recheck button in the head band.
+        _card(t,
+          head: Row(children: [
+            _cardTitle(t, tr('ep.ovReachability')),
+            const Spacer(),
+            _cardAction(t, label: tr('ep.ovRecheck'), onTap: _probing ? null : _probe),
+          ]),
+          rows: [
+            _reachRow(t, tr('ep.ovReachability'), _reachStatusWidget(t)),
+            _reachRow(t, tr('ep.ovTablesCount'),
+                Text(_tableCount == null ? '—' : '$_tableCount',
+                    style: Ts.style(
+                        size: Ts.md, weight: FontWeight.w600, color: t.text,
+                        monoFont: true, tabularNums: true))),
+            _reachRow(t, 'Latency',
+                Text(_latencyMs == null ? '—' : '$_latencyMs ms',
+                    style: Ts.style(
+                        size: Ts.md, weight: FontWeight.w600, color: t.text,
+                        monoFont: true, tabularNums: true))),
+            if (_error != null)
+              _reachRow(t, 'Error',
+                  SelectableText(_error!,
+                      style: Ts.style(size: Ts.md, weight: FontWeight.w600, color: t.danger,
+                          monoFont: true, tabularNums: true))),
+          ],
+        ),
       ]),
     );
+  }
+
+  // Last 4 chars of an access key, so a credential is identifiable without
+  // exposing it (the AWS console shows the same tail).
+  String _tail(String s) {
+    final trimmed = s.trim();
+    return trimmed.length <= 4 ? trimmed : trimmed.substring(trimmed.length - 4);
+  }
+
+  Widget _reachStatusWidget(AppTokens t) {
+    if (_probing) {
+      return Row(mainAxisSize: MainAxisSize.min, children: [
+        SizedBox(width: 13, height: 13, child: CircularProgressIndicator(strokeWidth: 2, color: t.text3)),
+        const SizedBox(width: 8),
+        Text(tr('ep.ovChecking'), style: Ts.style(size: Ts.md, weight: FontWeight.w600, color: t.text3)),
+      ]);
+    }
+    final color = _reachable ? t.success : t.danger;
+    return Row(mainAxisSize: MainAxisSize.min, children: [
+      Container(width: 8, height: 8, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
+      const SizedBox(width: 7),
+      Text(_reachable ? tr('ep.ovReachable') : tr('ep.ovUnreachable'),
+          style: Ts.style(size: Ts.md, weight: FontWeight.w600, color: color)),
+    ]);
   }
 
   String _backendLabel() {
@@ -343,34 +317,6 @@ class _EndpointOverviewState extends State<_EndpointOverview>
       'local' => 'Local DynamoDB',
       _ => 'DynamoDB-compatible',
     };
-  }
-
-  Widget _reachabilityRow(ColorScheme scheme) {
-    if (_probing) {
-      return Row(children: [
-        const SizedBox(width: 15, height: 15, child: CircularProgressIndicator(strokeWidth: 2)),
-        const SizedBox(width: 10),
-        Text(tr('ep.ovChecking')),
-      ]);
-    }
-    const okColor = Color(0xFF2E7D32);
-    final color = _reachable ? okColor : scheme.error;
-    final parts = <String>[];
-    if (_reachable && _tableCount != null) {
-      parts.add('$_tableCount ${tr('ep.ovTablesCount')}');
-    }
-    if (_latencyMs != null) parts.add('${_latencyMs}ms');
-    return Row(children: [
-      Icon(_reachable ? Icons.check_circle : Icons.cancel, size: 18, color: color),
-      const SizedBox(width: 6),
-      Text(_reachable ? tr('ep.ovReachable') : tr('ep.ovUnreachable'),
-          style: TextStyle(fontWeight: FontWeight.w600, color: color)),
-      if (parts.isNotEmpty) ...[
-        const SizedBox(width: 8),
-        Text('·  ${parts.join('  ·  ')}',
-            style: TextStyle(fontSize: 12.5, color: Theme.of(context).hintColor)),
-      ],
-    ]);
   }
 
   Widget _noteBanner(IconData icon, String text, Color color) => Container(
@@ -384,31 +330,121 @@ class _EndpointOverviewState extends State<_EndpointOverview>
           Icon(icon, size: 16, color: color),
           const SizedBox(width: 8),
           Expanded(
-            child: Text(text, style: const TextStyle(fontSize: 12, height: 1.35)),
+            // Mockup .note-banner body weight 500.
+            child: Text(text, style: const TextStyle(fontSize: 12, height: 1.35, fontWeight: FontWeight.w500)),
           ),
         ]),
       );
 
-  Widget _kv(String k, String v) => Row(
+  // Mockup .kv-row: 150px recessed key column, 600 mono tabular value; the
+  // hairline rule between rows comes from the card body builder, not here.
+  Widget _kv(AppTokens t, String k, String v) => Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           SizedBox(
-            width: 96,
-            child: Text(k,
-                style: TextStyle(fontSize: 12.5, color: Theme.of(context).hintColor)),
+            width: 150,
+            child: Text(k, style: Ts.style(size: Ts.md, color: t.text3)),
           ),
-          const SizedBox(width: 8),
           Expanded(
             child: SelectableText(v,
-                style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
+                style: Ts.style(
+                    size: Ts.md, weight: FontWeight.w600, color: t.text, monoFont: true, tabularNums: true)),
           ),
         ],
       );
 
-  Widget _card({required Widget child}) => Card(
-        elevation: 0,
-        color: Theme.of(context).colorScheme.surfaceContainerHigh,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        child: Padding(padding: const EdgeInsets.all(12), child: child),
+  // A reachability detail row (label left, live value widget right). Same
+  // 150px key column as _kv so both cards' rows align.
+  Widget _reachRow(AppTokens t, String k, Widget v) => Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          SizedBox(
+            width: 150,
+            child: Text(k, style: Ts.style(size: Ts.md, color: t.text3)),
+          ),
+          Expanded(child: v),
+        ],
       );
+
+  // Mockup .ov-card: border + radius + elev-2 + top highlight, with a two-tone
+  // header band (panel-2 bg + hairline bottom border) capping the card. Rows
+  // are separated by hairline rules (mockup .kv-row border-bottom).
+  Widget _card(AppTokens t, {required Widget head, required List<Widget> rows}) {
+    final brightness = Theme.of(context).brightness;
+    return Stack(children: [
+      Container(
+        decoration: BoxDecoration(
+          color: t.panel,
+          borderRadius: BorderRadius.circular(Dim.radiusM),
+          border: Border.all(color: t.border),
+          boxShadow: Depth.elev2(brightness),
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(Dim.radiusM - 1),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            // Header band (panel-2 + hairline bottom border).
+            Container(
+              decoration: BoxDecoration(
+                color: t.panel2,
+                border: Border(bottom: BorderSide(color: t.hairline)),
+              ),
+              // Mockup .ov-head band: 10px vertical padding.
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              child: head,
+            ),
+            // Ruled kv body (mockup .kv-row: 9px 14px padding, hairline between).
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 14),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                for (var i = 0; i < rows.length; i++) ...[
+                  Padding(padding: const EdgeInsets.symmetric(vertical: 9), child: rows[i]),
+                  if (i < rows.length - 1) Divider(height: 1, color: t.hairline),
+                ],
+              ]),
+            ),
+          ]),
+        ),
+      ),
+      // 1px top inner highlight.
+      Positioned(
+        left: 1, right: 1, top: 0,
+        child: IgnorePointer(
+          child: Container(
+            height: 1,
+            decoration: BoxDecoration(
+              color: t.highlight,
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(Dim.radiusM - 1)),
+            ),
+          ),
+        ),
+      ),
+    ]);
+  }
+
+  // Mockup .ov-head title: 11/700 uppercase, .9px tracking, text-3.
+  Widget _cardTitle(AppTokens t, String label) => Text(label.toUpperCase(),
+      style: Ts.style(size: Ts.xs, letterSpacing: 0.9, weight: FontWeight.w700, color: t.text3));
+
+  // Mockup .ov-head .abtn: a 26px bordered box with 12/500 text-2 label — no
+  // icon in the HTML render, unlike the old accent icon+text affordance.
+  Widget _cardAction(AppTokens t, {required String label, VoidCallback? onTap}) {
+    final enabled = onTap != null;
+    final color = enabled ? t.text2 : t.text3;
+    return InkWell(
+      borderRadius: BorderRadius.circular(Dim.radiusS),
+      onTap: onTap,
+      child: Container(
+        height: 26,
+        padding: const EdgeInsets.symmetric(horizontal: 11),
+        decoration: BoxDecoration(
+          color: t.panel,
+          border: Border.all(color: t.border),
+          borderRadius: BorderRadius.circular(Dim.radiusS),
+        ),
+        alignment: Alignment.center,
+        child: Text(label,
+            style: Ts.style(size: Ts.md, weight: FontWeight.w500, color: color)),
+      ),
+    );
+  }
 }

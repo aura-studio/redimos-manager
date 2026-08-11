@@ -1,0 +1,17 @@
+{
+  "name": "redimos-pixel-diff",
+  "private": true,
+  "version": "0.0.1",
+  "description": "Region-based pixel diff pipeline: mockup (Puppeteer) vs Flutter (flutter test capture) for the 8 v2.3 screens (pixel-fidelity-v23).",
+  "scripts": {
+    "capture:mockup": "node capture-mockup.js",
+    "capture:flutter": "bash capture-flutter.sh",
+    "diff": "node diff.js",
+    "validate": "node -e \"require('./config').validateSources()\""
+  },
+  "dependencies": {
+    "pixelmatch": "5.3.0",
+    "pngjs": "7.0.0",
+    "puppeteer": "25.5.0"
+  }
+}

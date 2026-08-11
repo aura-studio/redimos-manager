@@ -35,3 +35,8 @@ dynamodb-local-metadata.json
 # lifeline janitor helper (built from native/janitor)
 native/rm-janitor
 rm-janitor
+
+# pixel-diff tooling (tool/pixel-diff)
+node_modules/
+tool/pixel-diff/out/diff/
+test/failures/

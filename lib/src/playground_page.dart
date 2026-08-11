@@ -10,13 +10,14 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'code_editor.dart';
 import 'i18n.dart';
 import 'models.dart';
 import 'native.dart';
 import 'playground_samples.dart';
-import 'ui_theme.dart';
+import 'ui_tokens.dart';
 
 class PlaygroundView extends StatefulWidget {
   final NativeCore core;
@@ -54,29 +55,16 @@ class _PlaygroundViewState extends State<PlaygroundView>
   bool _hasRun = false;
   String? _error;
   int? _elapsedMs;
+  DateTime? _lastRunAt; // for the toolbar's last-run summary
 
   @override
   bool get wantKeepAlive => true;
 
+  // MidBar endGroup bridge: the screen's primary action must be reachable from
+  // the global MidBar CTA (v2.3), same as the toolbar Run button.
+  void runScript() => _run();
+
   List<PlaygroundSample> get _samples => samplesForKind(widget.kind);
-
-  // Mirrors the core's gate exactly — ddbHost.readOnly() is awsModeForEndpoint:
-  // the empty endpoint (default AWS resolver) OR an explicit AWS host, creds
-  // irrelevant. Anything looser makes the chip claim "writable" for an endpoint
-  // the core refuses every write on. Only the ddb host is gated; the redis host
-  // writes through the proxy, so kind=='redis' is genuinely writable even when
-  // the proxy's own backend is AWS.
-  bool get _isReadOnly {
-    if (widget.kind != 'ddb') return false;
-    final ep = widget.config.endpoint.trim();
-    if (ep.isEmpty) return true; // default AWS resolver
-    final host = (Uri.tryParse(ep)?.host ?? '').toLowerCase();
-    return host == 'amazonaws.com' ||
-        host.endsWith('.amazonaws.com') ||
-        host.endsWith('.amazonaws.com.cn');
-  }
-
-  bool get _writable => !_isReadOnly;
 
   @override
   void dispose() {
@@ -132,6 +120,7 @@ class _PlaygroundViewState extends State<PlaygroundView>
     if (!mounted) return;
     setState(() {
       _busy = false;
+      _lastRunAt = DateTime.now();
       _logs =
           ((res['logs'] as List?) ?? const []).map((e) => e.toString()).toList();
       _elapsedMs = (res['elapsedMs'] as num?)?.toInt();
@@ -153,12 +142,14 @@ class _PlaygroundViewState extends State<PlaygroundView>
       return _center(Icons.play_circle_outline, tr('pg.instanceNotRunning'),
           tr('pg.instanceNotRunningSub'));
     }
-    final scheme = Theme.of(context).colorScheme;
+    final t = AppTokens.of(context);
     return Column(children: [
-      _toolbar(),
-      const Divider(height: 1),
+      _toolbar(t),
+      Divider(height: 1, color: t.hairline),
+      // Mockup .play-wrap: a VERTICAL split — editor (flex 55) over output
+      // (flex 45) with a 1px border between, not a side-by-side Row.
       Expanded(
-        child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           Expanded(
             flex: 55,
             child: CodeField(
@@ -170,8 +161,8 @@ class _PlaygroundViewState extends State<PlaygroundView>
                   : '// ${widget.kind == 'redis' ? 'redis.scan' : 'ddb.scanAll'}(...) · console.log(...)',
             ),
           ),
-          Container(width: 1, color: scheme.outlineVariant.withValues(alpha: 0.5)),
-          Expanded(flex: 45, child: _outputPanel()),
+          Container(height: 1, color: t.border),
+          Expanded(flex: 45, child: _outputPanel(t)),
         ]),
       ),
     ]);
@@ -179,64 +170,96 @@ class _PlaygroundViewState extends State<PlaygroundView>
 
   // ---- toolbar ----
 
-  Widget _toolbar() {
+  // Mockup .play-toolbar: 44px, panel bg, hairline bottom border.
+  Widget _toolbar(AppTokens t) {
     return Container(
-      height: 52,
-      padding: const EdgeInsets.symmetric(horizontal: 12),
+      height: Dim.midBarH, // 44
+      color: t.panel,
+      padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Row(children: [
-        _langPill(),
+        _langSeg(t),
         const SizedBox(width: 12),
-        _sampleButton(),
-        const SizedBox(width: 12),
-        _runButton(),
+        _sampleButton(t),
         const Spacer(),
-        // Flexible here, not just inside the chip: a Row hands its non-flex
-        // children unbounded main-axis constraints, so the chip would take its
-        // full intrinsic width and its internal Flexible/ellipsis could never
-        // engage on a long config name in a narrow pane.
-        Flexible(child: _backendChip()),
+        // Last-run summary (v2.3), right of the samples menu. Mockup .run-status.
+        if (_lastRunAt != null && !_busy) ...[
+          _lastRunSummary(t),
+          const SizedBox(width: 12),
+        ],
+        _runButton(t),
       ]),
     );
   }
 
-  Widget _langPill() {
-    final scheme = Theme.of(context).colorScheme;
-    Widget seg(String value, String label) {
+  // Mockup .run-status: a status dot + "上次运行 <time> · <elapsed>" in mono
+  // (e.g. "● 上次运行 08:12:44 · 128 ms"; the dot and glyph flip on failure).
+  Widget _lastRunSummary(AppTokens t) {
+    final at = _lastRunAt!;
+    final hh = at.hour.toString().padLeft(2, '0');
+    final mm = at.minute.toString().padLeft(2, '0');
+    final ss = at.second.toString().padLeft(2, '0');
+    final failed = _error != null;
+    final parts = <String>['$hh:$mm:$ss'];
+    if (!failed) {
+      final r = _result;
+      if (r is List) parts.add('${r.length} ${tr('pg.rowsUnit')}');
+      if (r is Map) parts.add('${r.length} ${tr('pg.rowsUnit')}');
+    }
+    if (_elapsedMs != null) parts.add('${_elapsedMs}ms');
+    final color = failed ? t.danger : t.text3;
+    return Row(mainAxisSize: MainAxisSize.min, children: [
+      Container(
+        width: 7,
+        height: 7,
+        decoration: BoxDecoration(color: failed ? t.danger : t.success, shape: BoxShape.circle),
+      ),
+      const SizedBox(width: 6),
+      Text('上次运行 ${parts.join(' · ')}',
+          style: Ts.style(
+              size: Ts.sm, color: color, monoFont: true, tabularNums: true)),
+    ]);
+  }
+
+  // Mockup .lang-seg: a 28px inline segmented control — a 1px-bordered rounded
+  // box, the two halves separated by a right border (no pill), the active half
+  // filled accent with on-accent text (12px/600), the inactive half text-3.
+  Widget _langSeg(AppTokens t) {
+    Widget seg(String value, String label, {required bool last}) {
       final on = _lang == value;
       return InkWell(
         onTap: on ? null : () => _setLang(value),
-        borderRadius: BorderRadius.circular(7),
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 120),
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+        child: Container(
+          height: 28,
+          padding: const EdgeInsets.symmetric(horizontal: 13),
           decoration: BoxDecoration(
-            color: on ? Accents.teal : Colors.transparent,
-            borderRadius: BorderRadius.circular(7),
+            color: on ? t.accent : Colors.transparent,
+            border: last ? null : Border(right: BorderSide(color: t.border)),
           ),
+          alignment: Alignment.center,
           child: Text(label,
-              style: TextStyle(
-                  fontSize: 12.5,
-                  fontWeight: FontWeight.w700,
-                  color: on ? Colors.white : scheme.onSurfaceVariant)),
+              style: Ts.style(
+                  size: Ts.md, // 12
+                  weight: FontWeight.w600,
+                  color: on ? t.onAccent : t.text3)),
         ),
       );
     }
 
     return Container(
-      padding: const EdgeInsets.all(3),
+      height: 28,
       decoration: BoxDecoration(
-        color: scheme.surfaceContainerHighest.withValues(alpha: 0.5),
-        borderRadius: BorderRadius.circular(9),
+        border: Border.all(color: t.border),
+        borderRadius: BorderRadius.circular(Dim.radiusS),
       ),
+      clipBehavior: Clip.antiAlias,
       child: Row(mainAxisSize: MainAxisSize.min, children: [
-        seg('js', 'JS'),
-        seg('go', 'Go'),
+        seg('js', 'JS', last: false),
+        seg('go', 'Go', last: true),
       ]),
     );
   }
 
-  Widget _sampleButton() {
-    final scheme = Theme.of(context).colorScheme;
+  Widget _sampleButton(AppTokens t) {
     final catKey = widget.kind == 'redis' ? 'pg.catRedis' : 'pg.catDdb';
     return PopupMenuButton<int>(
       tooltip: tr('pg.samplesMenu'),
@@ -248,11 +271,8 @@ class _PlaygroundViewState extends State<PlaygroundView>
           enabled: false,
           height: 30,
           child: Text(tr(catKey),
-              style: TextStyle(
-                  fontSize: 10.5,
-                  letterSpacing: 1.2,
-                  fontWeight: FontWeight.w700,
-                  color: scheme.onSurfaceVariant)),
+              style: Ts.style(
+                  size: Ts.xs, letterSpacing: 1.2, weight: FontWeight.w700, color: t.text3)),
         ),
         for (var i = 0; i < _samples.length; i++)
           PopupMenuItem<int>(
@@ -262,16 +282,15 @@ class _PlaygroundViewState extends State<PlaygroundView>
                 margin: const EdgeInsets.only(top: 5, right: 10),
                 width: 7,
                 height: 7,
-                decoration:
-                    const BoxDecoration(color: Accents.teal, shape: BoxShape.circle),
+                decoration: BoxDecoration(color: t.accent, shape: BoxShape.circle),
               ),
               Expanded(
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   Text(tr(_samples[i].titleKey),
-                      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                      style: Ts.style(size: Ts.xl, weight: FontWeight.w600, color: t.text)),
                   const SizedBox(height: 2),
                   Text(tr(_samples[i].descKey),
-                      style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant)),
+                      style: Ts.style(size: Ts.xs, color: t.text3)),
                 ]),
               ),
             ]),
@@ -280,110 +299,97 @@ class _PlaygroundViewState extends State<PlaygroundView>
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         decoration: BoxDecoration(
-          color: scheme.surfaceContainerHighest.withValues(alpha: 0.5),
+          color: t.panel2,
           borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: scheme.outlineVariant.withValues(alpha: 0.5)),
+          border: Border.all(color: t.border),
         ),
         child: Row(mainAxisSize: MainAxisSize.min, children: [
-          Text(tr('pg.samplesMenu'), style: const TextStyle(fontSize: 12.5)),
+          Text(tr('pg.samplesMenu'), style: Ts.style(size: Ts.lg, color: t.text2)),
           const SizedBox(width: 6),
-          Icon(Icons.expand_more, size: 16, color: scheme.onSurfaceVariant),
+          Icon(Icons.expand_more, size: 16, color: t.text3),
         ]),
       ),
     );
   }
 
-  Widget _runButton() {
-    return FilledButton.icon(
-      onPressed: _script.text.trim().isEmpty || _busy ? null : _run,
-      icon: _busy
-          ? const SizedBox(
-              width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
-          : const Icon(Icons.play_arrow, size: 18),
-      label: Text(tr('pg.run')),
-      style: FilledButton.styleFrom(
-        backgroundColor: Accents.indigo,
-        foregroundColor: Colors.white,
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      ),
-    );
-  }
-
-  Widget _backendChip() {
-    final scheme = Theme.of(context).colorScheme;
-    final name = widget.config.name.isEmpty
-        ? (widget.kind == 'redis' ? ':${widget.config.port}' : tr('pg.hostDdb'))
-        : widget.config.name;
-    final accent = _writable ? Accents.teal : Accents.amber;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: accent.withValues(alpha: 0.5)),
-        color: accent.withValues(alpha: 0.08),
-      ),
-      child: Row(mainAxisSize: MainAxisSize.min, children: [
-        Icon(Icons.arrow_forward, size: 13, color: accent),
-        const SizedBox(width: 6),
-        Text('${tr('pg.backendLabel')} ',
-            style: TextStyle(fontSize: 11.5, color: scheme.onSurfaceVariant)),
-        Flexible(
-          child: Text(name,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                  fontSize: 11.5, fontWeight: FontWeight.w600, fontFamily: 'monospace')),
+  // v2.3 primary CTA: dark theme flips to a white fill + near-black text (same
+  // grammar as the MidBar endGroup CTA in main.dart).
+  Widget _runButton(AppTokens t) {
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    final bg = dark ? const Color(0xFFF5F7FB) : t.accent;
+    final fg = dark ? const Color(0xFF10142E) : t.onAccent;
+    return SizedBox(
+      // Mockup .pbtn: 32px tall, radius-sm 6, 14px horizontal padding.
+      height: 32,
+      child: FilledButton.icon(
+        onPressed: _script.text.trim().isEmpty || _busy ? null : _run,
+        icon: _busy
+            ? SizedBox(
+                width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: fg))
+            : Icon(Icons.play_arrow, size: 16, color: fg),
+        label: Text(tr('pg.run'),
+            style: Ts.style(size: Ts.md, weight: FontWeight.w600)),
+        style: FilledButton.styleFrom(
+          backgroundColor: bg,
+          foregroundColor: fg,
+          minimumSize: const Size(0, 32),
+          padding: const EdgeInsets.symmetric(horizontal: 14),
+          shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(Dim.radiusS)),
         ),
-        Text('  ·  ', style: TextStyle(fontSize: 11.5, color: scheme.onSurfaceVariant)),
-        Text(_writable ? tr('pg.writable') : tr('pg.readOnly'),
-            style: TextStyle(fontSize: 11.5, color: accent, fontWeight: FontWeight.w600)),
-      ]),
+      ),
     );
   }
 
   // ---- output panel ----
 
-  Widget _outputPanel() {
-    final scheme = Theme.of(context).colorScheme;
+  // Mockup .output: panel bg with a two-tone .output-head band (panel-2 +
+  // hairline bottom border) carrying an eyebrow title + a done-chip status.
+  Widget _outputPanel(AppTokens t) {
     return Container(
-      color: scheme.surfaceContainerLow.withValues(alpha: 0.4),
+      color: t.panel,
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         Container(
-          height: 40,
-          padding: const EdgeInsets.symmetric(horizontal: 14),
+          decoration: BoxDecoration(
+            color: t.panel2,
+            border: Border(bottom: BorderSide(color: t.hairline)),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
           child: Row(children: [
-            Text(tr('pg.output'),
-                style: TextStyle(
-                    fontSize: 11,
-                    letterSpacing: 1.5,
-                    fontWeight: FontWeight.w700,
-                    color: scheme.onSurfaceVariant)),
+            // Mockup .op-title: 11px/600 uppercase, .8px tracking, text-3.
+            Text(tr('pg.output').toUpperCase(),
+                style: Ts.style(
+                    size: Ts.xs, letterSpacing: 0.8, weight: FontWeight.w600, color: t.text3)),
+            const SizedBox(width: 10),
+            if (_hasRun && !_busy) _statusChip(t),
             const Spacer(),
-            if (_hasRun && !_busy) _statusChip(),
+            if (_hasRun && !_busy)
+              _outputIcon(t, Icons.copy_outlined, tr('br.copy'), _copyOutput),
           ]),
         ),
-        const Divider(height: 1),
         Expanded(
           child: !_hasRun
               ? _center(Icons.play_circle_outline, '', tr('pg.emptyOutput'))
+              // Mockup .output-body: mono 12px log-rows.
               : SingleChildScrollView(
                   padding: const EdgeInsets.fromLTRB(14, 12, 14, 16),
                   child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                    for (final line in _logs) _consoleLine(line),
-                    if (_error != null) _errorBox(),
+                    for (var i = 0; i < _logs.length; i++) _logRow(i, _logs[i], t),
+                    if (_error != null) _errorBox(t),
                     if (_error == null && _result != null) ...[
                       if (_logs.isNotEmpty) const SizedBox(height: 10),
-                      _resultWidget(_result),
+                      _resultWidget(_result, t),
                       const SizedBox(height: 10),
-                      _doneFooter(),
+                      _doneFooter(t),
                     ],
                     // _run clears logs/result/error before awaiting, so without
                     // this the empty-output branch below would paint "✓ done"
                     // for the whole 8s timeout window, while the run is still in
                     // flight. The header chip already gates on !_busy.
                     if (_busy)
-                      _runningRow()
+                      _runningRow(t)
                     else if (_error == null && _result == null && _logs.isEmpty)
-                      _doneFooter(),
+                      _doneFooter(t),
                   ]),
                 ),
         ),
@@ -391,9 +397,37 @@ class _PlaygroundViewState extends State<PlaygroundView>
     );
   }
 
-  Widget _statusChip() {
+  Widget _outputIcon(AppTokens t, IconData icon, String tooltip, VoidCallback onTap) {
+    return IconButton(
+      tooltip: tooltip,
+      visualDensity: VisualDensity.compact,
+      padding: EdgeInsets.zero,
+      constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+      icon: Icon(icon, size: 15, color: t.text3),
+      onPressed: onTap,
+    );
+  }
+
+  void _copyOutput() {
+    final sb = StringBuffer();
+    for (final l in _logs) {
+      sb.writeln(l);
+    }
+    if (_error != null) {
+      sb.writeln(_error);
+    } else if (_result != null) {
+      try {
+        sb.write(const JsonEncoder.withIndent('  ').convert(_result));
+      } catch (_) {
+        sb.write('$_result');
+      }
+    }
+    Clipboard.setData(ClipboardData(text: sb.toString().trimRight()));
+  }
+
+  Widget _statusChip(AppTokens t) {
     final failed = _error != null;
-    final color = failed ? Theme.of(context).colorScheme.error : Accents.green;
+    final color = failed ? t.danger : t.success;
     final parts = <String>[failed ? tr('pg.errored') : tr('pg.ran')];
     if (!failed) {
       // Count what was RETURNED, in container-neutral units. "keys"/"items" would
@@ -407,53 +441,63 @@ class _PlaygroundViewState extends State<PlaygroundView>
       }
     }
     if (_elapsedMs != null) parts.add('${_elapsedMs}ms');
-    return Row(mainAxisSize: MainAxisSize.min, children: [
-      Container(
-          width: 8, height: 8, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
-      const SizedBox(width: 7),
-      Text(parts.join('  ·  ').toUpperCase(),
-          style: TextStyle(
-              fontSize: 11, fontFamily: 'monospace', fontWeight: FontWeight.w600, color: color)),
-    ]);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(99),
+        border: Border.all(color: color.withValues(alpha: 0.6)),
+      ),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        Container(
+            width: 6, height: 6, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
+        const SizedBox(width: 6),
+        Text(parts.join('  ·  '),
+            style: Ts.style(
+                size: Ts.xs, weight: FontWeight.w700, color: color, monoFont: true, tabularNums: true)),
+      ]),
+    );
   }
 
-  Widget _consoleLine(String line) {
-    final muted = Theme.of(context).textTheme.bodySmall?.color;
+  // Mockup .output-body .log-row: a right-aligned 20px line index (text-3) +
+  // the line text (text-2), 10px gap, 2px vertical padding, mono 12px.
+  Widget _logRow(int i, String line, AppTokens t) {
     final isErr = line.startsWith('ERROR:');
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 1.5),
+      padding: const EdgeInsets.symmetric(vertical: 2),
       child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text('↳ ',
-            style: TextStyle(
-                fontFamily: 'monospace',
-                fontSize: 12.5,
-                color: muted?.withValues(alpha: 0.6))),
+        SizedBox(
+          width: 20,
+          child: Text('${i + 1}',
+              textAlign: TextAlign.right,
+              style: Ts.style(size: Ts.md, color: t.text3, monoFont: true, height: 1.4)),
+        ),
+        const SizedBox(width: 10),
         Expanded(
           child: SelectableText(line,
-              style: TextStyle(
-                  fontFamily: 'monospace',
-                  fontSize: 12.5,
+              style: Ts.style(
+                  size: Ts.md,
                   height: 1.4,
-                  color: isErr ? Theme.of(context).colorScheme.error : null)),
+                  monoFont: true,
+                  color: isErr ? t.danger : t.text2)),
         ),
       ]),
     );
   }
 
-  Widget _runningRow() {
-    final muted = Theme.of(context).textTheme.bodySmall?.color;
+  Widget _runningRow(AppTokens t) {
     return Row(mainAxisSize: MainAxisSize.min, children: [
       SizedBox(
           width: 11,
           height: 11,
-          child: CircularProgressIndicator(strokeWidth: 1.6, color: muted)),
+          child: CircularProgressIndicator(strokeWidth: 1.6, color: t.text3)),
       const SizedBox(width: 8),
       Text(tr('pg.running'),
-          style: TextStyle(fontSize: 12, fontFamily: 'monospace', color: muted)),
+          style: Ts.style(size: Ts.md, monoFont: true, color: t.text3)),
     ]);
   }
 
-  Widget _doneFooter() {
+  Widget _doneFooter(AppTokens t) {
     final rows = _result is List
         ? (_result as List).length
         : (_result is Map ? (_result as Map).length : null);
@@ -461,25 +505,24 @@ class _PlaygroundViewState extends State<PlaygroundView>
         ? '✓ ${tr('pg.doneRows')} · $rows ${tr('pg.rowsUnit')}'
         : '✓ ${tr('pg.doneRows')}';
     return Text(txt,
-        style: const TextStyle(fontSize: 12, fontFamily: 'monospace', color: Accents.green));
+        style: Ts.style(size: Ts.md, monoFont: true, color: t.success, tabularNums: true));
   }
 
-  Widget _errorBox() {
-    final scheme = Theme.of(context).colorScheme;
+  Widget _errorBox(AppTokens t) {
     return Container(
       margin: const EdgeInsets.only(top: 8),
       padding: const EdgeInsets.all(11),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: scheme.error.withValues(alpha: 0.6)),
-        color: scheme.error.withValues(alpha: 0.08),
+        border: Border.all(color: t.danger.withValues(alpha: 0.6)),
+        color: t.danger.withValues(alpha: 0.08),
       ),
       child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Icon(Icons.error_outline, color: scheme.error, size: 18),
+        Icon(Icons.error_outline, color: t.danger, size: 18),
         const SizedBox(width: 8),
         Expanded(
           child: SelectableText(_error!,
-              style: const TextStyle(fontSize: 12.5, fontFamily: 'monospace')),
+              style: Ts.style(size: Ts.lg, monoFont: true, color: t.text)),
         ),
       ]),
     );
@@ -487,95 +530,56 @@ class _PlaygroundViewState extends State<PlaygroundView>
 
   // ---- result rendering ----
 
-  Widget _resultWidget(Object? r) {
-    // array of objects → a multi-column table
-    if (r is List && r.isNotEmpty && r.every((e) => e is Map)) {
-      final cols = <String>[];
-      for (final row in r) {
-        for (final k in (row as Map).keys) {
-          final key = k.toString();
-          if (!cols.contains(key)) cols.add(key);
-        }
+  Widget _resultWidget(Object? r, AppTokens t) {
+    // Mockup has no bordered result table — the return value is rendered as
+    // more .log-row lines in the same mono output body. Flatten whatever came
+    // back to a compact per-row form (array of objects → one row per object,
+    // plain object → one row per key, fallback → pretty-JSON lines).
+    final lines = <String>[];
+    if (r is List) {
+      for (final e in r) {
+        lines.add(_compactJson(e));
       }
-      return _table(cols, [for (final row in r) (row as Map).cast<dynamic, dynamic>()]);
-    }
-    // plain object → a key / value table
-    if (r is Map && r.isNotEmpty) {
-      return _table(['key', 'value'],
-          [for (final e in r.entries) {'key': e.key, 'value': e.value}]);
-    }
-    // fallback → pretty JSON
-    String pretty;
-    try {
-      pretty = const JsonEncoder.withIndent('  ').convert(r);
-    } catch (_) {
-      pretty = '$r';
-    }
-    return SelectableText(pretty,
-        style: const TextStyle(fontFamily: 'monospace', fontSize: 12.5, height: 1.4));
-  }
-
-  Widget _table(List<String> cols, List<Map> rows) {
-    final scheme = Theme.of(context).colorScheme;
-    Widget cell(dynamic v, {required bool header}) {
-      if (header) {
-        return Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-          child: Text(v.toString(),
-              style: TextStyle(
-                  fontSize: 12, fontWeight: FontWeight.w700, color: scheme.onSurfaceVariant)),
-        );
+    } else if (r is Map) {
+      for (final e in r.entries) {
+        lines.add('${e.key}: ${_compactJson(e.value)}');
       }
-      final isNum = v is num;
-      final txt = v == null
-          ? '—'
-          : (v is Map || v is List ? _compactJson(v) : v.toString());
-      // SelectableText, matching the console lines and the JSON fallback: this
-      // is the only result surface a value can land on (ddbScanAggregate returns
-      // rows), so a plain Text would make it the one uncopyable one. It takes no
-      // `overflow`, hence clipping at maxLines rather than an ellipsis.
-      return Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-        child: SelectableText(txt,
-            maxLines: 3,
-            style: TextStyle(
-                fontSize: 12,
-                fontFamily: 'monospace',
-                color: isNum ? Accents.amber : null)),
-      );
+    } else {
+      String pretty;
+      try {
+        pretty = const JsonEncoder.withIndent('  ').convert(r);
+      } catch (_) {
+        pretty = '$r';
+      }
+      lines.addAll(pretty.split('\n'));
     }
-
-    return Container(
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: scheme.outlineVariant.withValues(alpha: 0.5)),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: IntrinsicWidth(
-          child: Table(
-            defaultColumnWidth: const IntrinsicColumnWidth(),
-            border: TableBorder(
-              horizontalInside:
-                  BorderSide(color: scheme.outlineVariant.withValues(alpha: 0.35)),
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      for (var i = 0; i < lines.length; i++)
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 2),
+          child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            SizedBox(
+              width: 20,
+              child: Text('${i + 1}',
+                  textAlign: TextAlign.right,
+                  style: Ts.style(size: Ts.md, color: t.text3, monoFont: true, height: 1.4)),
             ),
-            children: [
-              TableRow(
-                decoration: BoxDecoration(
-                    color: scheme.surfaceContainerHighest.withValues(alpha: 0.4)),
-                children: [for (final c in cols) cell(c, header: true)],
-              ),
-              for (final row in rows)
-                TableRow(children: [for (final c in cols) cell(row[c], header: false)]),
-            ],
-          ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: SelectableText(lines[i],
+                  style: Ts.style(size: Ts.md, height: 1.4, monoFont: true, color: t.text2)),
+            ),
+          ]),
         ),
-      ),
-    );
+    ]);
   }
 
+  // Compact one-line form for a result cell: scalars as-is, containers as
+  // single-line JSON, null as an em-dash (matching the rest of the output).
   String _compactJson(dynamic v) {
+    if (v == null) return '—';
+    if (v is num || v is bool) return '$v';
+    if (v is String) return v;
     try {
       return jsonEncode(v);
     } catch (_) {

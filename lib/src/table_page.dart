@@ -19,6 +19,7 @@ import 'i18n.dart';
 import 'item_editor.dart';
 import 'models.dart';
 import 'native.dart';
+import 'ui_tokens.dart';
 
 // The second tuple element is an i18n key (translated at render), not display text.
 const _skConds = [
@@ -92,25 +93,35 @@ class TablePageView extends StatefulWidget {
   /// the authority on its own data), so item writes are offered for the override
   /// table on non-AWS endpoints; on AWS the view stays read-only.
   final bool allowOverrideWrites;
+
+  /// The endpoint Browser's bridge into this state (its MidBar "＋ Item" CTA
+  /// → [TablePageViewState.createItem]); called once the state exists.
+  final void Function(TablePageViewState)? onExplorerReady;
   const TablePageView(
       {super.key,
       required this.core,
       required this.config,
       this.tableOverride,
-      this.allowOverrideWrites = false});
+      this.allowOverrideWrites = false,
+      this.onExplorerReady});
 
   @override
-  State<TablePageView> createState() => _TablePageViewState();
+  State<TablePageView> createState() => TablePageViewState();
 }
 
-class _TablePageViewState extends State<TablePageView>
+// Public state: the endpoint Browser reaches createItem() through onExplorerReady.
+class TablePageViewState extends State<TablePageView>
     with AutomaticKeepAliveClientMixin {
   TableMeta? _meta;
   String? _metaError;
   bool _loadingMeta = false;
 
   // query form
-  bool _panelOpen = true;
+  // Flat (endpoint Browser) mode starts with the advanced form collapsed —
+  // the valuepane head's SCAN FILTER is the everyday tool; the classic
+  // instance Browse keeps the form open as before. `late` so _flat (via
+  // widget) is readable at first use.
+  late bool _panelOpen = !_flat;
   bool _isQuery = false;
   int _targetIdx = 0;
   String _projection = 'all';
@@ -122,6 +133,10 @@ class _TablePageViewState extends State<TablePageView>
   final _skV2 = TextEditingController();
   bool _sortDesc = false;
   final _filters = <_FilterRow>[];
+  // v2.3 endpoint Browser: the single SCAN FILTER box in the valuepane head
+  // (client-side contains-filter over the loaded page's cell reprs; the full
+  // Scan/Query form still lives in the collapsed advanced card).
+  final _scanFilter = TextEditingController();
 
   // results
   bool _running = false;
@@ -143,16 +158,17 @@ class _TablePageViewState extends State<TablePageView>
   @override
   void initState() {
     super.initState();
+    widget.onExplorerReady?.call(this);
     _loadMeta();
   }
 
   @override
-  void didUpdateWidget(TablePageView old) {
-    super.didUpdateWidget(old);
-    if (old.config.id != widget.config.id ||
-        old.config.table != widget.config.table ||
-        old.config.endpoint != widget.config.endpoint ||
-        old.tableOverride != widget.tableOverride) {
+  void didUpdateWidget(TablePageView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.config.id != widget.config.id ||
+        oldWidget.config.table != widget.config.table ||
+        oldWidget.config.endpoint != widget.config.endpoint ||
+        oldWidget.tableOverride != widget.tableOverride) {
       _resetAll();
       _loadMeta();
     }
@@ -160,6 +176,7 @@ class _TablePageViewState extends State<TablePageView>
 
   @override
   void dispose() {
+    _scanFilter.dispose();
     _projectInput.dispose();
     _pk.dispose();
     _skV1.dispose();
@@ -180,11 +197,13 @@ class _TablePageViewState extends State<TablePageView>
     _pk.clear();
     _skV1.clear();
     _skV2.clear();
+    _scanFilter.clear();
     _sortDesc = false;
     for (final f in _filters) {
       f.dispose();
     }
     _filters.clear();
+    _panelOpen = !_flat;
     _page = null;
     _pageError = null;
     _stack
@@ -218,6 +237,30 @@ class _TablePageViewState extends State<TablePageView>
 
   TableTarget? get _target =>
       (_meta != null && _targetIdx < _meta!.targets.length) ? _meta!.targets[_targetIdx] : null;
+
+  // v2.3 endpoint Browser = the flat item table: the header strip, the
+  // advanced Scan/Query card and the in-page Create button are all folded
+  // into the valuepane head (endpoint mode only; an instance's own Browse
+  // keeps the full form, where Scan/Query IS the workflow).
+  bool get _flat => widget.tableOverride != null;
+
+  // MidBar bridge (T12): the endpoint Browser's "＋ Item" end-group CTA calls
+  // this; it is exactly the toolbar's Create-item flow.
+  void createItem() {
+    if (_canWriteItems) _openEditor(from: null, isNew: true);
+  }
+
+  // Rows surviving the valuepane-head SCAN FILTER (client-side, case
+  // insensitive, matched against any visible cell's repr — the scan itself is
+  // unchanged, this only narrows what's rendered).
+  List<TableItem> _visibleRows(TablePage p) {
+    final q = _scanFilter.text.trim().toLowerCase();
+    final rows = _sortedRows(p.rows);
+    if (q.isEmpty) return rows;
+    return rows
+        .where((r) => r.cells.values.any((c) => c.repr.toLowerCase().contains(q)))
+        .toList();
+  }
 
   Map<String, dynamic> _buildReq(Map<String, dynamic>? startKey) {
     final t = _target;
@@ -314,14 +357,15 @@ class _TablePageViewState extends State<TablePageView>
     return Theme(
       data: _denseTabTheme(context),
       child: SingleChildScrollView(
-      padding: const EdgeInsets.all(12),
+      padding: EdgeInsets.all(_flat ? 0 : 12),
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         // The header (AWS read-only chip / foreign-browse controls) always
         // renders, even when the table can't be read — so the safety state
         // stays legible and a table that was just deleted can still be
-        // recreated from here.
-        _headerRow(),
-        const SizedBox(height: 12),
+        // recreated from here. In flat mode the valuepane head carries the
+        // table name + refresh, so the strip collapses to the AWS chip.
+        if (!_flat || _awsMode) _headerRow(),
+        if (!_flat || _awsMode) const SizedBox(height: 12),
         if (_loadingMeta && _meta == null)
           const Padding(
             padding: EdgeInsets.symmetric(vertical: 60),
@@ -337,15 +381,22 @@ class _TablePageViewState extends State<TablePageView>
                     label: Text(tr('tbl.retry')))),
           )
         else ...[
-          _queryCard(),
-          // AWS console shows no success banner — scan stats live in the results
-          // card's caption; only errors get a banner.
-          if (_pageError != null) ...[
+          // Flat mode: the advanced Scan/Query form is one tap away (the
+          // valuepane head's tune toggle) but never in the way — the single
+          // SCAN FILTER box covers the common case.
+          if (!_flat || _panelOpen)
+            Padding(
+              padding: _flat ? const EdgeInsets.all(12) : EdgeInsets.zero,
+              child: _queryCard(),
+            ),
+          if (!_flat && _pageError != null) ...[
             const SizedBox(height: 12),
             _banner(),
           ],
+          if (_flat && _pageError != null)
+            Padding(padding: const EdgeInsets.fromLTRB(12, 0, 12, 12), child: _banner()),
           if (_page != null) ...[
-            const SizedBox(height: 12),
+            if (!_flat) const SizedBox(height: 12),
             _resultsCard(),
           ],
         ],
@@ -769,15 +820,303 @@ class _TablePageViewState extends State<TablePageView>
   Widget _resultsCard() {
     final p = _page!;
     final cols = p.cols.where((c) => !_hiddenCols.contains(c)).toList();
-    final rows = _sortedRows(p.rows);
+    final rows = _visibleRows(p);
     final t = _target;
-    final scheme = Theme.of(context).colorScheme;
     final selCount = _checked.length;
-    return _card(
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        // AWS Explore-items toolbar: "Items returned (N)" left; refresh,
-        // pagination, preferences, Actions and Create item on the right.
-        Row(children: [
+    // The toolbar row: flat mode renders the v2.3 valuepane head (table name
+    // + key summary + SCAN FILTER + advanced toggle + pagination + ＋ Item);
+    // the instance Browse keeps the AWS-console "Items returned" toolbar.
+    final head = _flat ? _valuepaneHead(t) : _toolbar(t, p, rows, selCount);
+    final body = Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        head,
+        if (!_flat) const SizedBox(height: 8),
+        if (rows.isEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 40),
+            child: Center(
+              child: Column(children: [
+                Icon(Icons.inbox_outlined, size: 36, color: Theme.of(context).hintColor),
+                const SizedBox(height: 8),
+                Text(tr('tbl.noItems')),
+                const SizedBox(height: 4),
+                Text(tr('tbl.noItemsToDisplay'),
+                    style: TextStyle(fontSize: 12, color: Theme.of(context).hintColor)),
+              ]),
+            ),
+          )
+        else
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: DataTable(
+              columnSpacing: 16,
+              headingRowHeight: 30,
+              // Mockup .vtable td height = var(--row-h) = 30, fixed.
+              dataRowMinHeight: 30,
+              dataRowMaxHeight: 30,
+              // Mockup shows no checkbox column — selection is by row click.
+              showCheckboxColumn: false,
+              onSelectAll: (v) => setState(() {
+                _checked.clear();
+                if (v == true) _checked.addAll(rows.map((r) => r.ddbJson));
+              }),
+              columns: [
+                // v2.3 flat table leads with a 34px right-aligned line-number
+                // gutter (mockup .vtable .ln); the gutter header stays empty.
+                if (_flat)
+                  const DataColumn(label: SizedBox(width: 34)),
+                for (final c in cols)
+                  DataColumn(
+                    label: _colHeader(c),
+                    onSort: (_, __) => setState(() {
+                      if (_sortCol == c) {
+                        _sortAsc = !_sortAsc;
+                      } else {
+                        _sortCol = c;
+                        _sortAsc = true;
+                      }
+                    }),
+                  ),
+              ],
+              rows: [
+                for (var i = 0; i < rows.length; i++)
+                  _dataRow(t, rows[i], i, cols),
+              ],
+            ),
+          ),
+      ]);
+    if (_flat) {
+      // v2.3 valuepane: borderless flat surface (the endpoint Browser's own
+      // pane border is the frame) instead of the rounded card.
+      return body;
+    }
+    return _card(child: body);
+  }
+
+  DataRow _dataRow(TableTarget? t, TableItem r, int i, List<String> cols) {
+    final tok = AppTokens.of(context);
+    final selected = _checked.contains(r.ddbJson);
+    return DataRow(
+      selected: selected,
+      // v2.3: selection fill + zebra on panel2.
+      color: WidgetStateProperty.resolveWith((_) {
+        if (selected) return tok.selection;
+        return (_flat && i.isOdd) ? tok.panel2 : null;
+      }),
+      // Checkbox / row click = select (AWS behaviour); the pk cell
+      // is the link that opens the item.
+      onSelectChanged: (v) => setState(() {
+        if (v == true) {
+          _checked.add(r.ddbJson);
+        } else {
+          _checked.remove(r.ddbJson);
+        }
+      }),
+      cells: [
+        if (_flat)
+          DataCell(Container(
+            width: 34,
+            height: 30, // fill the row so the 2px bar reads as a left indicator
+            decoration: BoxDecoration(
+              border: Border(
+                  left: BorderSide(
+                      color: selected ? tok.accent : Colors.transparent, width: 2)),
+            ),
+            alignment: Alignment.centerRight,
+            padding: const EdgeInsets.only(right: 6),
+            child: Text('${i + 1}',
+                textAlign: TextAlign.right,
+                style: Ts.style(size: Ts.xs, color: tok.text3, monoFont: true, tabularNums: true)),
+          )),
+        for (final c in cols)
+          c == t?.pk.name
+              ? DataCell(
+                  _pkText(r.cells[c]),
+                  // onTap here wins over the row's onSelectChanged,
+                  // so the pk cell is the item link while the rest of
+                  // the row / checkbox handles selection.
+                  onTap: () => _canWriteItems
+                      ? _openEditor(from: r, isNew: false)
+                      : _showItemViewer(r),
+                )
+              : DataCell(_cellWidget(r.cells[c])),
+      ],
+    );
+  }
+
+  // The v2.3 valuepane head: table name (15.5/700) + PK/SK summary + the
+  // single SCAN FILTER box + advanced-form toggle; refresh / pagination /
+  // preferences / Actions / ＋ Item on the right.
+  Widget _valuepaneHead(TableTarget? t) {
+    final tok = AppTokens.of(context);
+    final p = _page!;
+    // CP 9.x: inside the home chrome the valuepane is ~735px wide and this
+    // row's fixed children (filter box + right cluster) no longer fit. The
+    // wide layout (goldens / full screen) keeps the 200px filter box.
+    return LayoutBuilder(builder: (context, constraints) {
+      final compact = constraints.maxWidth < 800;
+      return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: tok.panel2,
+        border: Border(bottom: BorderSide(color: tok.hairline)),
+      ),
+      child: Row(children: [
+        // Mockup .vp-title: the table name is a small uppercase eyebrow
+        // (11/600/text-3), NOT a large prominent heading.
+        Flexible(
+          child: Text(_effTable.toUpperCase(),
+              overflow: TextOverflow.ellipsis,
+              style: Ts.style(
+                  size: Ts.xs, weight: FontWeight.w600, letterSpacing: .8, color: tok.text3)),
+        ),
+        if (t != null) ...[
+          const SizedBox(width: 14),
+          // Mockup .empty-note: "PK <b>user#</b> · SK <b>profile</b>" — sans
+          // (the PK/SK values stay non-mono, the strong is just 600 text).
+          // Plain Texts instead of TextSpan children: the capture channel
+          // rasterizes rich runs as .notdef blocks (CP 9.x).
+          Row(mainAxisSize: MainAxisSize.min, children: [
+            Text('PK ', style: Ts.style(size: Ts.md, color: tok.text3)),
+            Text(t.pk.name,
+                style: Ts.style(size: Ts.md, weight: FontWeight.w600, color: tok.text)),
+            if (t.sk != null) ...[
+              Text(' · SK ', style: Ts.style(size: Ts.md, color: tok.text3)),
+              Text(t.sk!.name,
+                  style: Ts.style(size: Ts.md, weight: FontWeight.w600, color: tok.text)),
+            ],
+          ]),
+        ],
+        const SizedBox(width: 16),
+        SizedBox(
+          width: compact ? 132 : 200,
+          height: 26,
+          child: TextField(
+            controller: _scanFilter,
+            onChanged: (_) => setState(() {}),
+            style: Ts.style(size: Ts.sm, monoFont: true, letterSpacing: .6),
+            decoration: InputDecoration(
+              isDense: true,
+              // No i18n key for this one — the design's own placeholder.
+              hintText: 'SCAN FILTER…',
+              hintStyle: Ts.style(size: Ts.sm, color: tok.text3, monoFont: true, letterSpacing: .6),
+              prefixIcon: Icon(Icons.search, size: 14, color: tok.text3),
+              prefixIconConstraints: const BoxConstraints(minWidth: 28, minHeight: 26),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+              border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(Dim.radiusS),
+                  borderSide: BorderSide(color: tok.border)),
+              enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(Dim.radiusS),
+                  borderSide: BorderSide(color: tok.border)),
+            ),
+          ),
+        ),
+        IconButton(
+          // The advanced Scan/Query card (projection / key conditions / typed
+          // filters) — folded away in flat mode, one tap back.
+          tooltip: tr('tbl.scanOrQueryItems'),
+          visualDensity: VisualDensity.compact,
+          isSelected: _panelOpen,
+          icon: const Icon(Icons.tune, size: 17),
+          onPressed: () => setState(() => _panelOpen = !_panelOpen),
+        ),
+        const Spacer(),
+        Text('${p.returned}',
+            style: Ts.style(size: Ts.md, weight: FontWeight.w600, color: tok.text2, tabularNums: true)),
+        IconButton(
+          tooltip: tr('tbl.refresh'),
+          visualDensity: VisualDensity.compact,
+          onPressed: _running ? null : () => _run(),
+          icon: const Icon(Icons.refresh, size: 17),
+        ),
+        IconButton(
+          visualDensity: VisualDensity.compact,
+          onPressed: _pageIdx == 0 || _running ? null : _prevPage,
+          icon: const Icon(Icons.chevron_left, size: 20),
+        ),
+        Text('${_pageIdx + 1}', style: Ts.style(size: Ts.md, tabularNums: true)),
+        IconButton(
+          visualDensity: VisualDensity.compact,
+          onPressed: p.hasNext && !_running ? _nextPage : null,
+          icon: const Icon(Icons.chevron_right, size: 20),
+        ),
+        IconButton(
+          tooltip: tr('tbl.preferences'),
+          visualDensity: VisualDensity.compact,
+          onPressed: _openPreferences,
+          icon: const Icon(Icons.settings, size: 17),
+        ),
+        if (_canWriteItems) ...[
+          const SizedBox(width: 4),
+          _selectionMenu(),
+          const SizedBox(width: 6),
+          _ghostButton(Icons.add, tr('tbl.createItem'),
+              () => _openEditor(from: null, isNew: true)),
+        ],
+      ]),
+    );
+    });
+  }
+
+  // Ghost button (v2.3 .abtn.ghost — the ＋ Item grammar): a quiet 26px
+  // outlined action, no fill.
+  Widget _ghostButton(IconData icon, String label, VoidCallback onPressed) {
+    final tok = AppTokens.of(context);
+    return SizedBox(
+      height: 26,
+      child: OutlinedButton.icon(
+        onPressed: onPressed,
+        icon: Icon(icon, size: 14),
+        label: Text(label, style: Ts.style(size: Ts.md, weight: FontWeight.w500)),
+        style: OutlinedButton.styleFrom(
+          foregroundColor: tok.text2,
+          side: BorderSide(color: tok.border),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(Dim.radiusS)),
+          padding: const EdgeInsets.symmetric(horizontal: 10),
+        ),
+      ),
+    );
+  }
+
+  // The Actions menu (Edit / Duplicate / Delete / Export) — shared by the
+  // valuepane head and the classic toolbar.
+  Widget _selectionMenu() {
+    final p = _page!;
+    final cols = p.cols.where((c) => !_hiddenCols.contains(c)).toList();
+    final rows = _visibleRows(p);
+    final selCount = _checked.length;
+    return MenuAnchor(
+      builder: (ctx, ctrl, _) => OutlinedButton.icon(
+        onPressed: () => ctrl.isOpen ? ctrl.close() : ctrl.open(),
+        icon: const Icon(Icons.arrow_drop_down, size: 18),
+        label: Text(tr('tbl.actions')),
+      ),
+      menuChildren: [
+        MenuItemButton(
+          onPressed: selCount == 1 ? () => _openEditor(from: _selectedItem(rows), isNew: false) : null,
+          child: Text(tr('tbl.editItem')),
+        ),
+        MenuItemButton(
+          onPressed: selCount == 1 ? () => _openEditor(from: _selectedItem(rows), isNew: true) : null,
+          child: Text(tr('tbl.duplicateItem')),
+        ),
+        MenuItemButton(
+          onPressed: selCount >= 1 ? () => _deleteSelected(rows) : null,
+          child: Text(tr('tbl.deleteItems')),
+        ),
+        const Divider(height: 4),
+        MenuItemButton(
+          onPressed: rows.isEmpty ? null : () => _exportCsv(cols, rows),
+          child: Text(tr('tbl.exportToCsv')),
+        ),
+      ],
+    );
+  }
+
+  // The classic (instance Browse) toolbar — the AWS Explore-items layout.
+  Widget _toolbar(TableTarget? t, TablePage p, List<TableItem> rows, int selCount) {
+    final scheme = Theme.of(context).colorScheme;
+    return Row(children: [
           Expanded(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text('${tr('tbl.itemsReturned')} (${p.returned})',
@@ -813,129 +1152,29 @@ class _TablePageViewState extends State<TablePageView>
           ),
           if (_canWriteItems) ...[
             const SizedBox(width: 6),
-            MenuAnchor(
-              builder: (ctx, ctrl, _) => OutlinedButton.icon(
-                onPressed: () => ctrl.isOpen ? ctrl.close() : ctrl.open(),
-                icon: const Icon(Icons.arrow_drop_down, size: 18),
-                label: Text(tr('tbl.actions')),
-              ),
-              menuChildren: [
-                MenuItemButton(
-                  onPressed: selCount == 1 ? () => _openEditor(from: _selectedItem(rows), isNew: false) : null,
-                  child: Text(tr('tbl.editItem')),
-                ),
-                MenuItemButton(
-                  onPressed: selCount == 1 ? () => _openEditor(from: _selectedItem(rows), isNew: true) : null,
-                  child: Text(tr('tbl.duplicateItem')),
-                ),
-                MenuItemButton(
-                  onPressed: selCount >= 1 ? () => _deleteSelected(rows) : null,
-                  child: Text(tr('tbl.deleteItems')),
-                ),
-                const Divider(height: 4),
-                MenuItemButton(
-                  onPressed: rows.isEmpty ? null : () => _exportCsv(cols, rows),
-                  child: Text(tr('tbl.exportToCsv')),
-                ),
-              ],
-            ),
+            _selectionMenu(),
             const SizedBox(width: 8),
             FilledButton(
               onPressed: () => _openEditor(from: null, isNew: true),
               child: Text(tr('tbl.createItem')),
             ),
           ],
-        ]),
-        const SizedBox(height: 8),
-        if (rows.isEmpty)
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 40),
-            child: Center(
-              child: Column(children: [
-                Icon(Icons.inbox_outlined, size: 36, color: Theme.of(context).hintColor),
-                const SizedBox(height: 8),
-                Text(tr('tbl.noItems')),
-                const SizedBox(height: 4),
-                Text(tr('tbl.noItemsToDisplay'),
-                    style: TextStyle(fontSize: 12, color: Theme.of(context).hintColor)),
-              ]),
-            ),
-          )
-        else
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: DataTable(
-              columnSpacing: 16,
-              headingRowHeight: 30,
-              dataRowMinHeight: 28,
-              dataRowMaxHeight: 34,
-              onSelectAll: (v) => setState(() {
-                _checked.clear();
-                if (v == true) _checked.addAll(rows.map((r) => r.ddbJson));
-              }),
-              columns: [
-                for (final c in cols)
-                  DataColumn(
-                    label: _colHeader(c),
-                    onSort: (_, __) => setState(() {
-                      if (_sortCol == c) {
-                        _sortAsc = !_sortAsc;
-                      } else {
-                        _sortCol = c;
-                        _sortAsc = true;
-                      }
-                    }),
-                  ),
-              ],
-              rows: [
-                for (final r in rows)
-                  DataRow(
-                    selected: _checked.contains(r.ddbJson),
-                    // Checkbox / row click = select (AWS behaviour); the pk cell
-                    // is the link that opens the item.
-                    onSelectChanged: (v) => setState(() {
-                      if (v == true) {
-                        _checked.add(r.ddbJson);
-                      } else {
-                        _checked.remove(r.ddbJson);
-                      }
-                    }),
-                    cells: [
-                      for (final c in cols)
-                        c == t?.pk.name
-                            ? DataCell(
-                                _pkText(r.cells[c]),
-                                // onTap here wins over the row's onSelectChanged,
-                                // so the pk cell is the item link while the rest of
-                                // the row / checkbox handles selection.
-                                onTap: () => _canWriteItems
-                                    ? _openEditor(from: r, isNew: false)
-                                    : _showItemViewer(r),
-                              )
-                            : DataCell(_cellWidget(r.cells[c])),
-                    ],
-                  ),
-              ],
-            ),
-          ),
-      ]),
-    );
+        ]);
   }
 
   // The partition-key cell — rendered as a link (the DataCell.onTap opens it).
+  // Mockup .vtable .pk: plain mono weight-600 text in --text (NOT a coloured
+  // underlined link). The cell's onTap still opens the item editor/viewer.
   Widget _pkText(AttrCell? cell) {
-    final scheme = Theme.of(context).colorScheme;
+    final tok = AppTokens.of(context);
     return ConstrainedBox(
       constraints: const BoxConstraints(maxWidth: 320),
       child: Text(
         cell?.repr ?? '',
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
-        style: TextStyle(
-            color: scheme.primary,
-            fontWeight: FontWeight.w600,
-            decoration: TextDecoration.underline,
-            decorationColor: scheme.primary.withValues(alpha: 0.4)),
+        style: Ts.style(
+            size: Ts.md, weight: FontWeight.w600, monoFont: true, tabularNums: true, color: tok.text),
       ),
     );
   }
@@ -947,33 +1186,29 @@ class _TablePageViewState extends State<TablePageView>
     return null;
   }
 
+  // Mockup .vtable thead th: small uppercase letterspaced text-3 header — no
+  // type-name suffix. Sorting arrow preserved.
   Widget _colHeader(String c) {
-    final t = _target;
-    String? typ;
-    if (t != null) {
-      if (t.pk.name == c) typ = t.pk.type;
-      if (t.sk?.name == c) typ = t.sk!.type;
-    }
-    final typeName = {'S': 'String', 'N': 'Number', 'B': 'Binary'}[typ];
+    final tok = AppTokens.of(context);
     return Row(mainAxisSize: MainAxisSize.min, children: [
-      Text(c, style: const TextStyle(fontWeight: FontWeight.w600)),
-      if (typeName != null)
-        Padding(
-          padding: const EdgeInsets.only(left: 4),
-          child: Text('($typeName)',
-              style: TextStyle(
-                  fontStyle: FontStyle.italic, fontSize: 11, color: Theme.of(context).hintColor)),
-        ),
+      Text(c.toUpperCase(),
+          style: Ts.style(
+              size: 10.5, weight: FontWeight.w600, letterSpacing: .7, color: tok.text3)),
       if (_sortCol == c)
-        Icon(_sortAsc ? Icons.arrow_upward : Icons.arrow_downward, size: 12),
+        Icon(_sortAsc ? Icons.arrow_upward : Icons.arrow_downward, size: 12, color: tok.text3),
     ]);
   }
 
   Widget _cellWidget(AttrCell? cell) {
+    final tok = AppTokens.of(context);
     if (cell == null) return const SizedBox.shrink();
+    // Mockup .vtable .mono: every data cell is mono 12px tabular.
     final text = ConstrainedBox(
       constraints: const BoxConstraints(maxWidth: 320),
-      child: Text(cell.repr, maxLines: 1, overflow: TextOverflow.ellipsis),
+      child: Text(cell.repr,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: Ts.style(size: Ts.md, monoFont: true, tabularNums: true, color: tok.text2)),
     );
     if (cell.isBinary && cell.printable && cell.b64 != null) {
       return Tooltip(message: 'base64: ${cell.b64}', child: text);

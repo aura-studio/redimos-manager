@@ -22,6 +22,8 @@ import 'i18n.dart';
 import 'models.dart';
 import 'native.dart';
 import 'resp_client.dart';
+import 'cli_drawer.dart';
+import 'ui_tokens.dart';
 
 /// Rows loaded so far and the cursor to fetch more. One open key = one tab.
 class _KeyTab {
@@ -543,10 +545,23 @@ class _BrowserPageViewState extends State<BrowserPageView>
     }
     return Theme(
       data: _denseTabTheme(context),
-      child: Row(children: [
-        SizedBox(width: 288, child: _leftPanel()),
-        const VerticalDivider(width: 1),
-        Expanded(child: _rightPanel()),
+      child: Column(children: [
+        Expanded(
+          child: Row(children: [
+            // Mockup .sidebar: elev-side soft right-edge shadow over the border.
+            Container(
+              width: Dim.sidebarW,
+              decoration: BoxDecoration(
+                boxShadow: Depth.elevSide(Theme.of(context).brightness),
+              ),
+              child: _leftPanel(),
+            ),
+            const VerticalDivider(width: 1),
+            Expanded(child: _rightPanel()),
+          ]),
+        ),
+        // v2.3 CLI drawer: collapsible RESP console pinned to the Browse floor.
+        CliDrawer(host: '127.0.0.1', port: widget.config.port),
       ]),
     );
   }
@@ -554,85 +569,47 @@ class _BrowserPageViewState extends State<BrowserPageView>
   // ---- left panel ----
 
   Widget _leftPanel() {
-    final scheme = Theme.of(context).colorScheme;
+    final tok = AppTokens.of(context);
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      // Mockup .filter-row: DB f-select + search box on ONE row.
       Padding(
-        padding: const EdgeInsets.fromLTRB(12, 12, 12, 6),
+        padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
         child: Row(children: [
-          Tooltip(
-            message: widget.config.multiDb
-                ? tr('br.selectDatabase')
-                : tr('br.multiDbOff'),
-            child: DropdownButton<int>(
-              value: _db,
-              underline: const SizedBox.shrink(),
-              items: [for (var i = 0; i < 16; i++) DropdownMenuItem(value: i, child: Text('DB$i'))],
-              onChanged: (v) async {
-                if (v == null) return;
-                setState(() => _db = v);
-                await _client?.select(v);
-                if (!mounted) return;
-                _reload();
-              },
-            ),
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: FilledButton.icon(
-              onPressed: _newKeyDialog,
-              icon: const Icon(Icons.add, size: 18),
-              label: Text(tr('br.newKey')),
-              style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(36)),
-            ),
-          ),
+          _dbSelect(tok),
+          const SizedBox(width: 6),
+          Expanded(child: _searchBox(tok)),
         ]),
       ),
-      Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12),
-        child: TextField(
-          controller: _search,
-          decoration: InputDecoration(
-            isDense: true,
-            prefixIcon: const Icon(Icons.search, size: 18),
-            hintText: 'Glob pattern, e.g. user:*',
-            border: const OutlineInputBorder(),
-            contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
-            suffixIcon: IconButton(
-              tooltip: tr('br.search'),
-              icon: const Icon(Icons.arrow_forward, size: 18),
-              onPressed: _reload,
-            ),
-          ),
-          onSubmitted: (_) => _reload(),
-        ),
-      ),
+      // The mockup's ＋ New Key lives in the MidBar mend, not the sidebar —
+      // the MidBar CTA bridge (startCreateKey → _newKeyDialog) covers it, so
+      // the sidebar keeps the design's filter-row → side-tools rhythm.
       Padding(
         padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
         child: Row(children: [
+          // Mockup .side-tools .count: mono, 600 + tabular-nums (v2.4).
           Text('${_keys.length} ${tr('br.keysUnit')}${_scanDone ? '' : '+'}',
-              style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant)),
+              style: Ts.style(size: Ts.sm, weight: FontWeight.w600, color: tok.text2,
+                  monoFont: true, tabularNums: true)),
           const Spacer(),
-          IconButton(
+          // Mockup .seg: segmented 树/平铺 control.
+          _viewSeg(tok),
+          const SizedBox(width: 4),
+          _sideToolBtn(
             tooltip: _selectMode ? tr('br.exitSelect') : tr('br.selectMultiple'),
-            visualDensity: VisualDensity.compact,
-            isSelected: _selectMode,
-            icon: Icon(_selectMode ? Icons.check_box : Icons.check_box_outlined, size: 18),
-            onPressed: () => setState(() {
+            icon: _selectMode ? Icons.check_box : Icons.check_box_outlined,
+            on: _selectMode,
+            tok: tok,
+            onTap: () => setState(() {
               _selectMode = !_selectMode;
               if (!_selectMode) _checked.clear();
             }),
           ),
-          IconButton(
-            tooltip: _tree ? tr('br.flatView') : tr('br.treeView'),
-            visualDensity: VisualDensity.compact,
-            icon: Icon(_tree ? Icons.account_tree : Icons.list, size: 18),
-            onPressed: () => setState(() => _tree = !_tree),
-          ),
-          IconButton(
+          _sideToolBtn(
             tooltip: tr('br.refresh'),
-            visualDensity: VisualDensity.compact,
-            icon: const Icon(Icons.refresh, size: 18),
-            onPressed: _reload,
+            icon: Icons.refresh,
+            on: false,
+            tok: tok,
+            onTap: _reload,
           ),
         ]),
       ),
@@ -646,46 +623,218 @@ class _BrowserPageViewState extends State<BrowserPageView>
       ),
       if (_selectMode && _checked.isNotEmpty)
         Container(
-          color: scheme.errorContainer,
+          color: Theme.of(context).colorScheme.errorContainer,
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
           child: Row(children: [
-            Text('${_checked.length} ${tr('br.selected')}', style: TextStyle(color: scheme.onErrorContainer)),
+            Text('${_checked.length} ${tr('br.selected')}',
+                style: TextStyle(color: Theme.of(context).colorScheme.onErrorContainer)),
             const Spacer(),
             TextButton(
               onPressed: () => setState(_checked.clear),
               child: Text(tr('br.clear')),
             ),
             FilledButton.icon(
-              style: FilledButton.styleFrom(backgroundColor: scheme.error),
+              style: FilledButton.styleFrom(backgroundColor: Theme.of(context).colorScheme.error),
               onPressed: _batchDelete,
               icon: const Icon(Icons.delete_outline, size: 16),
               label: Text(tr('br.delete')),
             ),
           ]),
         ),
+      // Mockup .side-foot: two 26px outlined abtn chips; Load all keeps the
+      // outlined look with danger text + danger-tinted border (not a solid fill).
       if (!_scanDone)
         Padding(
-          padding: const EdgeInsets.all(8),
+          padding: const EdgeInsets.fromLTRB(12, 9, 12, 9),
           child: Row(children: [
             Expanded(
-              child: OutlinedButton(
-                onPressed: _scanning ? null : _scanMore,
-                child: _scanning
-                    ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-                    : Text(tr('br.loadMore')),
+              child: _sideFootBtn(
+                tok,
+                label: _scanning ? null : tr('br.loadMore'),
+                onTap: _scanning ? null : _scanMore,
               ),
             ),
-            const SizedBox(width: 8),
-            // ARDM's "load all" is a red filled button — it walks the whole keyspace.
-            FilledButton(
-              style: FilledButton.styleFrom(
-                  backgroundColor: scheme.error, foregroundColor: scheme.onError),
-              onPressed: _scanning ? null : _loadAllConfirm,
-              child: Text(tr('br.loadAll')),
+            const SizedBox(width: 6),
+            Expanded(
+              child: _sideFootBtn(
+                tok,
+                label: _scanning ? null : tr('br.loadAll'),
+                danger: true,
+                onTap: _scanning ? null : _loadAllConfirm,
+              ),
             ),
           ]),
         ),
     ]);
+  }
+
+  // Mockup .side-foot .abtn: 26px-tall outlined chip; .load-all is danger text
+  // + 30%-danger border, still outlined.
+  Widget _sideFootBtn(AppTokens tok,
+      {String? label, bool danger = false, VoidCallback? onTap}) {
+    final color = danger ? tok.danger : tok.text2;
+    return InkWell(
+      borderRadius: BorderRadius.circular(Dim.radiusS),
+      onTap: onTap,
+      child: Container(
+        height: 26,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: tok.panel,
+          borderRadius: BorderRadius.circular(Dim.radiusS),
+          border: Border.all(
+              color: danger ? tok.danger.withValues(alpha: 0.35) : tok.border),
+        ),
+        child: label == null
+            ? SizedBox(
+                width: 14,
+                height: 14,
+                child: CircularProgressIndicator(strokeWidth: 2, color: color))
+            : Text(label,
+                style: Ts.style(size: Ts.md, weight: FontWeight.w500, color: color)),
+      ),
+    );
+  }
+
+  // Mockup .seg: 26px segmented control for tree/flat.
+  Widget _viewSeg(AppTokens tok) {
+    Widget segBtn({required IconData icon, required bool on, required VoidCallback onTap, required String tooltip}) {
+      return Tooltip(
+        message: tooltip,
+        child: InkWell(
+          onTap: onTap,
+          child: Container(
+            width: 30,
+            height: 26,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(color: on ? tok.selection : Colors.transparent),
+            child: Icon(icon, size: 15, color: on ? tok.accent : tok.text3),
+          ),
+        ),
+      );
+    }
+
+    return Container(
+      height: 26,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(Dim.radiusS),
+        border: Border.all(color: tok.border),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        segBtn(
+            icon: Icons.account_tree,
+            on: _tree,
+            tooltip: tr('br.treeView'),
+            onTap: () => setState(() => _tree = true)),
+        Container(width: 1, height: 26, color: tok.border),
+        segBtn(
+            icon: Icons.list,
+            on: !_tree,
+            tooltip: tr('br.flatView'),
+            onTap: () => setState(() => _tree = false)),
+      ]),
+    );
+  }
+
+  // Mockup .ibtn: 26x26 icon button, .on = selection bg + accent.
+  Widget _sideToolBtn({
+    required String tooltip,
+    required IconData icon,
+    required bool on,
+    required AppTokens tok,
+    required VoidCallback onTap,
+  }) {
+    return Tooltip(
+      message: tooltip,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(Dim.radiusS),
+        onTap: onTap,
+        child: Container(
+          width: 26,
+          height: 26,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: on ? tok.selection : Colors.transparent,
+            borderRadius: BorderRadius.circular(Dim.radiusS),
+          ),
+          child: Icon(icon, size: 15, color: on ? tok.accent : tok.text2),
+        ),
+      ),
+    );
+  }
+
+  // Mockup .f-select: 30px-tall mono 12px bordered chip + caret for the DB picker.
+  Widget _dbSelect(AppTokens tok) {
+    return Tooltip(
+      message: widget.config.multiDb ? tr('br.selectDatabase') : tr('br.multiDbOff'),
+      child: Container(
+        height: Dim.ctlH,
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        decoration: BoxDecoration(
+          color: tok.panel,
+          borderRadius: BorderRadius.circular(Dim.radiusS),
+          border: Border.all(color: tok.border),
+        ),
+        child: DropdownButtonHideUnderline(
+          child: DropdownButton<int>(
+            value: _db,
+            isDense: true,
+            icon: Icon(Icons.arrow_drop_down, size: 16, color: tok.text3),
+            style: Ts.style(size: Ts.md, color: tok.text2, monoFont: true),
+            items: [
+              for (var i = 0; i < 16; i++)
+                DropdownMenuItem(value: i, child: Text('DB$i')),
+            ],
+            onChanged: (v) async {
+              if (v == null) return;
+              setState(() => _db = v);
+              await _client?.select(v);
+              if (!mounted) return;
+              _reload();
+            },
+          ),
+        ),
+      ),
+    );
+  }
+
+  // Mockup .search: 30px-tall bordered box, search icon + mono 12px input.
+  Widget _searchBox(AppTokens tok) {
+    return Container(
+      height: Dim.ctlH,
+      decoration: BoxDecoration(
+        color: tok.panel,
+        borderRadius: BorderRadius.circular(Dim.radiusS),
+        border: Border.all(color: tok.border),
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      child: Row(children: [
+        Icon(Icons.search, size: 15, color: tok.text3),
+        const SizedBox(width: 6),
+        Expanded(
+          child: TextField(
+            controller: _search,
+            style: Ts.style(size: Ts.md, color: tok.text, monoFont: true),
+            decoration: InputDecoration(
+              isDense: true,
+              // Shield from the theme-level .f-input contentPadding (CP 7.6):
+              // the bordered container already provides the mockup .search
+              // padding; the inner input is borderless with none of its own.
+              contentPadding: EdgeInsets.zero,
+              border: InputBorder.none,
+              hintText: 'Glob pattern, e.g. user:*',
+              hintStyle: Ts.style(size: Ts.md, color: tok.text3, monoFont: true),
+            ),
+            onSubmitted: (_) => _reload(),
+          ),
+        ),
+        InkWell(
+          onTap: _reload,
+          child: Icon(Icons.arrow_forward, size: 14, color: tok.text3),
+        ),
+      ]),
+    );
   }
 
   List<Widget> _flatNodes() => [
@@ -694,6 +843,8 @@ class _BrowserPageViewState extends State<BrowserPageView>
 
   Widget _leaf(String key, String label, int depth) {
     final sel = key == _selected;
+    final tok = AppTokens.of(context);
+    final type = _tabType(key);
     return InkWell(
       onTap: () {
         if (_selectMode) {
@@ -705,8 +856,15 @@ class _BrowserPageViewState extends State<BrowserPageView>
       onSecondaryTapDown: (d) => _keyMenu(key, d.globalPosition),
       onLongPress: () => _keyMenu(key, null),
       child: Container(
-        color: sel ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.15) : null,
-        padding: EdgeInsets.fromLTRB(12.0 + depth * 16, 7, 8, 7),
+        height: Dim.rowH,
+        // v2.3: selection fill + 2px left accent indicator.
+        decoration: BoxDecoration(
+          color: sel ? tok.selection : null,
+          border: sel ? Border(left: BorderSide(color: tok.accent, width: 2)) : null,
+          borderRadius: BorderRadius.circular(Dim.radiusS),
+        ),
+        // Mockup .node.key: padding-left 24px base, 40px when nested (deep).
+        padding: EdgeInsets.only(left: depth > 0 ? 40 : 24, right: 8),
         child: Row(children: [
           if (_selectMode)
             Padding(
@@ -717,11 +875,57 @@ class _BrowserPageViewState extends State<BrowserPageView>
                 color: Theme.of(context).colorScheme.primary,
               ),
             ),
-          // ARDM leaves are plain text (no key glyph), indented under folders.
-          Expanded(child: Text(label, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 13))),
+          // Mockup: each key row leads with a small 18x18 type badge.
+          if (type != null && type.isNotEmpty) ...[
+            _leafBadge(tok, type),
+            const SizedBox(width: 7),
+          ],
+          // Mockup .kname: mono 12px, ellipsis.
+          Expanded(
+            child: Text(label,
+                overflow: TextOverflow.ellipsis,
+                style: Ts.style(size: Ts.md, color: tok.text, monoFont: true,
+                    weight: sel ? FontWeight.w600 : FontWeight.normal)),
+          ),
         ]),
       ),
     );
+  }
+
+  // Mockup .badge: 18x18 single-letter pastel chip leading each key row.
+  Widget _leafBadge(AppTokens tok, String type) {
+    final c = tok.typeColors(type);
+    return Container(
+      width: 18,
+      height: 18,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: c.fill,
+        borderRadius: BorderRadius.circular(5),
+        border: Border.all(color: c.border),
+      ),
+      child: Text(_leafTypeLetter(type),
+          style: Ts.style(size: 10, weight: FontWeight.w700, color: c.fg, monoFont: true)),
+    );
+  }
+
+  String _leafTypeLetter(String type) => switch (type.toLowerCase()) {
+        'string' => 'S',
+        'hash' => 'H',
+        'list' => 'L',
+        'set' => '⊕',
+        'zset' => 'Z',
+        'stream' => 'T',
+        'json' => 'J',
+        _ => type.isEmpty ? '?' : type[0].toUpperCase(),
+      };
+
+  // Type of an open key's tab (loaded lazily); empty/unknown until its tab loads.
+  String? _tabType(String key) {
+    for (final t in _tabs) {
+      if (t.key == key) return t.type.isEmpty ? null : t.type;
+    }
+    return null;
   }
 
   Future<void> _keyMenu(String key, Offset? at) async {
@@ -806,51 +1010,101 @@ class _BrowserPageViewState extends State<BrowserPageView>
     }
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       _tabStrip(),
-      const Divider(height: 1),
-      Expanded(child: _detail(_tabs[_active])),
+      // The active tab's card bottom edge merges into this body band.
+      Expanded(
+        child: Container(
+          decoration: BoxDecoration(
+            color: AppTokens.of(context).panel,
+            border: Border(top: BorderSide(color: AppTokens.of(context).border)),
+          ),
+          child: _detail(_tabs[_active]),
+        ),
+      ),
     ]);
   }
 
+  // Mockup .ktabs: 30px top-rounded bordered tab cards (active = panel bg +
+  // full border, no bottom edge → merges into the detail body), 2px gap, plus a
+  // trailing ghost "add" tile.
   Widget _tabStrip() {
-    final scheme = Theme.of(context).colorScheme;
-    return SizedBox(
-      height: 38,
-      child: ListView.builder(
-        scrollDirection: Axis.horizontal,
-        itemCount: _tabs.length,
-        itemBuilder: (ctx, i) {
-          final active = i == _active;
-          return InkWell(
-            onTap: () => setState(() => _active = i),
-            child: Container(
-              constraints: const BoxConstraints(maxWidth: 220),
-              padding: const EdgeInsets.only(left: 12, right: 4),
-              decoration: BoxDecoration(
-                color: active ? scheme.primary.withValues(alpha: 0.12) : null,
-                border: Border(
-                  bottom: BorderSide(
-                    color: active ? scheme.primary : Colors.transparent,
-                    width: 2,
-                  ),
-                ),
-              ),
-              child: Row(mainAxisSize: MainAxisSize.min, children: [
-                Flexible(
-                  child: Text(_tabs[i].key,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(fontSize: 12.5, fontWeight: active ? FontWeight.w600 : FontWeight.w400)),
-                ),
-                IconButton(
-                  tooltip: tr('br.close'),
-                  visualDensity: VisualDensity.compact,
-                  iconSize: 14,
-                  icon: const Icon(Icons.close),
-                  onPressed: () => _closeTab(i),
-                ),
-              ]),
+    final tok = AppTokens.of(context);
+    return Container(
+      color: tok.bg,
+      padding: const EdgeInsets.fromLTRB(14, 8, 14, 0),
+      child: SizedBox(
+        height: 30,
+        child: ListView.builder(
+          scrollDirection: Axis.horizontal,
+          itemCount: _tabs.length + 1, // +1 = the trailing "add" ghost tile
+          itemBuilder: (ctx, i) {
+            if (i == _tabs.length) return _addTabTile(tok);
+            final active = i == _active;
+            return Padding(
+              padding: const EdgeInsets.only(right: 2),
+              child: _ktab(tok, i, active),
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  Widget _ktab(AppTokens tok, int i, bool active) {
+    return InkWell(
+      onTap: () => setState(() => _active = i),
+      borderRadius: const BorderRadius.vertical(top: Radius.circular(Dim.radiusS)),
+      child: Container(
+        constraints: const BoxConstraints(maxWidth: 220),
+        padding: const EdgeInsets.only(left: 12, right: 6),
+        decoration: BoxDecoration(
+          color: active ? tok.panel : Colors.transparent,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(Dim.radiusS)),
+          border: Border(
+            top: BorderSide(color: active ? tok.border : Colors.transparent),
+            left: BorderSide(color: active ? tok.border : Colors.transparent),
+            right: BorderSide(color: active ? tok.border : Colors.transparent),
+          ),
+        ),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Flexible(
+            child: Text(_tabs[i].key,
+                overflow: TextOverflow.ellipsis,
+                style: Ts.style(
+                    size: Ts.md,
+                    monoFont: true,
+                    weight: active ? FontWeight.w600 : FontWeight.normal,
+                    color: active ? tok.text : tok.text2)),
+          ),
+          const SizedBox(width: 6),
+          // Mockup .ktab-x: a small × glyph, text-3.
+          InkWell(
+            onTap: () => _closeTab(i),
+            borderRadius: BorderRadius.circular(4),
+            child: Padding(
+              padding: const EdgeInsets.all(2),
+              child: Text('×',
+                  style: Ts.style(size: Ts.md, color: tok.text3, height: 1)),
             ),
-          );
-        },
+          ),
+        ]),
+      ),
+    );
+  }
+
+  // Mockup .ktab-add: 30px-wide centred ghost tile at the end of the strip.
+  Widget _addTabTile(AppTokens tok) {
+    return Tooltip(
+      message: tr('br.pickKey'),
+      child: InkWell(
+        onTap: () => ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(tr('br.pickKey')), duration: const Duration(seconds: 2))),
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(Dim.radiusS)),
+        child: SizedBox(
+          width: 30,
+          child: Center(
+            child: Text('＋', style: Ts.style(size: Ts.md, color: tok.text3)),
+          ),
+        ),
       ),
     );
   }
@@ -880,36 +1134,10 @@ class _BrowserPageViewState extends State<BrowserPageView>
     );
   }
 
-  // ARDM-style header: [type | key name  ⎘] [TTL | <secs> ↺ ✓] [🗑][↻][</>]
+  // Mockup .keycard: big 20px type badge + inline 16px mono 700 keyname (no
+  // surrounding box) + a key-meta row, with TTL group + actions pushed right.
   Widget _keyHeader(_KeyTab t) {
-    final scheme = Theme.of(context).colorScheme;
-    final border = Border.all(color: scheme.outlineVariant);
-
-    // A prefix segment of an input-look group (like ARDM's "Hash" / "TTL").
-    Widget seg(String label) => Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            color: scheme.surfaceContainerHigh,
-            border: Border(right: BorderSide(color: scheme.outlineVariant)),
-          ),
-          child: Text(label,
-              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: scheme.onSurfaceVariant)),
-        );
-
-    // ARDM's square colored action buttons (delete red / refresh green / cmd blue).
-    Widget squareBtn(Color color, IconData icon, String tooltip, VoidCallback onTap) => Tooltip(
-          message: tooltip,
-          child: Material(
-            color: color,
-            borderRadius: BorderRadius.circular(6),
-            child: InkWell(
-              borderRadius: BorderRadius.circular(6),
-              onTap: onTap,
-              child: SizedBox(width: 44, height: 36, child: Icon(icon, size: 17, color: Colors.white)),
-            ),
-          ),
-        );
+    final tok = AppTokens.of(context);
 
     void applyTtl() {
       final s = int.tryParse(t.ttlCtrl.text.trim());
@@ -918,77 +1146,182 @@ class _BrowserPageViewState extends State<BrowserPageView>
     }
 
     return SizedBox(
-      height: 36,
-      child: Row(children: [
-        // key group: type badge + read-only name + copy
-        Expanded(
-          child: Container(
-            decoration: BoxDecoration(border: border, borderRadius: BorderRadius.circular(6)),
-            clipBehavior: Clip.antiAlias,
-            child: Row(children: [
-              seg(_typeLabel(t.type)),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Tooltip(
-                  message: tr('br.renameNotSupported'),
-                  child: Text(t.key,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-                ),
-              ),
-              IconButton(
-                tooltip: tr('br.copyKeyName'),
-                visualDensity: VisualDensity.compact,
-                onPressed: () => _copy(t.key, tr('br.keyNameCopied')),
-                icon: Icon(Icons.copy, size: 14, color: scheme.onSurfaceVariant),
-              ),
-            ]),
+      // Mockup .keycard renders 47px tall (detail-body pad 14 + keycard 47 +
+      // gap 12 lands the valuepane top border at the mockup's y=408).
+      height: 47,
+      // CP 9.x: inside the home chrome the pane is ~630px wide and the right
+      // cluster (TTL group + 3 action chips) overflows by ~13px; tighten the
+      // chip padding when narrow. The wide layout (goldens) stays untouched.
+      child: LayoutBuilder(builder: (context, constraints) {
+        final compact = constraints.maxWidth < 800;
+        return Row(children: [
+        _typeBadgeBig(tok, t.type),
+        const SizedBox(width: 10),
+        // Inline keyname (mockup .keyname): 16px mono 700, no surrounding box.
+        Flexible(
+          child: Tooltip(
+            message: tr('br.renameNotSupported'),
+            child: Text(t.key,
+                overflow: TextOverflow.ellipsis,
+                style: Ts.style(
+                    size: 16, weight: FontWeight.w700, color: tok.text,
+                    monoFont: true, letterSpacing: -0.1)),
           ),
         ),
-        const SizedBox(width: 10),
-        // TTL group: label + inline seconds input + reset + apply
-        Container(
-          decoration: BoxDecoration(border: border, borderRadius: BorderRadius.circular(6)),
-          clipBehavior: Clip.antiAlias,
-          child: Row(children: [
-            seg('TTL'),
-            SizedBox(
-              width: 76,
-              child: TextField(
-                controller: t.ttlCtrl,
-                keyboardType: TextInputType.number,
-                textAlign: TextAlign.center,
-                style: const TextStyle(fontSize: 13),
-                decoration: const InputDecoration(
-                  isDense: true,
-                  border: InputBorder.none,
-                  contentPadding: EdgeInsets.symmetric(vertical: 9),
-                ),
-                onSubmitted: (_) => applyTtl(),
-              ),
-            ),
-            IconButton(
-              tooltip: tr('br.reset'),
-              visualDensity: VisualDensity.compact,
-              onPressed: () => setState(() => t.ttlCtrl.text = '${t.ttl}'),
-              icon: Icon(Icons.history, size: 15, color: scheme.onSurfaceVariant),
-            ),
-            IconButton(
-              tooltip: tr('br.applyTtl'),
-              visualDensity: VisualDensity.compact,
-              onPressed: applyTtl,
-              icon: Icon(Icons.check, size: 16, color: scheme.primary),
-            ),
-          ]),
+        IconButton(
+          tooltip: tr('br.copyKeyName'),
+          visualDensity: VisualDensity.compact,
+          onPressed: () => _copy(t.key, tr('br.keyNameCopied')),
+          icon: Icon(Icons.copy, size: 13, color: tok.text3),
         ),
-        const SizedBox(width: 10),
-        squareBtn(const Color(0xFFE25B5B), Icons.delete_outline, tr('br.deleteKey'), () => _deleteKeys([t.key])),
+        // Mockup .key-meta: mono labels + 600 mono values, only when loaded.
+        if (!t.loading && t.error == null) _keyMeta(tok, t, compact: compact),
+        const Spacer(),
+        // Mockup .key-actions: TTL group + copy-as-command + Refresh + Delete.
+        _ttlGroup(tok, t, applyTtl, compact: compact),
+        SizedBox(width: compact ? 4 : 6),
+        _abtn(tok,
+            label: tr('br.copyAsCommand'),
+            icon: Icons.code,
+            compact: compact,
+            onTap: () => _copy(_keyCommand(t), tr('br.commandCopied'))),
+        SizedBox(width: compact ? 4 : 6),
+        _abtn(tok,
+            label: tr('br.refresh'),
+            icon: Icons.refresh,
+            compact: compact,
+            onTap: _refreshTab),
+        SizedBox(width: compact ? 4 : 6),
+        _abtn(tok,
+            label: tr('br.deleteKey'),
+            icon: Icons.delete_outline,
+            danger: true,
+            compact: compact,
+            onTap: () => _deleteKeys([t.key])),
+      ]);
+      }),
+    );
+  }
+
+  // Mockup .key-meta: Fields / Size with mono 600 text-2 values.
+  Widget _keyMeta(AppTokens tok, _KeyTab t, {bool compact = false}) {
+    Widget item(String label, String value) => Padding(
+          padding: EdgeInsets.only(left: compact ? 8 : 14),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Text('$label ',
+                style: Ts.style(size: Ts.md, color: tok.text3)),
+            Text(value,
+                style: Ts.style(size: Ts.md, weight: FontWeight.w600, color: tok.text2,
+                    monoFont: true, tabularNums: true)),
+          ]),
+        );
+    final countLabel = switch (t.type) {
+      'hash' => 'Fields',
+      'list' || 'set' || 'zset' => 'Members',
+      _ => null,
+    };
+    return Row(mainAxisSize: MainAxisSize.min, children: [
+      if (countLabel != null) item(countLabel, '${t.total}'),
+      if (t.type == 'string' && t.strBytes != null)
+        item('Size', _fmtBytes(t.strBytes!.length)),
+    ]);
+  }
+
+  static String _fmtBytes(int n) {
+    if (n < 1024) return '$n B';
+    if (n < 1024 * 1024) return '${(n / 1024).toStringAsFixed(1)} KB';
+    return '${(n / (1024 * 1024)).toStringAsFixed(1)} MB';
+  }
+
+  // Mockup .ttl-group: 26px-tall bordered box, TTL label + 64px mono input +
+  // accent Apply.
+  Widget _ttlGroup(AppTokens tok, _KeyTab t, VoidCallback applyTtl,
+      {bool compact = false}) {
+    return Container(
+      height: 26,
+      decoration: BoxDecoration(
+        color: tok.panel,
+        borderRadius: BorderRadius.circular(Dim.radiusS),
+        border: Border.all(color: tok.border),
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        Text('TTL', style: Ts.style(size: Ts.sm, color: tok.text3)),
         const SizedBox(width: 6),
-        squareBtn(const Color(0xFF57B36A), Icons.refresh, tr('br.refresh'), _refreshTab),
-        const SizedBox(width: 6),
-        squareBtn(const Color(0xFF4A8FE0), Icons.code, tr('br.copyAsCommand'),
-            () => _copy(_keyCommand(t), tr('br.commandCopied'))),
+        SizedBox(
+          width: compact ? 44 : 56,
+          child: TextField(
+            controller: t.ttlCtrl,
+            keyboardType: TextInputType.number,
+            textAlign: TextAlign.center,
+            style: Ts.style(size: Ts.md, color: tok.text, monoFont: true, tabularNums: true),
+            decoration: const InputDecoration(
+              isDense: true,
+              border: InputBorder.none,
+              contentPadding: EdgeInsets.symmetric(vertical: 4),
+            ),
+            onSubmitted: (_) => applyTtl(),
+          ),
+        ),
+        const SizedBox(width: 4),
+        InkWell(
+          onTap: applyTtl,
+          borderRadius: BorderRadius.circular(4),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 2),
+            child: Text('Apply',
+                style: Ts.style(size: Ts.sm, weight: FontWeight.w600, color: tok.accent)),
+          ),
+        ),
       ]),
+    );
+  }
+
+  // Mockup .abtn: 26px-tall outlined chip (12px 500 text-2); .danger keeps the
+  // outlined look with danger text + 35% danger border. [compact] (CP 9.x:
+  // narrow pane inside the home chrome) tightens the horizontal padding so the
+  // keycard head's right cluster fits; the wide layout keeps 11px.
+  Widget _abtn(AppTokens tok,
+      {required String label, IconData? icon, bool danger = false, bool compact = false, VoidCallback? onTap}) {
+    final color = danger ? tok.danger : tok.text2;
+    return InkWell(
+      borderRadius: BorderRadius.circular(Dim.radiusS),
+      onTap: onTap,
+      child: Container(
+        height: 26,
+        padding: EdgeInsets.symmetric(horizontal: compact ? 8 : 11),
+        decoration: BoxDecoration(
+          color: tok.panel,
+          borderRadius: BorderRadius.circular(Dim.radiusS),
+          border: Border.all(
+              color: danger ? tok.danger.withValues(alpha: 0.35) : tok.border),
+        ),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          if (icon != null) ...[
+            Icon(icon, size: 13, color: color),
+            const SizedBox(width: 5),
+          ],
+          Text(label, style: Ts.style(size: Ts.md, weight: FontWeight.w500, color: color)),
+        ]),
+      ),
+    );
+  }
+
+  // Mockup .badge.big: 20px-tall uppercase mono chip (pastel fill + border).
+  Widget _typeBadgeBig(AppTokens tok, String type) {
+    final c = tok.typeColors(type);
+    return Container(
+      height: 20,
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: c.fill,
+        borderRadius: BorderRadius.circular(5),
+        border: Border.all(color: c.border),
+      ),
+      child: Text(_typeLabel(type).toUpperCase(),
+          style: Ts.style(size: 10, weight: FontWeight.w700, color: c.fg,
+              monoFont: true, letterSpacing: 0.8)),
     );
   }
 
@@ -1125,6 +1458,9 @@ class _BrowserPageViewState extends State<BrowserPageView>
   }
 
   // -- shared collection editor (hash / list / set / zset) --
+  // Mockup .valuepane: a bordered card (elev-2 + top highlight) holding a
+  // panel-2 head band (eyebrow title + inline filter + ghost add) over a custom
+  // table (zebra, mono cells, selected-row accent bar, three-glyph actions).
   Widget _collectionEditor(
     _KeyTab t,
     List<String> columns, {
@@ -1135,11 +1471,12 @@ class _BrowserPageViewState extends State<BrowserPageView>
     bool numbered = true,
     bool singleColumn = false,
   }) {
+    final tok = AppTokens.of(context);
+    final brightness = Theme.of(context).brightness;
     final f = t.filter.trim().toLowerCase();
     var visible = f.isEmpty
         ? t.rows
         : t.rows.where((r) => r[0].toLowerCase().contains(f) || r[1].toLowerCase().contains(f)).toList();
-    final scheme = Theme.of(context).colorScheme;
 
     // Column-header sorting over the loaded rows (display column → row slot).
     // zset: col0=score(r[1]) col1=member(r[0]); list (!numbered): the only data
@@ -1159,112 +1496,170 @@ class _BrowserPageViewState extends State<BrowserPageView>
 
     // Data columns: hash Field/Value, list Value, set Member, zset Score/Member.
     final dataCols = numbered ? columns : columns.sublist(1);
-    final idHeader = 'ID (${tr('br.total')}: ${t.total})';
 
-    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Row(children: [
-        FilledButton(onPressed: onAdd, child: Text(tr('br.addNewLine'))),
-        // ARDM shows a DESC/ASC order toggle for zsets, DESC first.
-        if (scoreFirst) ...[
-          const SizedBox(width: 10),
-          SegmentedButton<bool>(
-            style: const ButtonStyle(visualDensity: VisualDensity.compact),
-            segments: [
-              ButtonSegment(value: true, label: Text(tr('br.desc')), icon: const Icon(Icons.arrow_drop_down)),
-              ButtonSegment(value: false, label: Text(tr('br.asc')), icon: const Icon(Icons.arrow_drop_up)),
-            ],
-            selected: {t.desc},
-            onSelectionChanged: (s) => _setZsetOrder(t, s.first),
-          ),
-        ],
-      ]),
-      const SizedBox(height: 10),
-      if (visible.isEmpty)
-        Padding(
-          padding: const EdgeInsets.all(12),
-          child: Center(
-            child: Text(t.filter.isEmpty ? tr('br.empty') : tr('br.noMatchInLoadedRows'),
-                style: const TextStyle(color: Colors.grey)),
-          ),
-        )
-      else
-        // Fill the pane width like ARDM (long values still get a horizontal
-        // scroll once the intrinsic width exceeds the viewport).
-        LayoutBuilder(
-          builder: (ctx, box) => SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: ConstrainedBox(
-              constraints: BoxConstraints(minWidth: box.maxWidth),
-              child: DataTable(
-            columnSpacing: 16,
-            headingRowHeight: 30,
-            dataRowMinHeight: 28,
-            dataRowMaxHeight: 34,
-            sortColumnIndex: t.sortCol == null ? null : t.sortCol! + 1,
-            sortAscending: t.sortAsc,
-            columns: [
-              DataColumn(label: Text(idHeader, style: const TextStyle(fontWeight: FontWeight.w600))),
-              for (var j = 0; j < dataCols.length; j++)
-                DataColumn(
-                  label: Text(dataCols[j], style: const TextStyle(fontWeight: FontWeight.w600)),
-                  onSort: (_, asc) => setState(() {
-                    t.sortCol = j;
-                    t.sortAsc = asc;
-                  }),
-                ),
-              // ARDM puts the keyword filter in the table header, over the actions.
-              DataColumn(
-                label: SizedBox(
-                  width: 190,
+    // Keep copy/view for parity but route the three visible actions to
+    // edit / copy / delete (mockup .rowact ✎ ⧉ ⌫). View + copy-as-command stay
+    // reachable via the key's FormatViewer (string) — collection rows drop them
+    // to match the mockup's three-glyph action cell.
+
+    return Stack(children: [
+      Container(
+        decoration: BoxDecoration(
+          color: tok.panel,
+          borderRadius: BorderRadius.circular(Dim.radiusM),
+          border: Border.all(color: tok.border),
+          boxShadow: Depth.elev2(brightness),
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(Dim.radiusM - 1),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            // Head band (mockup .valuepane-head): panel-2 + bottom hairline.
+            Container(
+              decoration: BoxDecoration(
+                color: tok.panel2,
+                border: Border(bottom: BorderSide(color: tok.hairline)),
+              ),
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+              child: Row(children: [
+                // Mockup .vp-title: 11px 600 uppercase eyebrow.
+                Text(_valuePaneTitle(t).toUpperCase(),
+                    style: Ts.style(size: Ts.xs, weight: FontWeight.w600,
+                        letterSpacing: 0.8, color: tok.text3)),
+                const SizedBox(width: 12),
+                // zset keeps its DESC/ASC order toggle in the band.
+                if (scoreFirst) _zsetOrderSeg(tok, t),
+                const Spacer(),
+                // Mockup .filter-input: 200px 26px mono 11px.
+                SizedBox(
+                  width: 200,
+                  height: 26,
                   child: TextField(
-                    style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w400),
+                    style: Ts.style(size: Ts.xs, color: tok.text, monoFont: true, letterSpacing: 0.6),
                     decoration: InputDecoration(
                       isDense: true,
-                      hintText: tr('br.keywordSearch'),
-                      border: const OutlineInputBorder(),
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                      hintText: tr('br.keywordSearch').toUpperCase(),
+                      hintStyle: Ts.style(size: Ts.xs, color: tok.text3, monoFont: true, letterSpacing: 0.6),
+                      filled: true,
+                      fillColor: tok.panel,
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(Dim.radiusS),
+                        borderSide: BorderSide(color: tok.border),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(Dim.radiusS),
+                        borderSide: BorderSide(color: tok.focus),
+                      ),
                     ),
                     onChanged: (v) => setState(() => t.filter = v),
                   ),
                 ),
+                const SizedBox(width: 8),
+                // Mockup .abtn.ghost ＋ Field.
+                _ghostAddBtn(tok, onAdd),
+              ]),
+            ),
+            // Table body.
+            if (visible.isEmpty)
+              Padding(
+                padding: const EdgeInsets.all(20),
+                child: Center(
+                  child: Text(t.filter.isEmpty ? tr('br.empty') : tr('br.noMatchInLoadedRows'),
+                      style: Ts.style(size: Ts.md, color: tok.text3)),
+                ),
+              )
+            else
+              _valueTable(tok, t, visible, dataCols,
+                  scoreFirst: scoreFirst, numbered: numbered, singleColumn: singleColumn,
+                  disabled: t.mutating, onEdit: rowEdit, onDelete: rowDelete),
+            if (t.hasMore)
+              Container(
+                decoration: BoxDecoration(
+                  border: Border(top: BorderSide(color: tok.hairline)),
+                ),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: _abtn(tok,
+                      label: '${tr('br.loadMore')}  (${t.rows.length}/${t.total})',
+                      onTap: t.loadingMore ? null : () => _loadMoreRows(t)),
+                ),
               ),
-            ],
-            rows: [
-              for (var i = 0; i < visible.length; i++)
-                _dataRow(t, i, visible[i],
-                    scoreFirst: scoreFirst, numbered: numbered, singleColumn: singleColumn,
-                    disabled: t.mutating, onEdit: rowEdit, onDelete: rowDelete),
-            ],
+            if (f.isNotEmpty && t.hasMore)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+                child: Text(tr('br.filterLoadedOnly'),
+                    style: Ts.style(size: Ts.xs, color: tok.text3)),
               ),
+          ]),
+        ),
+      ),
+      // 1px top inner highlight.
+      Positioned(
+        left: 1, right: 1, top: 0,
+        child: IgnorePointer(
+          child: Container(
+            height: 1,
+            decoration: BoxDecoration(
+              color: tok.highlight,
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(Dim.radiusM - 1)),
             ),
           ),
         ),
-      if (t.hasMore)
-        Padding(
-          padding: const EdgeInsets.only(top: 10),
-          child: SizedBox(
-            width: double.infinity,
-            child: OutlinedButton(
-              onPressed: t.loadingMore ? null : () => _loadMoreRows(t),
-              child: t.loadingMore
-                  ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-                  : Text('${tr('br.loadMore')}  (${t.rows.length}/${t.total})'),
-            ),
-          ),
-        ),
-      if (f.isNotEmpty && t.hasMore)
-        Padding(
-          padding: const EdgeInsets.only(top: 4),
-          child: Text(tr('br.filterLoadedOnly'),
-              style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant)),
-        ),
+      ),
     ]);
   }
 
-  DataRow _dataRow(
+  String _valuePaneTitle(_KeyTab t) => switch (t.type) {
+        'hash' => 'Value',
+        'list' => 'Elements',
+        'set' => 'Members',
+        'zset' => 'Members',
+        _ => 'Value',
+      };
+
+  // Mockup .abtn.ghost: dashed-border 26px add chip.
+  Widget _ghostAddBtn(AppTokens tok, VoidCallback onTap) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(Dim.radiusS),
+      onTap: onTap,
+      child: Container(
+        height: 26,
+        padding: const EdgeInsets.symmetric(horizontal: 11),
+        decoration: BoxDecoration(
+          color: tok.panel,
+          borderRadius: BorderRadius.circular(Dim.radiusS),
+          border: Border.all(color: tok.border, style: BorderStyle.solid),
+        ),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Icon(Icons.add, size: 13, color: tok.text2),
+          const SizedBox(width: 4),
+          Text(tr('br.addNewLine'),
+              style: Ts.style(size: Ts.md, weight: FontWeight.w500, color: tok.text2)),
+        ]),
+      ),
+    );
+  }
+
+  Widget _zsetOrderSeg(AppTokens tok, _KeyTab t) {
+    return SegmentedButton<bool>(
+      style: const ButtonStyle(visualDensity: VisualDensity.compact),
+      segments: [
+        ButtonSegment(value: true, label: Text(tr('br.desc')), icon: const Icon(Icons.arrow_drop_down)),
+        ButtonSegment(value: false, label: Text(tr('br.asc')), icon: const Icon(Icons.arrow_drop_up)),
+      ],
+      selected: {t.desc},
+      onSelectionChanged: (s) => _setZsetOrder(t, s.first),
+    );
+  }
+
+  // Mockup .vtable: sticky uppercase eyebrow header over zebra rows with mono
+  // cells, a selected-row accent bar, and a three-glyph action cell.
+  Widget _valueTable(
+    AppTokens tok,
     _KeyTab t,
-    int i,
-    List<String> row, {
+    List<List<String>> visible,
+    List<String> dataCols, {
     required bool scoreFirst,
     required bool numbered,
     required bool singleColumn,
@@ -1272,63 +1667,224 @@ class _BrowserPageViewState extends State<BrowserPageView>
     required void Function(List<String>) onEdit,
     required Future<void> Function(List<String>) onDelete,
   }) {
-    final scheme = Theme.of(context).colorScheme;
-    // display cells: scoreFirst (zset) shows [score(b), member(a)]; set shows
-    // [member]; else [a, b] — key off the type flag, NOT whether the value is
-    // empty (an empty hash/list value must still emit its column, or the
-    // DataCell count won't match the header and DataTable asserts).
+    final columns = <_VCol>[
+      if (numbered) const _VCol.ln('#'),
+      for (var j = 0; j < dataCols.length; j++)
+        _VCol.data(dataCols[j], j, pk: j == 0),
+      const _VCol.actions(),
+    ];
+
+    return LayoutBuilder(
+      builder: (ctx, box) => SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        // IntrinsicWidth: the horizontal viewport hands its child an
+        // UNBOUNDED width, and a stretch Column under it would force that
+        // infinity onto every row (layout crash). IntrinsicWidth resolves a
+        // finite tight width = max(rows' natural width, container width), so
+        // the table fills the pane and only scrolls when content overflows.
+        child: IntrinsicWidth(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(minWidth: box.maxWidth),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              _vHead(tok, t, columns),
+              for (var i = 0; i < visible.length; i++)
+                _vRow(tok, t, i, visible[i], columns,
+                    scoreFirst: scoreFirst, numbered: numbered, singleColumn: singleColumn,
+                    disabled: disabled, onEdit: onEdit, onDelete: onDelete),
+            ]),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _vHead(AppTokens tok, _KeyTab t, List<_VCol> columns) {
+    return Container(
+      decoration: BoxDecoration(
+        color: tok.panel,
+        border: Border(bottom: BorderSide(color: tok.border)),
+      ),
+      child: Row(children: [
+        for (final c in columns)
+          _vHeadCell(tok, t, c),
+      ]),
+    );
+  }
+
+  Widget _vHeadCell(AppTokens tok, _KeyTab t, _VCol c) {
+    // Mockup .vtable thead th: 10.5px 600 uppercase ls .7px text-3, padding 7/12.
+    final label = Padding(
+      padding: EdgeInsets.only(left: c.isLn ? 0 : 12, right: 12, top: 7, bottom: 7),
+      child: Text(c.label.toUpperCase(),
+          style: Ts.style(size: 10.5, weight: FontWeight.w600,
+              letterSpacing: 0.7, color: tok.text3)),
+    );
+    final sortable = c.sortCol != null;
+    final sorted = sortable && t.sortCol == c.sortCol;
+    Widget child = label;
+    if (sortable) {
+      child = InkWell(
+        onTap: () => setState(() {
+          if (t.sortCol == c.sortCol) {
+            t.sortAsc = !t.sortAsc;
+          } else {
+            t.sortCol = c.sortCol;
+            t.sortAsc = true;
+          }
+        }),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          label,
+          if (sorted)
+            Icon(t.sortAsc ? Icons.arrow_upward : Icons.arrow_downward,
+                size: 11, color: tok.text3),
+        ]),
+      );
+    }
+    // Mockup .vtable: .ln 34px, Field .w-180 fixed, Value flex, .w-120 actions.
+    if (c.isLn) return SizedBox(width: 34, child: Align(alignment: Alignment.centerRight, child: Padding(padding: const EdgeInsets.only(right: 8), child: child)));
+    if (c.isActions) return SizedBox(width: 120, child: child);
+    if (c.pk) return SizedBox(width: 180, child: child);
+    return Expanded(child: child);
+  }
+
+  Widget _vRow(
+    AppTokens tok,
+    _KeyTab t,
+    int i,
+    List<String> row,
+    List<_VCol> columns, {
+    required bool scoreFirst,
+    required bool numbered,
+    required bool singleColumn,
+    required bool disabled,
+    required void Function(List<String>) onEdit,
+    required Future<void> Function(List<String>) onDelete,
+  }) {
     final cells = scoreFirst
         ? [row[1], row[0]]
         : (singleColumn ? [row[0]] : [row[0], row[1]]);
-    // ARDM renders all four row action icons in the same accent blue.
-    final iconColor = disabled ? scheme.outline : const Color(0xFF4A8FE0);
-    return DataRow(
-      // zebra striping like ARDM
-      color: WidgetStatePropertyAll(
-          i.isOdd ? scheme.surfaceContainerHigh.withValues(alpha: 0.45) : null),
-      cells: [
-        if (numbered) DataCell(Text('${i + 1}', style: TextStyle(color: Theme.of(context).hintColor))),
-        for (final c in cells)
-          DataCell(ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 440),
-            child: Text(c, maxLines: 2, overflow: TextOverflow.ellipsis),
-          )),
-        DataCell(Row(mainAxisSize: MainAxisSize.min, children: [
-          IconButton(
-            tooltip: tr('br.viewFormatValue'),
-            visualDensity: VisualDensity.compact,
-            icon: Icon(Icons.description_outlined, size: 15, color: iconColor),
-            onPressed: () => _viewValue(t, row),
+    final zebra = i.isOdd;
+    final rowBg = zebra ? tok.panel2 : tok.panel;
+    final valueTextColor = disabled ? tok.text3 : tok.text;
+
+    Widget cellWidget(_VCol c) {
+      if (c.isLn) {
+        // Mockup .vtable .ln: 34px mono 11px text-3 right-aligned.
+        return SizedBox(
+          width: 34,
+          child: Align(
+            alignment: Alignment.centerRight,
+            child: Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: Text('${i + 1}',
+                  style: Ts.style(size: Ts.xs, color: tok.text3, monoFont: true, tabularNums: true)),
+            ),
           ),
-          IconButton(
-            tooltip: tr('br.copyValue'),
-            visualDensity: VisualDensity.compact,
-            icon: Icon(Icons.copy, size: 14, color: iconColor),
-            // The row's VALUE: hash value / list element (row[1]); set/zset member (row[0]).
-            onPressed: () => _copy(scoreFirst || singleColumn ? row[0] : row[1], tr('br.valueCopied')),
+        );
+      }
+      if (c.isActions) {
+        return SizedBox(
+          width: 120,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              _rowAct(tok, const Icon(Icons.mode_edit_outlined, size: 13), tr('br.edit'),
+                  disabled ? null : () => onEdit(row)),
+              const SizedBox(width: 4),
+              // Tap copies the value; long-press copies the recreating command.
+              _rowActCmd(tok, const Icon(Icons.content_copy, size: 13), tr('br.copyValue'),
+                  onTap: () => _copy(scoreFirst || singleColumn ? row[0] : row[1], tr('br.valueCopied')),
+                  onLongPress: () => _copy(_rowCommand(t, row), tr('br.commandCopied'))),
+              const SizedBox(width: 4),
+              // Mockup .rowact: ALL three glyphs are text-3 (even delete).
+              _rowAct(tok, Text('⌫', style: Ts.style(size: Ts.md, height: 1)), tr('br.delete'),
+                  disabled ? null : () => _guard(() => onDelete(row))),
+            ]),
           ),
-          IconButton(
-            visualDensity: VisualDensity.compact,
-            tooltip: tr('br.edit'),
-            icon: Icon(Icons.edit, size: 15, color: iconColor),
-            onPressed: disabled ? null : () => onEdit(row),
+        );
+      }
+      final text = cells[c.sortCol!];
+      // Mockup .vtable .mono cells (+ pk 600 on the first data column). Tapping
+      // a value cell opens the read-only format viewer (kept from the old
+      // "view" row action — the mockup's three-glyph cell has no view button,
+      // so the viewer lives behind the value itself).
+      final cell = Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 520),
+          child: InkWell(
+            onTap: () => _viewValue(t, row),
+            child: Text(text,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: Ts.style(
+                    size: Ts.md,
+                    color: valueTextColor,
+                    monoFont: true,
+                    tabularNums: true,
+                    weight: c.pk ? FontWeight.w600 : FontWeight.normal)),
           ),
-          IconButton(
-            visualDensity: VisualDensity.compact,
-            tooltip: tr('br.delete'),
-            icon: Icon(Icons.delete_outline, size: 15, color: iconColor),
-            // Disabled while a write is in flight so a second (positional) delete
-            // can't fire against a stale, shifted index.
-            onPressed: disabled ? null : () => _guard(() => onDelete(row)),
+        ),
+      );
+      // Field/PK column is fixed .w-180 in the mockup; Value stays flex.
+      if (c.pk && !singleColumn) return SizedBox(width: 180, child: cell);
+      return Expanded(child: cell);
+    }
+
+    return Container(
+      height: Dim.rowH,
+      decoration: BoxDecoration(
+        color: rowBg,
+        border: Border(bottom: BorderSide(color: tok.hairline)),
+      ),
+      child: Row(children: [for (final c in columns) cellWidget(c)]),
+    );
+  }
+
+  // Mockup .rowact: a plain 13px text-3 glyph button (✎/⧉ are Material icons —
+  // the literal glyphs are not in Inter and rasterise as tofu bars).
+  Widget _rowAct(AppTokens tok, Widget glyph, String tooltip, VoidCallback? onTap) {
+    final color = onTap == null ? tok.text3.withValues(alpha: 0.4) : tok.text3;
+    return Tooltip(
+      message: tooltip,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(4),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(3),
+          child: IconTheme(
+            data: IconThemeData(size: 13, color: color),
+            child: DefaultTextStyle(
+              style: Ts.style(size: Ts.md, color: color, height: 1),
+              child: glyph,
+            ),
           ),
-          IconButton(
-            visualDensity: VisualDensity.compact,
-            tooltip: tr('br.copyAsCommand'),
-            icon: Icon(Icons.code, size: 15, color: iconColor),
-            onPressed: () => _copy(_rowCommand(t, row), tr('br.commandCopied')),
+        ),
+      ),
+    );
+  }
+
+  // A rowact glyph with a distinct long-press action (copy value vs copy cmd).
+  Widget _rowActCmd(AppTokens tok, Widget glyph, String tooltip,
+      {VoidCallback? onTap, VoidCallback? onLongPress}) {
+    final color = onTap == null ? tok.text3.withValues(alpha: 0.4) : tok.text3;
+    return Tooltip(
+      message: tooltip,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(4),
+        onTap: onTap,
+        onLongPress: onLongPress,
+        child: Padding(
+          padding: const EdgeInsets.all(3),
+          child: IconTheme(
+            data: IconThemeData(size: 13, color: color),
+            child: DefaultTextStyle(
+              style: Ts.style(size: Ts.md, color: color, height: 1),
+              child: glyph,
+            ),
           ),
-        ])),
-      ],
+        ),
+      ),
     );
   }
 
@@ -1447,6 +2003,10 @@ class _BrowserPageViewState extends State<BrowserPageView>
   }
 
   // ---- dialogs ----
+
+  // Public bridge so the HomePage-level MidBar "New Key" CTA can open the
+  // same dialog the in-page button does (v2.3 chrome lifted the CTA up).
+  void startCreateKey() => _newKeyDialog();
 
   Future<void> _newKeyDialog() async {
     final nameCtrl = TextEditingController();
@@ -1704,6 +2264,30 @@ class _BrowserPageViewState extends State<BrowserPageView>
       );
 }
 
+// One column descriptor for the value table: the line-number gutter, a data
+// column (sortable), or the trailing actions cell.
+class _VCol {
+  final String label;
+  final int? sortCol; // data column index; null for gutter/actions
+  final bool pk; // first data column — 600 weight (mockup .pk)
+  final bool isLn;
+  final bool isActions;
+  const _VCol.ln(this.label)
+      : sortCol = null,
+        pk = false,
+        isLn = true,
+        isActions = false;
+  const _VCol.data(this.label, this.sortCol, {this.pk = false})
+      : isLn = false,
+        isActions = false;
+  const _VCol.actions()
+      : label = 'ACTIONS', // mockup thead shows the literal Actions th
+        sortCol = null,
+        pk = false,
+        isLn = false,
+        isActions = true;
+}
+
 // A collapsible namespace folder in the key tree.
 class _Folder extends StatefulWidget {
   final String name;
@@ -1727,21 +2311,30 @@ class _FolderState extends State<_Folder> {
   bool _open = true;
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
+    final tok = AppTokens.of(context);
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       InkWell(
         onTap: () => setState(() => _open = !_open),
         onSecondaryTapDown: (d) => _menu(d.globalPosition),
         onLongPress: () => _menu(null),
-        child: Padding(
-          padding: EdgeInsets.fromLTRB(8.0 + widget.depth * 16, 7, 8, 7),
+        child: Container(
+          height: Dim.rowH,
+          padding: EdgeInsets.only(left: 8.0 + widget.depth * 16, right: 8),
           child: Row(children: [
-            Icon(_open ? Icons.expand_more : Icons.chevron_right, size: 16, color: scheme.onSurfaceVariant),
-            const SizedBox(width: 2),
-            Icon(Icons.folder, size: 14, color: scheme.primary),
-            const SizedBox(width: 6),
-            Expanded(child: Text(widget.name, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 13))),
-            Text('(${widget.count})', style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant)),
+            // Mockup .node folder: twisty + name only (no folder icon).
+            SizedBox(
+              width: 12,
+              child: Text(_open ? '▾' : '▸',
+                  style: Ts.style(size: 10, color: tok.text3)),
+            ),
+            const SizedBox(width: 7),
+            Expanded(
+              child: Text(widget.name,
+                  overflow: TextOverflow.ellipsis,
+                  style: Ts.style(size: Ts.lg, weight: FontWeight.w500, color: tok.text)),
+            ),
+            Text('${widget.count}',
+                style: Ts.style(size: Ts.xs, color: tok.text3, monoFont: true, tabularNums: true)),
           ]),
         ),
       ),

@@ -18,8 +18,7 @@ import 'models.dart';
 import 'native.dart';
 import 'table_lifecycle.dart';
 import 'table_page.dart';
-
-const _green = Color(0xFF3BA55D);
+import 'ui_tokens.dart';
 
 class EndpointBrowserView extends StatefulWidget {
   final NativeCore core;
@@ -31,10 +30,11 @@ class EndpointBrowserView extends StatefulWidget {
       {super.key, required this.core, required this.config, required this.endpoint});
 
   @override
-  State<EndpointBrowserView> createState() => _EndpointBrowserViewState();
+  State<EndpointBrowserView> createState() => EndpointBrowserViewState();
 }
 
-class _EndpointBrowserViewState extends State<EndpointBrowserView>
+// Public state: HomePage's MidBar "＋ Item" CTA reaches createItem() via a key.
+class EndpointBrowserViewState extends State<EndpointBrowserView>
     with AutomaticKeepAliveClientMixin {
   bool _loading = true;
   String? _error;
@@ -66,11 +66,11 @@ class _EndpointBrowserViewState extends State<EndpointBrowserView>
   }
 
   @override
-  void didUpdateWidget(EndpointBrowserView old) {
-    super.didUpdateWidget(old);
+  void didUpdateWidget(EndpointBrowserView oldWidget) {
+    super.didUpdateWidget(oldWidget);
     _lc.config = widget.config; // ops read it at call time — keep it fresh
-    if (old.config.id != widget.config.id ||
-        old.config.endpoint != widget.config.endpoint) {
+    if (oldWidget.config.id != widget.config.id ||
+        oldWidget.config.endpoint != widget.config.endpoint) {
       _selected = null;
       _load();
     }
@@ -123,68 +123,97 @@ class _EndpointBrowserViewState extends State<EndpointBrowserView>
   Widget build(BuildContext context) {
     super.build(context);
     return Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      SizedBox(width: 264, child: _sidebar()),
+      // v2.3: the Tables sidebar narrows to the design's 230px.
+      SizedBox(width: Dim.tablesSideW, child: _sidebar()),
       const VerticalDivider(width: 1),
-      Expanded(child: _explorer()),
+      Expanded(child: _explorerPane()),
     ]);
   }
 
   // ---- left pane: the Tables sidebar ----
 
   Widget _sidebar() {
-    final scheme = Theme.of(context).colorScheme;
-    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      Padding(
-        padding: const EdgeInsets.fromLTRB(12, 10, 8, 6),
-        child: Row(children: [
-          Icon(Icons.folder_open, size: 16, color: scheme.primary),
-          const SizedBox(width: 7),
-          Text(tr('ep.tables'),
-              style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700)),
-          if (!_loading && _error == null) ...[
-            const SizedBox(width: 6),
-            Text('${_tables.length}',
-                style: TextStyle(fontSize: 12, color: Theme.of(context).hintColor)),
-          ],
-          const Spacer(),
-          IconButton(
-            tooltip: tr('ep.refresh'),
-            visualDensity: VisualDensity.compact,
-            onPressed: _busy || _loading ? null : _load,
-            icon: const Icon(Icons.refresh, size: 18),
+    final tok = AppTokens.of(context);
+    final brightness = Theme.of(context).brightness;
+    // Mockup .tables-side: a compact .side-tools row (count + refresh, NO title
+    // text / folder icon / filter box), the tbl-node tree, then a ＋Table foot.
+    // Right-edge soft shadow (var(--elev-side)).
+    return Container(
+      decoration: BoxDecoration(boxShadow: Depth.elevSide(brightness)),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        // .side-tools: 7px/12px padding, hairline bottom border.
+        Container(
+          decoration: BoxDecoration(
+            border: Border(bottom: BorderSide(color: tok.hairline)),
           ),
-        ]),
-      ),
-      if (_awsMode)
-        Padding(
-          padding: const EdgeInsets.fromLTRB(12, 0, 12, 6),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
           child: Row(children: [
-            Icon(Icons.lock_outline, size: 13, color: Colors.amber.shade700),
-            const SizedBox(width: 5),
-            Expanded(
-              child: Text(tr('ep.awsReadOnly'),
-                  style: TextStyle(fontSize: 11, color: Colors.amber.shade700)),
+            // .count: mono text-2, the number emphasized (text + 600 tabular).
+            // Plain Texts, not Text.rich — the capture channel rasterizes rich
+            // runs as .notdef blocks (pixel-fidelity-v23 CP 9.x).
+            Text('${_tables.length} ',
+                style: Ts.style(
+                    size: Ts.sm, weight: FontWeight.w600, color: tok.text, monoFont: true, tabularNums: true)),
+            Text('tables', style: Ts.style(size: Ts.sm, color: tok.text2, monoFont: true)),
+            const Spacer(),
+            // .ibtn refresh.
+            InkWell(
+              borderRadius: BorderRadius.circular(Dim.radiusS),
+              onTap: _busy || _loading ? null : _load,
+              child: Padding(
+                padding: const EdgeInsets.all(2),
+                child: Icon(Icons.refresh, size: 16, color: tok.text3),
+              ),
             ),
           ]),
         ),
-      Padding(
-        padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-        child: TextField(
-          controller: _filter,
-          onChanged: (_) => setState(() {}),
-          decoration: InputDecoration(
-            isDense: true,
-            prefixIcon: const Icon(Icons.search, size: 16),
-            prefixIconConstraints: const BoxConstraints(minWidth: 30, minHeight: 30),
-            hintText: tr('ep.filterTables'),
-            border: const OutlineInputBorder(),
-            contentPadding: const EdgeInsets.symmetric(vertical: 7, horizontal: 8),
+        if (_awsMode)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 6, 12, 4),
+            child: Row(children: [
+              Icon(Icons.lock_outline, size: 13, color: tok.warning),
+              const SizedBox(width: 5),
+              Expanded(
+                child: Text(tr('ep.awsReadOnly'),
+                    style: TextStyle(fontSize: 11, color: tok.warning)),
+              ),
+            ]),
+          ),
+        Expanded(child: _list()),
+        _sideFoot(),
+      ]),
+    );
+  }
+
+  // v2.3 ＋Table foot entry. R5.2 reservation: creating a table needs a native
+  // rm_table_create call the Go core doesn't expose yet — the button stays
+  // visible (the design's grammar) but only explains, it never half-creates.
+  Widget _sideFoot() {
+    final tok = AppTokens.of(context);
+    return Container(
+      padding: const EdgeInsets.all(8),
+      decoration: BoxDecoration(
+        border: Border(top: BorderSide(color: tok.hairline)),
+      ),
+      child: SizedBox(
+        height: 26,
+        child: OutlinedButton.icon(
+          onPressed: _awsMode || _busy
+              ? null
+              : () => _toast(
+                  'Creating tables needs engine support (rm_table_create) — not available yet.'),
+          icon: const Icon(Icons.add, size: 14),
+          // No i18n key for a create-table action (R5.2 reservation) — the
+          // design's own label.
+          label: Text('＋ Table', style: Ts.style(size: Ts.md, weight: FontWeight.w500)),
+          style: OutlinedButton.styleFrom(
+            foregroundColor: tok.text2,
+            side: BorderSide(color: tok.border),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(Dim.radiusS)),
           ),
         ),
       ),
-      const Divider(height: 1),
-      Expanded(child: _list()),
-    ]);
+    );
   }
 
   Widget _list() {
@@ -212,59 +241,70 @@ class _EndpointBrowserViewState extends State<EndpointBrowserView>
     );
   }
 
+  // Mockup .tbl-node: fixed 30px row — a leading accent ⛁ glyph + the mono
+  // 12px table name (500, 600 when selected) + a right-aligned .cnt. Selected
+  // row = neutral selection fill + a 2px inset left accent bar; the name keeps
+  // its colour. Lifecycle actions move off the row onto the right-click menu
+  // (the mockup has no status dot / kind badge / ⋮ button).
   Widget _tableRow(Map<String, dynamic> t) {
-    final scheme = Theme.of(context).colorScheme;
+    final tok = AppTokens.of(context);
     final name = t['name']?.toString() ?? '?';
     final missing = t['missing'] == true;
     final selected = !missing && _selected == name;
     final menu = _menuChildren(t, missing: missing);
 
     Widget content({MenuController? controller}) => Material(
-          color: selected ? scheme.primary.withValues(alpha: 0.12) : Colors.transparent,
-          borderRadius: BorderRadius.circular(8),
+          color: selected ? tok.selection : Colors.transparent,
+          borderRadius: BorderRadius.circular(Dim.radiusS),
           child: InkWell(
-            borderRadius: BorderRadius.circular(8),
+            borderRadius: BorderRadius.circular(Dim.radiusS),
             onTap: missing ? null : () => setState(() => _selected = name),
             onSecondaryTapUp: controller == null
                 ? null
                 : (_) => controller.isOpen ? controller.close() : controller.open(),
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(10, 7, 6, 7),
-              child: Row(children: [
-                _statusDot(missing ? 'missing' : (t['status']?.toString() ?? '')),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(name,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 12.5,
-                        fontWeight: selected ? FontWeight.w700 : FontWeight.w600,
-                        fontStyle: missing ? FontStyle.italic : FontStyle.normal,
-                        color: missing
-                            ? scheme.onSurfaceVariant
-                            : (selected ? scheme.primary : null),
-                      )),
-                ),
-                if (missing) ...[
-                  const SizedBox(width: 4),
-                  Text(tr('ep.missing'),
-                      style: TextStyle(fontSize: 9.5, color: scheme.onSurfaceVariant)),
-                ] else ...[
-                  const SizedBox(width: 4),
-                  Text(_countShort(t),
-                      style: TextStyle(fontSize: 10, color: scheme.onSurfaceVariant)),
-                ],
-                const SizedBox(width: 2),
-                _kindDot(t['kind']?.toString() ?? 'raw'),
-                if (controller != null)
-                  IconButton(
-                    visualDensity: VisualDensity.compact,
-                    tooltip: tr('ep.tableOperations'),
-                    icon: const Icon(Icons.more_vert, size: 16),
-                    onPressed: _busy
-                        ? null
-                        : () => controller.isOpen ? controller.close() : controller.open(),
+            child: SizedBox(
+              height: Dim.rowH, // 30
+              child: Stack(children: [
+                // .sel inset 2px left accent bar.
+                if (selected)
+                  Positioned(
+                    left: 0, top: 0, bottom: 0, width: 2,
+                    child: Container(color: tok.accent),
                   ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 0),
+                  child: Row(children: [
+                    // .tbl-ico: accent ⛁ leading glyph.
+                    Text('⛁', style: Ts.style(size: 13, color: tok.accent)),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(name,
+                          overflow: TextOverflow.ellipsis,
+                          style: Ts.style(
+                            size: Ts.md, // 12
+                            weight: selected ? FontWeight.w600 : FontWeight.w500,
+                            color: missing ? tok.text3 : tok.text,
+                            monoFont: true,
+                          ).copyWith(
+                              fontStyle:
+                                  missing ? FontStyle.italic : FontStyle.normal)),
+                    ),
+                    if (missing) ...[
+                      const SizedBox(width: 4),
+                      Text(tr('ep.missing'), style: Ts.style(size: 9.5, color: tok.text3)),
+                    ] else ...[
+                      // .cnt: right-aligned 11px count (text-2/600 when selected).
+                      const SizedBox(width: 8),
+                      Text(_countShort(t),
+                          style: Ts.style(
+                              size: Ts.xs, // 11
+                              color: selected ? tok.text2 : tok.text3,
+                              weight: selected ? FontWeight.w600 : FontWeight.normal,
+                              monoFont: true,
+                              tabularNums: true)),
+                    ],
+                  ]),
+                ),
               ]),
             ),
           ),
@@ -334,7 +374,20 @@ class _EndpointBrowserViewState extends State<EndpointBrowserView>
 
   // ---- right pane: the Explorer ----
 
-  Widget _explorer() {
+  // The live Explorer state, registered via onExplorerReady so the HomePage
+  // MidBar "＋ Item" CTA (idx 1) can open the current table's create flow.
+  TablePageViewState? _explorerState;
+
+  /// MidBar bridge: create an item in the table currently selected in the
+  /// sidebar. False when nothing is selected (HomePage falls back to a toast).
+  bool createItem() {
+    final st = _explorerState;
+    if (_selected == null || st == null) return false;
+    st.createItem();
+    return true;
+  }
+
+  Widget _explorerPane() {
     final sel = _selected;
     if (sel == null) {
       return _center(Icons.touch_app_outlined, tr('epb.noTableSelected'),
@@ -342,6 +395,7 @@ class _EndpointBrowserViewState extends State<EndpointBrowserView>
     }
     return TablePageView(
       key: ValueKey('epb-explore-${widget.endpoint.id}'),
+      onExplorerReady: (st) => _explorerState = st,
       core: widget.core,
       config: widget.config,
       tableOverride: sel,
@@ -354,41 +408,23 @@ class _EndpointBrowserViewState extends State<EndpointBrowserView>
 
   // ---- small helpers ----
 
-  Widget _statusDot(String status) {
-    final color = switch (status.toUpperCase()) {
-      'ACTIVE' => _green,
-      'CREATING' || 'UPDATING' => Colors.amber,
-      'DELETING' => Colors.orange,
-      'MISSING' => Colors.grey,
-      _ => Colors.grey,
-    };
-    return Container(
-        width: 8, height: 8, decoration: BoxDecoration(color: color, shape: BoxShape.circle));
-  }
-
-  Widget _kindDot(String kind) {
-    final (Color c, String label) = switch (kind) {
-      'v2' => (const Color(0xFF3B6EA5), 'v2'),
-      'v1' => (Colors.amber.shade700, 'v1'),
-      _ => (Theme.of(context).colorScheme.onSurfaceVariant, 'raw'),
-    };
-    return Tooltip(
-      message: kind == 'raw' ? 'raw' : 'redimos $label',
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-        decoration: BoxDecoration(
-          color: c.withValues(alpha: 0.14),
-          borderRadius: BorderRadius.circular(4),
-        ),
-        child: Text(label, style: TextStyle(fontSize: 9, fontWeight: FontWeight.w700, color: c)),
-      ),
-    );
-  }
-
+  // Mockup .tbl-node .cnt is a COMPACT count (12.4k / 3.1k / 892), not a
+  // comma-grouped integer.
   String _countShort(Map<String, dynamic> t) {
     final items = (t['itemCount'] as num?)?.toInt();
     if (items == null || items < 0) return '';
-    return TableLifecycle.fmtInt(items);
+    return _fmtCompact(items);
+  }
+
+  static String _fmtCompact(int v) {
+    if (v < 1000) return '$v';
+    String unit(double x, String u) {
+      final s = (x * 10).round() / 10;
+      return '${s % 1 == 0 ? s.toInt() : s}$u';
+    }
+
+    if (v < 1000000) return unit(v / 1000, 'k');
+    return unit(v / 1000000, 'M');
   }
 
   String _tooltipFor(Map<String, dynamic> t) {

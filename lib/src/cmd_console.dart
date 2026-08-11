@@ -15,6 +15,7 @@ import 'package:flutter/services.dart';
 
 import 'i18n.dart';
 import 'ui_theme.dart';
+import 'ui_tokens.dart';
 
 // The redimos proxy's reply for ANY storage-layer error — deliberately generic
 // and lossy on its side, so it can never diagnose the cause. Matched verbatim
@@ -330,10 +331,26 @@ List<String>? tokenize(String line) {
 enum _Kind { prompt, reply, error, info }
 
 class _OutLine {
+  // For prompt lines this is the COMMAND head only (the prompt prefix is kept
+  // separately so a block card can style the two parts differently).
   final String text;
+  final String promptPrefix;
   final _Kind kind;
-  _OutLine(this.text, this.kind);
+  // Round-trip time for the command this prompt line issued (ms). Null on
+  // non-prompt lines. >200ms marks a slow command (v2.3 R4.1).
+  final int? elapsedMs;
+  const _OutLine(this.text, this.kind,
+      {this.promptPrefix = '', this.elapsedMs});
 }
+
+// Command completion vocabulary for the suggestion chips. A curated common
+// subset (matching the _welcome examples), not the full Redis command set.
+const _kConsoleCommands = [
+  'PING', 'SET', 'GET', 'DEL', 'EXISTS', 'EXPIRE', 'TTL', 'TYPE',
+  'KEYS', 'SCAN', 'HSET', 'HGET', 'HGETALL', 'LPUSH', 'RPUSH', 'LRANGE',
+  'SADD', 'SMEMBERS', 'ZADD', 'ZRANGE', 'INCR', 'DECR', 'SELECT', 'DBSIZE',
+  'INFO', 'FLUSHDB',
+];
 
 class CmdConsole extends StatefulWidget {
   final String host;
@@ -355,6 +372,16 @@ class CmdConsole extends StatefulWidget {
   // older redimos publishes no cause at all. So this refines the tooltip when
   // present and the generic wording must stand on its own when absent.
   final String? backendError;
+  /// The instance's display name for the toolbar identity chip (mockup
+  /// .inst-crumb shows "<b>prod-redis-01</b> · db3", not host:port). Null
+  /// keeps the legacy host:port chip.
+  final String? instanceName;
+  /// Seeded connection-age label for the toolbar note ("RESP3 · 已连接 2h 14m"
+  /// in the mockup). Null hides the note.
+  final String? connectedLabel;
+  /// The DB index the chip starts on (mockup shows "· db3"). Real sessions
+  /// always open on db0; the capture seeds the mockup's value.
+  final int initialDb;
   const CmdConsole({
     super.key,
     required this.host,
@@ -364,6 +391,9 @@ class CmdConsole extends StatefulWidget {
     this.statusReason,
     this.backendDegraded = false,
     this.backendError,
+    this.instanceName,
+    this.connectedLabel,
+    this.initialDb = 0,
   });
 
   @override
@@ -383,6 +413,9 @@ class _CmdConsoleState extends State<CmdConsole>
   bool _everConnected = false; // distinguishes "Connecting…" from "Reconnecting…"
   int _db = 0;
   Timer? _reconnectTimer; // auto-reconnect while the instance is meant to be up
+  // Completion tray: visible before the first command (or via the History
+  // button), hidden once a command is submitted or Esc is pressed.
+  bool _showChips = true;
   // Set when a command comes back with the proxy's backend-error reply, to show
   // the degraded dot ahead of the health signal (see _kBackendErrorReply). Held
   // as a timestamp, not a bool: the health signal it defers to lags by up to
@@ -392,6 +425,7 @@ class _CmdConsoleState extends State<CmdConsole>
   @override
   void initState() {
     super.initState();
+    _db = widget.initialDb;
     if (widget.running) _connect();
   }
 
@@ -487,9 +521,15 @@ class _CmdConsoleState extends State<CmdConsole>
     }
   }
 
-  void _append(String text, _Kind kind) {
-    for (final line in text.split('\n')) {
-      _out.add(_OutLine(line, kind));
+  void _append(String text, _Kind kind,
+      [int? elapsedMs, String promptPrefix = '']) {
+    final lines = text.split('\n');
+    for (var i = 0; i < lines.length; i++) {
+      // elapsedMs / prompt prefix attach to the FIRST line of a multi-line
+      // append only (the prompt head); continuation lines stay timeless.
+      _out.add(_OutLine(lines[i], kind,
+          promptPrefix: i == 0 ? promptPrefix : '',
+          elapsedMs: i == 0 ? elapsedMs : null));
     }
     // cap scrollback
     if (_out.length > 5000) _out.removeRange(0, _out.length - 5000);
@@ -517,39 +557,51 @@ class _CmdConsoleState extends State<CmdConsole>
 
   Future<void> _submit(String raw) async {
     final line = raw.trim();
-    _input.clear();
     _histIdx = -1;
     _refocus();
     if (line.isEmpty) return;
     _history.add(line);
+    _showChips = false; // an explicit command dismisses the completion tray
 
     // local conveniences
     final lower = line.toLowerCase();
     if (lower == 'clear' || lower == 'cls') {
-      setState(() => _out.clear());
+      _clearOut();
       _refocus();
       return;
     }
 
-    setState(() => _append('$_prompt$line', _Kind.prompt));
-
     final args = tokenize(line);
     if (args == null || args.isEmpty) {
-      setState(() => _append('(error) ${tr('cmd.unbalancedQuotes')}', _Kind.error));
+      setState(() {
+        _input.clear();
+        _append(line, _Kind.prompt, null, _prompt);
+        _append('(error) ${tr('cmd.unbalancedQuotes')}', _Kind.error);
+      });
       return;
     }
 
     final client = _client;
     if (client == null || !client.connected) {
-      setState(() => _append('(error) ${tr('cmd.notConnectedStart')}', _Kind.error));
+      setState(() {
+        _input.clear();
+        _append(line, _Kind.prompt, null, _prompt);
+        _append('(error) ${tr('cmd.notConnectedStart')}', _Kind.error);
+      });
       return;
     }
+    _input.clear();
 
+    // Round-trip timing (v2.3 R4.1): the prompt line's elapsed badge is filled
+    // in once the reply lands; >200ms marks a slow command.
+    final sw = Stopwatch()..start();
     try {
       final reply = await client.command(args);
       if (!mounted) return;
+      final ms = sw.elapsedMilliseconds;
       setState(() {
         final isErr = reply is RespError;
+        _append(line, _Kind.prompt, ms, _prompt);
         _append(formatReply(reply), isErr ? _Kind.error : _Kind.reply);
         // The health signal lags by up to ~14.5s, so the error reaches the
         // console while the dot is still dark. Light it now; the latch keeps it
@@ -569,7 +621,9 @@ class _CmdConsoleState extends State<CmdConsole>
       _refocus();
     } catch (e) {
       if (!mounted) return;
+      final ms = sw.elapsedMilliseconds;
       setState(() {
+        _append(line, _Kind.prompt, ms, _prompt);
         _append('(error) $e', _Kind.error);
       });
       _refocus();
@@ -587,11 +641,54 @@ class _CmdConsoleState extends State<CmdConsole>
     );
   }
 
-  Color _color(_Kind k, bool dark) => switch (k) {
-        _Kind.prompt => dark ? const Color(0xFF9FB6D0) : const Color(0xFF3A5A7D),
-        _Kind.reply => dark ? const Color(0xFFC8E1CB) : const Color(0xFF1F7A3D),
-        _Kind.error => dark ? const Color(0xFFFF8A80) : const Color(0xFFC62828),
-        _Kind.info => dark ? const Color(0xFF7C8592) : const Color(0xFF6B7280),
+  // The suggestion chip vocabulary shown above the input, filtered by the
+  // current first word (case-insensitive prefix). Empty input shows the full
+  // common set (capped).
+  List<String> get _chipSuggestions {
+    final raw = _input.text.trimLeft();
+    final firstWord = raw.split(RegExp(r'\s+')).first.toUpperCase();
+    final hits = firstWord.isEmpty
+        ? _kConsoleCommands
+        : _kConsoleCommands.where((c) => c.startsWith(firstWord)).toList();
+    return hits.take(8).toList();
+  }
+
+  void _applyChip(String cmd) {
+    // Replace only the first word; preserve any arguments already typed.
+    final raw = _input.text;
+    final rest = raw.trimLeft().contains(RegExp(r'\s'))
+        ? raw.trimLeft().substring(raw.trimLeft().indexOf(RegExp(r'\s')))
+        : '';
+    final next = '$cmd$rest${rest.isEmpty ? ' ' : ''}';
+    _input.value = TextEditingValue(
+      text: next,
+      selection: TextSelection.collapsed(offset: next.length),
+    );
+    _focus.requestFocus();
+  }
+
+  void _insertHistory(String cmd) {
+    _input.value = TextEditingValue(
+      text: cmd,
+      selection: TextSelection.collapsed(offset: cmd.length),
+    );
+    _focus.requestFocus();
+  }
+
+  void _clearOut() => setState(() => _out.clear());
+
+  // Mockup .cmd-out: ok/error replies are bold (700), others normal.
+  Color _color(_Kind k, AppTokens t) => switch (k) {
+        _Kind.prompt => t.text2,
+        _Kind.reply => t.success,
+        _Kind.error => t.danger,
+        _Kind.info => t.text3,
+      };
+
+  FontWeight _weight(_Kind k) => switch (k) {
+        _Kind.reply => FontWeight.w700,
+        _Kind.error => FontWeight.w700,
+        _ => FontWeight.normal,
       };
 
   @override
@@ -621,59 +718,72 @@ class _CmdConsoleState extends State<CmdConsole>
 
     final connected = _client?.connected ?? false;
     final dark = Theme.of(context).brightness == Brightness.dark;
-    // Terminal palette, theme-aware. Dark keeps the classic near-black console;
-    // light uses a soft off-white so the Cmd tab isn't a black hole in a light UI.
-    final termBg = dark ? const Color(0xFF0B0E13) : const Color(0xFFF7F8FA);
+    final t = AppTokens.of(context);
+    // Terminal palette, theme-aware (v2.3 tokens). Dark keeps the classic
+    // near-black console; light uses the panel-2 well.
+    final termBg = dark ? const Color(0xFF0B0E13) : t.panel2;
 
     // Not connected yet (initial connect or an in-progress reconnect): a centered
     // spinner, and the console is not operable until it's back.
     if (!connected) {
       return Container(color: termBg, child: _loadingView());
     }
-    final inputBg = dark ? const Color(0xFF0E1116) : const Color(0xFFEDEFF3);
-    final inputText = dark ? Colors.white : const Color(0xFF1B1F24);
-    final hintColor = dark ? const Color(0xFF55606E) : const Color(0xFF98A0AC);
-    final promptColor = connected
-        ? (dark ? const Color(0xFF7FB2E6) : const Color(0xFF2F6FB3))
-        : Colors.grey;
-    const accent = Color(0xFF4F93D6);
+    final promptColor = connected ? t.accent : t.text3;
+    // Fold _out into render items ONCE: a stamped prompt line absorbs its
+    // output lines (up to the next prompt) into one command-block card.
+    // Mutating the builder's own index (the old `i = j` skip) has no effect —
+    // ListView.builder owns the index, so every output line rendered twice
+    // (pixel-fidelity-v23 CP 9.x).
+    final streamItems = <Widget>[];
+    for (var i = 0; i < _out.length;) {
+      final l = _out[i];
+      if (l.kind == _Kind.prompt && l.elapsedMs != null) {
+        final j = _blockEnd(i);
+        // Mockup .console-stream gap:12px between block cards.
+        streamItems.add(Padding(
+          padding: const EdgeInsets.only(bottom: 12),
+          child: _commandBlock(i, j, dark, t),
+        ));
+        i = j + 1;
+      } else {
+        streamItems.add(Padding(
+          padding: const EdgeInsets.symmetric(vertical: 1),
+          child: SelectableText(
+            l.text.isEmpty ? ' ' : l.text,
+            style: Ts.style(size: Ts.lg, color: _color(l.kind, t), monoFont: true, height: 1.35),
+          ),
+        ));
+        i++;
+      }
+    }
     return Container(
       color: termBg,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          // Top toolbar (v2.3): RESP connection state + History / Clear.
+          _toolbar(t, connected),
+          Divider(height: 1, color: t.hairline),
           // scrollback — or a terminal-style welcome banner before any command
           Expanded(
             child: _out.isEmpty
                 ? _welcome(dark)
                 : Scrollbar(
                     controller: _scroll,
-                    child: ListView.builder(
+                    child: ListView(
                       controller: _scroll,
-                      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-                      itemCount: _out.length,
-                      itemBuilder: (_, i) {
-                        final l = _out[i];
-                        return SelectableText(
-                          l.text.isEmpty ? ' ' : l.text,
-                          style: TextStyle(
-                            fontFamily: 'monospace',
-                            fontSize: 12.5,
-                            height: 1.35,
-                            color: _color(l.kind, dark),
-                          ),
-                        );
-                      },
+                      padding: const EdgeInsets.fromLTRB(18, 14, 18, 14),
+                      children: streamItems,
                     ),
                   ),
           ),
-          const Divider(height: 1),
-          // input row — fixed height so its top divider lines up with the
-          // Local DynamoDB panel's divider across the sidebar split (both 48px).
+          // Completion tray (v2.3): command suggestions above the input.
+          if (_showChips) _chipTray(t),
+          Divider(height: 1, color: t.hairline),
+          // input row
           Container(
-            color: inputBg,
-            height: 48,
-            padding: const EdgeInsets.symmetric(horizontal: 12),
+            color: t.panel,
+            padding: const EdgeInsets.fromLTRB(12, 6, 12, 8),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
@@ -692,11 +802,7 @@ class _CmdConsoleState extends State<CmdConsole>
                 ],
                 Text(
                   _connecting ? '${tr('cmd.connectingPrompt')} ' : _prompt,
-                  style: TextStyle(
-                    fontFamily: 'monospace',
-                    fontSize: 12.5,
-                    color: promptColor,
-                  ),
+                  style: Ts.style(size: Ts.lg, color: promptColor, monoFont: true),
                 ),
                 Expanded(
                   child: Focus(
@@ -710,6 +816,10 @@ class _CmdConsoleState extends State<CmdConsole>
                           _recall(1);
                           return KeyEventResult.handled;
                         }
+                        if (event.logicalKey == LogicalKeyboardKey.escape) {
+                          setState(() => _showChips = false);
+                          return KeyEventResult.handled;
+                        }
                       }
                       return KeyEventResult.ignored;
                     },
@@ -718,16 +828,23 @@ class _CmdConsoleState extends State<CmdConsole>
                       focusNode: _focus,
                       autofocus: true,
                       enabled: connected,
-                      style: TextStyle(
-                          fontFamily: 'monospace', fontSize: 12.5, color: inputText),
-                      cursorColor: accent,
+                      onChanged: (_) => setState(() {}),
+                      // Mockup .console-input input: the typed command is
+                      // key info — 600 (v2.4 emphasis).
+                      style: Ts.style(size: Ts.lg, weight: FontWeight.w600,
+                          color: t.text, monoFont: true),
+                      cursorColor: t.accent,
                       decoration: InputDecoration(
                         isDense: true,
+                        // Shield from the theme-level .f-input contentPadding
+                        // (CP 7.6): console rows align to the stream above;
+                        // the borderless input adds no padding of its own.
+                        contentPadding: EdgeInsets.zero,
                         border: InputBorder.none,
                         hintText: connected
                             ? tr('cmd.typeCommandHint')
                             : tr('cmd.notConnected'),
-                        hintStyle: TextStyle(color: hintColor, fontSize: 12.5),
+                        hintStyle: Ts.style(size: Ts.lg, color: t.text3, monoFont: true),
                       ),
                       onSubmitted: _submit,
                     ),
@@ -737,20 +854,255 @@ class _CmdConsoleState extends State<CmdConsole>
                   TextButton(
                     onPressed: _connect,
                     child: Text(tr('cmd.reconnect')),
-                  )
-                else
-                  IconButton(
-                    tooltip: tr('cmd.clear'),
-                    visualDensity: VisualDensity.compact,
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-                    icon: const Icon(Icons.clear_all, size: 18),
-                    onPressed: () => setState(() => _out.clear()),
                   ),
               ],
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  // v2.3 console toolbar: connection identity + state on the left, History /
+  // Clear on the right. (The screen breadcrumb lives in the global TopBar.)
+  Widget _toolbar(AppTokens t, bool connected) {
+    return Container(
+      height: 42, // mockup .console-toolbar 42h (logs_page precedent)
+      color: t.panel,
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      child: Row(children: [
+        // Mockup .console-toolbar left: a 28px .inst-crumb-style chip with a
+        // status dot before the identity text (pixel-fidelity-v23 CP 9.x).
+        // Mockup .console-toolbar left: a .inst-crumb chip — status dot +
+        // bold instance name + "· dbN" (no >_ glyph, no RESP pill). Legacy
+        // host:port chip when no instance name is provided.
+        Container(
+          height: 28, // mockup .inst-crumb inline height:28
+          padding: EdgeInsets.symmetric(
+              horizontal: widget.instanceName != null ? 12 : 10),
+          decoration: BoxDecoration(
+            color: t.panel2,
+            borderRadius: BorderRadius.circular(Dim.radiusS),
+            border: Border.all(color: t.border),
+          ),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Container(
+                width: 7, height: 7, // mockup .dot
+                decoration: BoxDecoration(
+                    color: connected ? t.success : Colors.grey,
+                    shape: BoxShape.circle)),
+            if (widget.instanceName != null) ...[
+              const SizedBox(width: 8), // mockup .inst-crumb gap:8
+              Text(widget.instanceName!,
+                  style: Ts.style(size: 12.5, weight: FontWeight.w600, color: t.text)),
+              const SizedBox(width: 8),
+              Text('· db$_db',
+                  style: Ts.style(size: 12.5, weight: FontWeight.w600, color: t.text)),
+            ] else ...[
+              const SizedBox(width: 7),
+              Text('>_',
+                  style: Ts.style(size: Ts.md, weight: FontWeight.w700, color: t.accent, monoFont: true)),
+              const SizedBox(width: 6),
+              Text('${widget.host}:${widget.port}${_db > 0 ? ' · db$_db' : ''}',
+                  style: Ts.style(size: Ts.sm, color: t.text2, monoFont: true, tabularNums: true)),
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                decoration: BoxDecoration(
+                  color: connected ? t.selection : t.panel,
+                  borderRadius: BorderRadius.circular(99),
+                  border: Border.all(color: connected ? t.success : t.border),
+                ),
+                child: Text('RESP',
+                    style: Ts.style(size: Ts.xs, weight: FontWeight.w700,
+                        color: connected ? t.success : t.text3)),
+              ),
+            ],
+          ]),
+        ),
+        // Mockup .empty-note after the crumb: "RESP3 · 已连接 <b>2h 14m</b>".
+        if (widget.connectedLabel != null) ...[
+          const SizedBox(width: 8),
+          Text('RESP3 · 已连接 ', style: Ts.style(size: Ts.md, color: t.text3)),
+          Text(widget.connectedLabel!,
+              style: Ts.style(size: Ts.md, weight: FontWeight.w600, color: t.text2)),
+        ],
+        const Spacer(),
+        // Mockup right cluster: two .abtn (26h, pad 0 11, border, radius-sm,
+        // icon + 12/500 text-2 label).
+        _abtn(t,
+            icon: Icons.history,
+            label: 'History', // no i18n key exists; plain label, not a tr() miss
+            iconColor: _showChips ? t.accent : t.text2,
+            onPressed: () => setState(() => _showChips = !_showChips)),
+        const SizedBox(width: 8),
+        _abtn(t, icon: Icons.clear_all, label: tr('cmd.clear'), onPressed: _clearOut),
+      ]),
+    );
+  }
+
+  // Mockup .abtn: 26px bordered neutral button, icon + 12px/500 text-2 label.
+  Widget _abtn(AppTokens t,
+      {required IconData icon,
+      required String label,
+      required VoidCallback onPressed,
+      Color? iconColor}) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(Dim.radiusS),
+      onTap: onPressed,
+      child: Container(
+        height: 26,
+        padding: const EdgeInsets.symmetric(horizontal: 11),
+        decoration: BoxDecoration(
+          color: t.panel,
+          borderRadius: BorderRadius.circular(Dim.radiusS),
+          border: Border.all(color: t.border),
+        ),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Icon(icon, size: 13, color: iconColor ?? t.text2),
+          const SizedBox(width: 5),
+          Text(label, style: Ts.style(size: 12, weight: FontWeight.w500, color: t.text2)),
+        ]),
+      ),
+    );
+  }
+
+  // The completion tray above the input: suggestion chips on the left, recent
+  // history (most recent last) on the right when there is room.
+  Widget _chipTray(AppTokens t) {
+    final chips = _chipSuggestions;
+    final recent = _history.length <= 1
+        ? const <String>[]
+        : _history.reversed.take(4).toList();
+    return Container(
+      color: t.panel,
+      padding: const EdgeInsets.fromLTRB(12, 6, 12, 2),
+      child: Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
+        Expanded(
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(children: [
+              for (final c in chips) ...[
+                _chip(c, t, onTap: () => _applyChip(c), filled: true),
+                const SizedBox(width: 6),
+              ],
+            ]),
+          ),
+        ),
+        if (recent.isNotEmpty) ...[
+          const SizedBox(width: 10),
+          Icon(Icons.history, size: 13, color: t.text3),
+          const SizedBox(width: 5),
+          for (final h in recent) ...[
+            _chip(h, t, onTap: () => _insertHistory(h), filled: false),
+            const SizedBox(width: 6),
+          ],
+        ],
+      ]),
+    );
+  }
+
+  Widget _chip(String label, AppTokens t,
+      {required VoidCallback onTap, required bool filled}) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(99),
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+        decoration: BoxDecoration(
+          color: filled ? t.selection : Colors.transparent,
+          borderRadius: BorderRadius.circular(99),
+          border: Border.all(color: filled ? t.accent : t.border),
+        ),
+        child: Text(label,
+            overflow: TextOverflow.ellipsis,
+            style: Ts.style(
+                size: Ts.xs,
+                color: filled ? t.accent : t.text3,
+                monoFont: true,
+                tabularNums: true)),
+      ),
+    );
+  }
+
+  // Index of the last scrollback line belonging to the command block that
+  // starts at prompt line [i] (i.e. the line before the next prompt, or the
+  // final line).
+  int _blockEnd(int i) {
+    var j = i;
+    while (j + 1 < _out.length && _out[j + 1].kind != _Kind.prompt) {
+      j++;
+    }
+    return j;
+  }
+
+  // One command block card (mockup .cmd-block): a bordered card with a panel-2
+  // head band (prompt + command left, elapsed badge right, >200ms warning) over
+  // the command's output lines. Blocks are spaced 12px apart (the stream's
+  // padding/gap come from the ListView, not here).
+  Widget _commandBlock(int start, int end, bool dark, AppTokens t) {
+    final head = _out[start];
+    final slow = head.elapsedMs! > 200;
+    return Container(
+      decoration: BoxDecoration(
+        color: t.panel,
+        borderRadius: BorderRadius.circular(Dim.radiusM),
+        border: Border.all(color: t.hairline),
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(Dim.radiusM - 1),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          // Head band (mockup .cmd-block-head): panel-2 + hairline bottom border.
+          Container(
+            decoration: BoxDecoration(
+              color: t.panel2,
+              border: Border(bottom: BorderSide(color: t.hairline)),
+            ),
+            padding: const EdgeInsets.fromLTRB(12, 7, 12, 7),
+            // Plain Text/SelectableText runs instead of SelectableText.rich:
+            // the rich variant rasterises as solid glyph boxes in the capture
+            // channel (pixel-fidelity-v23 CP 9.x inst-console diagnosis).
+            child: Row(children: [
+              Expanded(
+                child: Row(children: [
+                  if (head.promptPrefix.isNotEmpty)
+                    Text(head.promptPrefix,
+                        style: Ts.style(size: Ts.md, color: t.accent, monoFont: true, height: 1.35)),
+                  Flexible(
+                    child: SelectableText(
+                      head.text.isEmpty ? ' ' : head.text,
+                      style: Ts.style(size: Ts.lg, weight: FontWeight.w600, color: t.text, monoFont: true, height: 1.35),
+                    ),
+                  ),
+                ]),
+              ),
+              if (slow) ...[
+                Icon(Icons.warning_amber_rounded, size: 13, color: t.warning),
+                const SizedBox(width: 4),
+              ],
+              // Mockup .elapsed: right-aligned, 600, tabular-nums.
+              Text('${head.elapsedMs} ms',
+                  style: Ts.style(size: Ts.sm, weight: FontWeight.w600,
+                      color: slow ? t.warning : t.text2, monoFont: true, tabularNums: true)),
+            ]),
+          ),
+          // Output body (mockup .cmd-out).
+          if (end > start)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 9, 12, 9),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                for (var k = start + 1; k <= end; k++)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 3),
+                    child: SelectableText(
+                      _out[k].text.isEmpty ? ' ' : _out[k].text,
+                      style: Ts.style(size: Ts.md, color: _color(_out[k].kind, t),
+                          weight: _weight(_out[k].kind), monoFont: true, height: 1.4),
+                    ),
+                  ),
+              ]),
+            ),
+        ]),
       ),
     );
   }

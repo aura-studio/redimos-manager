@@ -1,21 +1,22 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
-import 'dart:math' as math;
 import 'dart:ui' show AppExitResponse;
 
+import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import 'src/browser_page.dart';
 import 'src/cmd_console.dart';
+import 'src/configure_page.dart';
 import 'src/endpoint_detail.dart';
+import 'src/home_chrome.dart';
 import 'src/i18n.dart';
+import 'src/logs_page.dart';
 import 'src/models.dart';
 import 'src/monitor_widgets.dart';
 import 'src/native.dart';
 import 'src/playground_page.dart';
-import 'src/ui_theme.dart';
+import 'src/ui_tokens.dart';
 
 void main() {
   _loadThemeMode();
@@ -59,44 +60,38 @@ void _saveThemeMode(ThemeMode m) {
   } catch (_) {}
 }
 
-// Root sidebar collapse state, persisted next to the theme/locale in ~/.redimos.
-File? _navFile() {
-  final home = Platform.environment['HOME'] ?? Platform.environment['USERPROFILE'];
-  if (home == null || home.isEmpty) return null;
-  return File('$home${Platform.pathSeparator}.redimos${Platform.pathSeparator}nav');
+ThemeData _appTheme(Brightness b) {
+  final t = AppTokens.forBrightness(b);
+  final td = ThemeData(
+    useMaterial3: true,
+    brightness: b,
+    scaffoldBackgroundColor: t.bg,
+    dividerColor: t.hairline,
+    // colorScheme (not colorSchemeSeed): the two are mutually exclusive — seed
+    // would also re-derive every role off the accent instead of the tuned
+    // token panel/surface below.
+    colorScheme: b == Brightness.dark
+        ? const ColorScheme.dark().copyWith(primary: t.accent, surface: t.panel)
+        : const ColorScheme.light().copyWith(primary: t.accent, surface: t.panel),
+    extensions: [t],
+    // UI defaults to the system sans stack (no more global monospace — data
+    // widgets opt into the mono fallback stack via Ts.style(monoFont:true)).
+    fontFamilyFallback: Ts.sans,
+    // One consistent weight/colour for every rule in the app (sidebar splits,
+    // tab bar, section separators) so no line looks bolder than another.
+    dividerTheme: DividerThemeData(
+      thickness: 1,
+      space: 1,
+      color: t.hairline,
+    ),
+  );
+  // CP 5.1/5.2: CSS half-leading for every theme-derived text style; the
+  // golden/capture themes in test/screen_fixtures.dart mirror this.
+  // CP 7.x: MatSuppress kills the M3 default chrome — applied here AND in
+  // the test-side goldenTheme so goldens/captures see the same suppression.
+  return MatSuppress.apply(
+      td.copyWith(textTheme: Ts.withCssLeading(td.textTheme)), t);
 }
-
-bool _loadNavCollapsed() {
-  try {
-    final f = _navFile();
-    return f != null && f.existsSync() && f.readAsStringSync().trim() == 'collapsed';
-  } catch (_) {
-    return false;
-  }
-}
-
-void _saveNavCollapsed(bool collapsed) {
-  try {
-    final f = _navFile();
-    if (f == null) return;
-    f.parent.createSync(recursive: true);
-    f.writeAsStringSync(collapsed ? 'collapsed' : 'expanded');
-  } catch (_) {}
-}
-
-ThemeData _appTheme(Brightness b) => ThemeData(
-      useMaterial3: true,
-      colorSchemeSeed: const Color(0xFF3B6EA5),
-      brightness: b,
-      fontFamily: 'monospace',
-      // One consistent weight/colour for every rule in the app (sidebar splits,
-      // tab bar, section separators) so no line looks bolder than another.
-      dividerTheme: DividerThemeData(
-        thickness: 1,
-        space: 1,
-        color: b == Brightness.dark ? const Color(0x33FFFFFF) : const Color(0x1F000000),
-      ),
-    );
 
 class RedimosManagerApp extends StatelessWidget {
   const RedimosManagerApp({super.key});
@@ -114,93 +109,6 @@ class RedimosManagerApp extends StatelessWidget {
         darkTheme: _appTheme(Brightness.dark),
         themeMode: appThemeMode.value,
         home: const HomePage(),
-      ),
-    );
-  }
-}
-
-/// The app mark: a steel-blue squircle with a white hexagon (a nod to the
-/// DynamoDB store) crossed by a horizontal "wire" (the RESP/db0 proxy layer),
-/// capped with a green live-dot — the running-instance colour used throughout.
-class RedimosLogo extends StatelessWidget {
-  const RedimosLogo({super.key, this.size = 30});
-  final double size;
-  @override
-  Widget build(BuildContext context) =>
-      SizedBox(width: size, height: size, child: const CustomPaint(painter: _LogoPainter()));
-}
-
-class _LogoPainter extends CustomPainter {
-  const _LogoPainter();
-  @override
-  void paint(Canvas canvas, Size size) {
-    canvas.scale(size.shortestSide / 256.0);
-    const rect = Rect.fromLTWH(8, 8, 240, 240);
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(rect, const Radius.circular(60)),
-      Paint()
-        ..shader = const LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [Color(0xFF5A93D4), Color(0xFF2C5B91)],
-        ).createShader(rect),
-    );
-    final hex = Path();
-    for (var i = 0; i < 6; i++) {
-      final a = (-90 + 60 * i) * math.pi / 180;
-      final x = 128 + 80 * math.cos(a);
-      final y = 128 + 80 * math.sin(a);
-      i == 0 ? hex.moveTo(x, y) : hex.lineTo(x, y);
-    }
-    hex.close();
-    canvas.drawPath(hex, Paint()..color = Colors.white);
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(const Rect.fromLTWH(66, 116, 124, 24), const Radius.circular(12)),
-      Paint()..color = const Color(0xFF3A6AA6),
-    );
-    canvas.drawCircle(const Offset(176, 128), 12, Paint()..color = const Color(0xFF46D38A));
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
-}
-
-/// Stylised "Redimos Manager" logotype: the geometric Righteous display face,
-/// its glyphs filled with a blue→cyan→green gradient echoing the logo, over a
-/// soft blue glow. "Manager" is tracked wider and slightly dimmed so the two
-/// words read as a mark rather than plain text.
-class _Wordmark extends StatelessWidget {
-  const _Wordmark();
-
-  @override
-  Widget build(BuildContext context) {
-    const glow = [
-      Shadow(color: Color(0x555FA8E8), blurRadius: 12),
-      Shadow(color: Color(0x3346D38A), blurRadius: 18),
-    ];
-    return ShaderMask(
-      blendMode: BlendMode.srcIn,
-      shaderCallback: (rect) => const LinearGradient(
-        begin: Alignment.topLeft,
-        end: Alignment.bottomRight,
-        colors: [Color(0xFF8FC6FF), Color(0xFF5A93D4), Color(0xFF33C1D6), Color(0xFF46D38A)],
-        stops: [0.0, 0.4, 0.72, 1.0],
-      ).createShader(rect),
-      child: const Text.rich(
-        TextSpan(children: [
-          TextSpan(text: 'Redimos', style: TextStyle(letterSpacing: 0.5)),
-          TextSpan(
-            text: '  Manager',
-            style: TextStyle(letterSpacing: 2.0, color: Color(0xCCFFFFFF)),
-          ),
-        ]),
-        style: TextStyle(
-          fontFamily: 'Righteous',
-          fontSize: 22,
-          height: 1.0,
-          color: Colors.white,
-          shadows: glow,
-        ),
       ),
     );
   }
@@ -224,8 +132,12 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   // When an endpoint (not an instance) is selected, this holds its id and the
   // right pane shows the endpoint's storage views instead of the instance tabs.
   String? _selEndpointId;
-  // Root sidebar collapse (v1.2): a ~232px panel ↔ a 64px rail. Persisted.
-  bool _navCollapsed = _loadNavCollapsed();
+  // v2.3: which rail entry is active — the entity sidebar shows ONLY that
+  // kind's entities (instances or endpoints), never mixed.
+  EntityKind _entityKind = EntityKind.instance;
+  // v2.3: active screen index on the endpoint detail's MidBar tabs (the tab
+  // controller lives there no longer — the chrome is HomePage-level now).
+  int _epScreenIndex = 0;
   // Sidebar card currently under the pointer (reveals its start/stop control).
   String? _hoveredCardId;
   // Configs that were running at the last AppBar "Stop all". While non-empty and
@@ -233,7 +145,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   List<String> _stopAllSnapshot = [];
   Timer? _poll;
   // Lets the parent inspect / save the editor form before leaving it.
-  final _editorKey = GlobalKey<_ConfigEditorState>();
+  final _editorKey = GlobalKey<ConfigEditorState>();
   // Right-pane tabs (Configure / Monitor / Logs / Console / Browser /
   // Playground) — owned here so flows can jump between tabs. The endpoint-bound
   // storage views (Endpoint / Table / PartiQL) live on the endpoint detail,
@@ -258,6 +170,17 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   @override
   void initState() {
     super.initState();
+    // Repaint the MidBar underline + top-bar screen name on tab changes.
+    _tabs.addListener(() {
+      if (mounted) setState(() {});
+    });
+    // Debug-only UI self-test hook: open a specific instance tab at launch so
+    // screenshots can reach screens whose MidBar tabs synthetic OS clicks
+    // never land on (see the v2.3 self-test). Release builds ignore the env.
+    if (kDebugMode) {
+      final i = int.tryParse(Platform.environment['REDIMOS_INITIAL_TAB'] ?? '');
+      if (i != null) _tabs.index = i.clamp(0, 5);
+    }
     try {
       _core = NativeCore();
       _reload();
@@ -293,6 +216,15 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
         _selectedId = _configs.first.id;
       }
     });
+    // Debug-only companion to the REDIMOS_INITIAL_TAB hook in initState: pick
+    // the initially selected instance by name (self-test screenshots).
+    if (kDebugMode) {
+      final n = Platform.environment['REDIMOS_INITIAL_INSTANCE'];
+      if (n != null && n.isNotEmpty) {
+        final hit = _configs.where((c) => c.name == n);
+        if (hit.isNotEmpty) setState(() => _selectedId = hit.first.id);
+      }
+    }
     _refresh();
   }
 
@@ -551,59 +483,132 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   @override
   Widget build(BuildContext context) {
     if (_loadError != null) return _errorScaffold();
+    final isEp = _selEndpointId != null;
+    // CP 9.x: the chrome (rail / entity sidebar / top bar / mid bar / status
+    // bar) lives in src/home_chrome.dart so the pixel-capture channel can wrap
+    // the very same widgets around its content screens.
     return Scaffold(
-      appBar: AppBar(
-        title: const Row(mainAxisSize: MainAxisSize.min, children: [
-          RedimosLogo(size: 26),
-          SizedBox(width: 11),
-          _Wordmark(),
-        ]),
-        actions: [
-          PopupMenuButton<AppLang>(
-            tooltip: tr('app.language'),
-            icon: const Icon(Icons.language_outlined),
-            onSelected: (l) {
-              appLang.value = l;
-              saveAppLang(l);
-            },
-            itemBuilder: (_) => [
-              // Language names show natively, not translated.
-              _langMenuItem(AppLang.zh, '中文'),
-              _langMenuItem(AppLang.en, 'English'),
-            ],
-          ),
-          PopupMenuButton<ThemeMode>(
-            tooltip: tr('app.theme'),
-            icon: Icon(switch (appThemeMode.value) {
-              ThemeMode.light => Icons.light_mode_outlined,
-              ThemeMode.dark => Icons.dark_mode_outlined,
-              ThemeMode.system => Icons.brightness_auto_outlined,
-            }),
-            onSelected: (m) {
-              appThemeMode.value = m;
-              _saveThemeMode(m);
-            },
-            itemBuilder: (_) => [
-              _themeMenuItem(ThemeMode.light, Icons.light_mode_outlined, tr('theme.light')),
-              _themeMenuItem(ThemeMode.dark, Icons.dark_mode_outlined, tr('theme.dark')),
-              _themeMenuItem(ThemeMode.system, Icons.brightness_auto_outlined, tr('theme.system')),
-            ],
-          ),
-          _stopAllButton(),
-        ],
-      ),
-      body: Row(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          SizedBox(
-            width: _navCollapsed ? 64 : 236,
-            child: _navCollapsed ? _navRail() : _configList(),
-          ),
-          const VerticalDivider(width: 1),
-          Expanded(child: _detail()),
-        ],
+      body: HomeChrome(
+        state: ChromeState(
+          entityKind: _entityKind,
+          configs: _configs,
+          endpoints: _endpoints,
+          statuses: _status,
+          selectedConfigId: _selectedId,
+          selectedEndpointId: _selEndpointId,
+          hoveredCardId: _hoveredCardId,
+          entityQuery: _entityQuery,
+          tabLabels: isEp ? _epTabLabels() : _instanceTabLabels(),
+          tabIndex: isEp ? _epScreenIndex : _tabs.index,
+          stopAllSnapshot: _stopAllSnapshot,
+          ddb: _ddb,
+          themeMode: appThemeMode.value,
+          lang: appLang.value,
+        ),
+        cb: ChromeCallbacks(
+          onEntityKind: (k) => setState(() => _entityKind = k),
+          onSelectConfig: _selectInstance,
+          onSelectEndpoint: _selectEndpoint,
+          onHoverCard: (h) => setState(() => _hoveredCardId = h),
+          onQueryChanged: (v) => setState(() => _entityQuery = v),
+          onNewConfig: _newConfig,
+          onMidTab: (i) => _onMidTab(i, isEp),
+          onStartStop: _startStop,
+          onStopAll: _stopAll,
+          onRestoreAll: _restoreAll,
+          onThemeMode: (m) {
+            appThemeMode.value = m;
+            _saveThemeMode(m);
+          },
+          onLang: (l) {
+            appLang.value = l;
+            saveAppLang(l);
+          },
+          onDdbMutated: _refresh,
+        ),
+        core: _core!,
+        midBarCta: _midBarCta(),
+        child: _detail(),
       ),
     );
+  }
+
+  void _onMidTab(int i, bool isEp) {
+    if (isEp) {
+      setState(() => _epScreenIndex = i);
+    } else {
+      _tabs.animateTo(i);
+      setState(() {}); // refresh the MidBar's active underline + top-bar name
+    }
+  }
+
+  Widget _midBarCta() {
+    // Context CTA in the end group. Wired screens get a live action; the rest
+    // reserve the slot (per-screen wiring lands in T4–T13).
+    final isEp = _selEndpointId != null;
+    final idx = isEp ? _epScreenIndex : _tabs.index;
+    if (!isEp && idx == 0) {
+      // Browse → New Key
+      final c = _selected;
+      if (c != null) {
+        return chromeCta(context, Icons.add, tr('br.newKey'), () => _focusBrowserNewKey(c));
+      }
+    }
+    if (!isEp && idx == 4) {
+      // Playground → Run (same v2.3 CTA grammar, same action as the toolbar's)
+      final st = _playgroundKey.currentState;
+      if (st != null) {
+        return chromeCta(context, Icons.play_arrow, tr('pg.run'),
+            () => (st as dynamic).runScript());
+      }
+    }
+    if (isEp && idx == 1) {
+      // Endpoint Browser → ＋ Item (T12; opens the selected table's create
+      // flow via the key bridge). No i18n key for this label. The leading
+      // plus comes from the icon — the literal must NOT repeat it (the
+      // mockup .pbtn shows a single plus; pixel-fidelity-v23 CP 9.x).
+      return chromeCta(context, Icons.add, 'Item', () {
+        final st = _epBrowserKey.currentState;
+        if (st != null && (st as dynamic).createItem() == true) return;
+        _toast('Select a table first');
+      });
+    }
+    return const SizedBox(width: 8);
+  }
+
+  // A GlobalKey into the instance Browser page so the MidBar CTA can reach its
+  // New-Key flow (the in-page button and the CTA open the same dialog).
+  final GlobalKey _browserKey = GlobalKey();
+  // Same bridge for the instance Playground screen's Run action (T9).
+  final GlobalKey _playgroundKey = GlobalKey();
+  // Same bridge for the endpoint Browser screen's ＋ Item action (T12).
+  final GlobalKey _epBrowserKey = GlobalKey();
+
+  void _focusBrowserNewKey(RedimosConfig c) {
+    final st = _browserKey.currentState;
+    if (st != null) (st as dynamic).startCreateKey();
+  }
+
+  // ---- screen-name + tab-label helpers (single source for top bar & mid bar) ----
+
+  // v2.3 mockups label the instance tab 'Browse' but the endpoint tab
+  // 'Browser'; the two screens must not share one i18n value. Reuse the
+  // existing 'ep.browse' ('Browse') key for the instance side — no new keys.
+  static const _instanceTabKeys = ['ep.browse', 'tab.console', 'tab.monitor', 'tab.logs', 'tab.playground', 'tab.configure'];
+  List<String> _instanceTabLabels() => [for (final k in _instanceTabKeys) tr(k)];
+
+  List<String> _epTabLabels() {
+    final showDdb = _selEndpoint != null && _ddbForEndpoint(_selEndpoint!) != null;
+    final labels = [tr('tab.overview'), tr('tab.browser'), tr('tab.partiql'), tr('tab.playground')];
+    if (showDdb) labels.addAll([tr('tab.monitor'), tr('tab.logs')]);
+    return labels;
+  }
+
+  DdbEndpoint? get _selEndpoint {
+    for (final e in _endpoints) {
+      if (e.id == _selEndpointId) return e;
+    }
+    return null;
   }
 
   Widget _errorScaffold() => Scaffold(
@@ -627,35 +632,6 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
         ),
       );
 
-  // AppBar action: stop-all / restore toggle. When anything is running it stops
-  // all (recording the running set); when nothing is running but a set was
-  // recorded, it becomes a green triangle that restores exactly that set.
-  Widget _stopAllButton() {
-    final anyRunning =
-        _status.values.any((s) => s.isRunning || s.status == 'restarting');
-    if (anyRunning) {
-      return IconButton(
-        tooltip: tr('app.stopAll'),
-        icon: const Icon(Icons.stop_circle_outlined),
-        onPressed: _stopAll,
-      );
-    }
-    if (_stopAllSnapshot.isNotEmpty) {
-      // Default icon colour (matches the outlined stop icon) — not green, so the
-      // AppBar style stays consistent.
-      return IconButton(
-        tooltip: '${tr('app.startAll')} — ${tr('home.restore')} ${_stopAllSnapshot.length} ${tr('home.configsSuffix')}',
-        icon: const Icon(Icons.play_circle_outline),
-        onPressed: _restoreAll,
-      );
-    }
-    return IconButton(
-      tooltip: tr('app.stopAll'),
-      icon: const Icon(Icons.stop_circle_outlined),
-      onPressed: null, // nothing running, nothing to restore
-    );
-  }
-
   void _stopAll() {
     final snap = _core?.stopAll() ?? [];
     setState(() => _stopAllSnapshot = snap);
@@ -672,97 +648,15 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     _toast('${tr('home.restored')} ${started.length} ${tr('home.configsSuffix')}');
   }
 
-  void _toggleNav() {
-    setState(() => _navCollapsed = !_navCollapsed);
-    _saveNavCollapsed(_navCollapsed);
-  }
-
   void _selectEndpoint(String id) {
     setState(() {
       _selEndpointId = id;
       _selectedId = null;
+      _epScreenIndex = 0; // reset the endpoint's MidBar screen on a fresh pick
     });
   }
 
-  Widget _configList() {
-    return Column(
-      children: [
-        // Header: New config + collapse toggle. 50px so the rule below lines up
-        // with the tab bar's rule across the split.
-        SizedBox(
-          height: 50,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(8, 3, 8, 9),
-            child: Row(children: [
-              Expanded(
-                child: FilledButton.icon(
-                  onPressed: _newConfig,
-                  icon: const Icon(Icons.add),
-                  label: Text(tr('config.new')),
-                  style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(38)),
-                ),
-              ),
-              const SizedBox(width: 4),
-              IconButton(
-                tooltip: tr('nav.collapse'),
-                visualDensity: VisualDensity.compact,
-                icon: const Icon(Icons.chevron_left, size: 20),
-                onPressed: _toggleNav,
-              ),
-            ]),
-          ),
-        ),
-        const Divider(height: 1),
-        Expanded(
-          child: (_configs.isEmpty && _endpoints.isEmpty)
-              ? Center(child: Text(tr('nav.noneYet')))
-              : ListView(children: [
-                  _navSection(tr('nav.instances'), Accents.amber),
-                  for (final c in _configs) _configTile(c),
-                  const SizedBox(height: 6),
-                  _navSection(tr('nav.endpoints'), Accents.teal),
-                  for (final e in _endpoints) _endpointTile(e),
-                  const SizedBox(height: 8),
-                ]),
-        ),
-        const Divider(height: 1),
-        LocalDdbPanel(
-          core: _core!,
-          info: _ddb,
-          onMutated: _refresh,
-        ),
-      ],
-    );
-  }
-
-  // A small colored section header in the sidebar (Instances / Endpoints).
-  Widget _navSection(String label, Color color) => Padding(
-        padding: const EdgeInsets.fromLTRB(16, 12, 12, 6),
-        child: Row(children: [
-          Container(width: 8, height: 8, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
-          const SizedBox(width: 8),
-          Text(label,
-              style: TextStyle(
-                  fontSize: 12, fontWeight: FontWeight.w700,
-                  color: Theme.of(context).textTheme.bodyMedium?.color)),
-        ]),
-      );
-
-  // The endpoint an instance's config points at (matched by backend tuple), so
-  // an instance card can show "→ endpoint-name".
-  DdbEndpoint? _endpointFor(RedimosConfig c) {
-    for (final e in _endpoints) {
-      if (e.endpoint == c.endpoint &&
-          e.region == c.region &&
-          e.accessKeyId == c.accessKeyId &&
-          e.secretKey == c.secretKey &&
-          e.sessionToken == c.sessionToken &&
-          e.source == c.source) {
-        return e;
-      }
-    }
-    return null;
-  }
+  String _entityQuery = '';
 
   Future<void> _selectInstance(RedimosConfig c) async {
     if (c.id == _selectedId) return;
@@ -773,304 +667,6 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       });
     }
   }
-
-  String _hostOf(String url) {
-    final u = Uri.tryParse(url);
-    return (u != null && u.host.isNotEmpty) ? (u.hasPort ? '${u.host}:${u.port}' : u.host) : url;
-  }
-
-  String _portLabel(String url) {
-    final u = Uri.tryParse(url);
-    if (u != null && u.hasPort) return ':${u.port}';
-    return _hostOf(url);
-  }
-
-  // A rounded sidebar card (the shared shell for instance / endpoint tiles).
-  Widget _sidebarCard({
-    required bool selected,
-    required VoidCallback onTap,
-    required Widget child,
-    void Function(bool)? onHover,
-  }) {
-    final scheme = Theme.of(context).colorScheme;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(10, 3, 10, 3),
-      child: Material(
-        color: selected
-            ? Accents.indigo.withValues(alpha: 0.12)
-            : scheme.surfaceContainerHighest.withValues(alpha: 0.35),
-        borderRadius: BorderRadius.circular(12),
-        child: InkWell(
-          onTap: onTap,
-          onHover: onHover,
-          borderRadius: BorderRadius.circular(12),
-          child: Ink(
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                color: selected
-                    ? Accents.indigo
-                    : scheme.outlineVariant.withValues(alpha: 0.45),
-                width: selected ? 1.6 : 1,
-              ),
-            ),
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(12, 10, 10, 10),
-              child: child,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _configTile(RedimosConfig c) {
-    final st = _status[c.id];
-    final running = st?.isRunning ?? false;
-    final active = running || st?.status == 'restarting';
-    final sel = c.id == _selectedId;
-    final hovered = _hoveredCardId == c.id;
-    final ep = _endpointFor(c);
-    final epName = (ep != null && ep.name.isNotEmpty)
-        ? ep.name
-        : (c.endpoint.isEmpty ? 'AWS' : _hostOf(c.endpoint));
-    final mutedColor = Theme.of(context).textTheme.bodySmall?.color;
-    return _sidebarCard(
-      selected: sel,
-      onTap: () => _selectInstance(c),
-      onHover: (h) => setState(() => _hoveredCardId = h ? c.id : null),
-      child: Row(children: [
-        _statusDot(st?.status ?? 'stopped'),
-        const SizedBox(width: 10),
-        Expanded(
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(c.name.isEmpty ? tr('config.unnamed') : c.name,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600)),
-            const SizedBox(height: 2),
-            Text(':${c.port} → $epName',
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(fontSize: 11, fontFamily: 'monospace', color: mutedColor)),
-          ]),
-        ),
-        // Start/stop reveals on hover (or stays visible while active so a running
-        // instance can always be stopped), keeping the resting card clean.
-        AnimatedOpacity(
-          opacity: (hovered || active) ? 1 : 0,
-          duration: const Duration(milliseconds: 120),
-          child: IgnorePointer(
-            ignoring: !(hovered || active),
-            child: IconButton(
-              tooltip: active ? tr('config.stop') : tr('config.start'),
-              visualDensity: VisualDensity.compact,
-              iconSize: 18,
-              icon: Icon(active ? Icons.stop_circle : Icons.play_circle_fill,
-                  color: active ? Colors.redAccent : Accents.green),
-              onPressed: () => _startStop(c),
-            ),
-          ),
-        ),
-      ]),
-    );
-  }
-
-  Widget _endpointTile(DdbEndpoint e) {
-    final sel = e.id == _selEndpointId;
-    final (badge, badgeColor) = switch (e.kind) {
-      'local' => ('LOCAL', Accents.teal),
-      'aws' => ('AWS', Accents.amber),
-      _ => ('URL', Accents.indigo),
-    };
-    final sub = switch (e.kind) {
-      'aws' => e.region.isEmpty ? 'AWS' : e.region,
-      'local' => _portLabel(e.endpoint),
-      _ => _hostOf(e.endpoint),
-    };
-    final mutedColor = Theme.of(context).textTheme.bodySmall?.color;
-    return _sidebarCard(
-      selected: sel,
-      onTap: () => _selectEndpoint(e.id),
-      child: Row(children: [
-        Container(
-            width: 11,
-            height: 11,
-            decoration: const BoxDecoration(color: Accents.teal, shape: BoxShape.circle)),
-        const SizedBox(width: 10),
-        Expanded(
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(e.name.isEmpty ? tr('config.unnamed') : e.name,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600)),
-            const SizedBox(height: 2),
-            Text(sub,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(fontSize: 11, fontFamily: 'monospace', color: mutedColor)),
-          ]),
-        ),
-        const SizedBox(width: 6),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2.5),
-          decoration: BoxDecoration(
-              color: badgeColor.withValues(alpha: 0.18),
-              borderRadius: BorderRadius.circular(5)),
-          child: Text(badge,
-              style: TextStyle(
-                  fontSize: 8.5, color: badgeColor, fontWeight: FontWeight.w800, letterSpacing: 0.4)),
-        ),
-      ]),
-    );
-  }
-
-  // ---- collapsed rail (avatars) ----
-
-  String _instanceAvatarLabel(RedimosConfig c) {
-    final v = c.version.trim();
-    final m = RegExp(r'v\d+', caseSensitive: false).firstMatch(v);
-    if (m != null) return m.group(0)!.toLowerCase();
-    if (v.isNotEmpty) return v.length <= 3 ? v : v.substring(0, 2);
-    final n = c.name.trim();
-    return n.isEmpty ? '?' : n.substring(0, 1).toUpperCase();
-  }
-
-  String _endpointAvatarLabel(DdbEndpoint e) {
-    final n = e.name.trim();
-    return n.isEmpty ? '?' : n.substring(0, 1).toUpperCase();
-  }
-
-  Widget _railDivider(Color c) => Container(
-        height: 2,
-        margin: const EdgeInsets.fromLTRB(18, 7, 18, 7),
-        decoration: BoxDecoration(
-            color: c.withValues(alpha: 0.55), borderRadius: BorderRadius.circular(1)),
-      );
-
-  Widget _railAvatar({
-    required String label,
-    required Color accent,
-    // Process status → badge dot. Null for endpoints: an endpoint is a storage
-    // backend, not a managed process, so it takes the same teal dot
-    // _endpointTile shows rather than a fabricated "running" (which would read
-    // green here and teal when the sidebar is expanded — same object, two
-    // colours depending on sidebar state).
-    String? status,
-    required bool selected,
-    required String tooltip,
-    required VoidCallback onTap,
-  }) {
-    final dot = status == null ? Accents.teal : _statusColor(status);
-    final bg = Theme.of(context).scaffoldBackgroundColor;
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-      child: Tooltip(
-        message: tooltip,
-        waitDuration: const Duration(milliseconds: 250),
-        child: InkWell(
-          onTap: onTap,
-          customBorder: const CircleBorder(),
-          child: Stack(clipBehavior: Clip.none, children: [
-            Container(
-              width: 40,
-              height: 40,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: accent.withValues(alpha: selected ? 0.24 : 0.14),
-                border: Border.all(
-                    color: selected ? Accents.indigo : accent.withValues(alpha: 0.45),
-                    width: selected ? 2 : 1),
-              ),
-              alignment: Alignment.center,
-              child: Text(label,
-                  style: TextStyle(
-                      fontSize: 12.5,
-                      fontWeight: FontWeight.w700,
-                      fontFamily: 'monospace',
-                      color: accent)),
-            ),
-            Positioned(
-              right: -1,
-              bottom: -1,
-              child: Container(
-                width: 12,
-                height: 12,
-                decoration: BoxDecoration(
-                  color: dot,
-                  shape: BoxShape.circle,
-                  border: Border.all(color: bg, width: 2),
-                ),
-              ),
-            ),
-          ]),
-        ),
-      ),
-    );
-  }
-
-  // Collapsed sidebar: a narrow rail of circular avatars with an expand toggle.
-  Widget _navRail() {
-    final scheme = Theme.of(context).colorScheme;
-    return Column(children: [
-      SizedBox(
-        height: 50,
-        child: Center(
-          child: Tooltip(
-            message: tr('nav.expand'),
-            child: InkWell(
-              onTap: _toggleNav,
-              borderRadius: BorderRadius.circular(9),
-              child: Container(
-                width: 34,
-                height: 34,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(9),
-                  border: Border.all(color: scheme.outlineVariant.withValues(alpha: 0.6)),
-                ),
-                child: const Icon(Icons.keyboard_double_arrow_right, size: 18),
-              ),
-            ),
-          ),
-        ),
-      ),
-      const Divider(height: 1),
-      Expanded(
-        child: ListView(padding: const EdgeInsets.symmetric(vertical: 6), children: [
-          _railDivider(Accents.amber),
-          for (final c in _configs)
-            _railAvatar(
-              label: _instanceAvatarLabel(c),
-              accent: Accents.amber,
-              status: _status[c.id]?.status ?? 'stopped',
-              selected: c.id == _selectedId,
-              tooltip:
-                  '${c.name.isEmpty ? tr('config.unnamed') : c.name}\n:${c.port}',
-              onTap: () => _selectInstance(c),
-            ),
-          _railDivider(Accents.teal),
-          for (final e in _endpoints)
-            _railAvatar(
-              label: _endpointAvatarLabel(e),
-              accent: Accents.teal,
-              selected: e.id == _selEndpointId,
-              tooltip:
-                  '${e.name.isEmpty ? tr('config.unnamed') : e.name}\n${e.endpoint.isEmpty ? 'AWS${e.region.isEmpty ? '' : ' · ${e.region}'}' : e.endpoint}',
-              onTap: () => _selectEndpoint(e.id),
-            ),
-        ]),
-      ),
-    ]);
-  }
-
-  Color _statusColor(String status) => switch (status) {
-        'running' => goGreen(context),
-        'restarting' => Colors.amberAccent,
-        'error' => Colors.redAccent,
-        'failed' => Colors.redAccent,
-        'exited' => Colors.orangeAccent,
-        _ => Colors.grey,
-      };
-
-  Widget _statusDot(String status) => Container(
-      width: 12, height: 12,
-      decoration: BoxDecoration(color: _statusColor(status), shape: BoxShape.circle));
 
   // Right pane for a selected endpoint: its own tab set (Tables · Explorer ·
   // PartiQL · Playground) bound directly to the DynamoDB backend — see
@@ -1086,10 +682,93 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
         ddbCpuHist: _ddbCpuHist,
         ddbMemHist: _ddbMemHist,
         ddbDiskHist: _ddbDiskHist,
+        screenIndex: _epScreenIndex,
+        onEdit: () => _editEndpoint(e),
+        browserKey: _epBrowserKey,
       );
 
+  // T11 R4.3/R4.4: edit an endpoint's identity fields and persist the change
+  // to every instance config bound to this endpoint (the same tuple), through
+  // saveConfig so it lands on disk; sibling instances sharing the tuple are
+  // synced one by one.
+  Future<void> _editEndpoint(DdbEndpoint e) async {
+    final nameCtl = TextEditingController(text: e.name);
+    final endpointCtl = TextEditingController(text: e.endpoint);
+    final regionCtl = TextEditingController(text: e.region);
+    final saved = await showDialog<DdbEndpoint>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Edit endpoint'),
+        content: SizedBox(
+          width: 420,
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            TextField(
+              controller: nameCtl,
+              decoration: const InputDecoration(labelText: 'Name', isDense: true),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: endpointCtl,
+              decoration: InputDecoration(labelText: tr('ep.ovEndpoint'), isDense: true),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: regionCtl,
+              decoration: InputDecoration(labelText: tr('ep.ovRegion'), isDense: true),
+            ),
+          ]),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: Text(tr('home.cancel'))),
+          FilledButton(
+            onPressed: () => Navigator.pop(
+                ctx,
+                DdbEndpoint(
+                  id: e.id,
+                  name: nameCtl.text.trim(),
+                  kind: e.kind,
+                  endpoint: endpointCtl.text.trim(),
+                  partitionID: e.partitionID,
+                  region: regionCtl.text.trim(),
+                  accessKeyId: e.accessKeyId,
+                  secretKey: e.secretKey,
+                  sessionToken: e.sessionToken,
+                  source: e.source,
+                )),
+            child: Text(tr('home.save')),
+          ),
+        ],
+      ),
+    );
+    nameCtl.dispose();
+    endpointCtl.dispose();
+    regionCtl.dispose();
+    if (saved == null) return;
+    // Persist: write the edited tuple into every bound instance config (the
+    // endpoint is a dedup view of those tuples, so the write goes through them).
+    var synced = 0;
+    try {
+      for (final c in _configs) {
+        if (c.endpoint == e.endpoint &&
+            c.region == e.region &&
+            c.accessKeyId == e.accessKeyId) {
+          final cc = c.copy();
+          cc.endpoint = saved.endpoint;
+          cc.region = saved.region;
+          _core!.saveConfig(cc);
+          synced++;
+        }
+      }
+      _reload();
+      _toast('${tr('home.saved')} "${saved.name}"${synced > 0 ? ' · $synced' : ''}');
+    } catch (err) {
+      _toast('${tr('home.saveFailed')}: $err', error: true);
+    }
+  }
+
   Widget _detail() {
-    // Endpoint selected → its storage views (see _endpointDetail).
+    // Endpoint selected → its storage views (see _endpointDetail). The chrome
+    // (tabs) lives in the HomePage-level MidBar; this is just the content.
     if (_selEndpointId != null) {
       for (final e in _endpoints) {
         if (e.id == _selEndpointId) return _endpointDetail(e);
@@ -1101,890 +780,82 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     }
     final logsConfigId = c.id.startsWith('unsaved-') ? null : c.id;
     final st = _status[c.id];
-    // configure / monitor / logs / console / browser / playground as switchable
-    // tabs. The controller sits above the per-config content so the chosen tab
-    // is kept when you switch between configs in the sidebar.
-    return Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          // Fixed 50px — same explicit height as the sidebar's "New config"
-          // header, so the thin rule below lines up across the split.
-          SizedBox(
-            height: 50,
-            child: TabBar(
-              controller: _tabs,
-              // Six equal-width tabs sharing the full width.
-              labelColor: Theme.of(context).colorScheme.primary,
-              unselectedLabelColor: Theme.of(context).textTheme.bodySmall?.color,
-              indicatorColor: Theme.of(context).colorScheme.primary,
-              indicatorWeight: 2.5,
-              // Drop the tab bar's own M3 divider so it doesn't double up.
-              dividerColor: Colors.transparent,
-              tabs: [
-                _tab(Icons.tune, tr('tab.configure')),
-                _tab(Icons.insights, tr('tab.monitor')),
-                _tab(Icons.terminal, tr('tab.logs')),
-                _tab(Icons.chevron_right, tr('tab.console')),
-                _tab(Icons.travel_explore, tr('tab.browser')),
-                _tab(Icons.science_outlined, tr('tab.playground')),
-              ],
-            ),
-          ),
-          const Divider(height: 1), // thin rule under the tabs
-          Expanded(
-            child: TabBarView(
-              controller: _tabs,
-              physics: const NeverScrollableScrollPhysics(),
-              children: [
-                // configure (scrolls its own fields, pins the action bar)
-                ConfigEditor(
-                  key: _editorKey,
-                  config: c,
-                  onSave: _save,
-                  onDelete: _delete,
-                ),
-                // monitor — the redimos proxy's own telemetry only; the Local
-                // DynamoDB engine's dashboard lives on the local endpoint page
-                MonitorView(
-                  status: st,
-                  cpuHist: _cpuHist[c.id] ?? const [],
-                  memHist: _memHist[c.id] ?? const [],
-                  opsHist: _opsHist[c.id] ?? const [],
-                  embedded: true,
-                ),
-                // logs — the proxy's own log tail
-                LogsView(
-                  core: _core!,
-                  configId: logsConfigId,
-                  status: st,
-                  embedded: true,
-                ),
-                // cmd — interactive redis-cli against the running proxy
-                CmdConsole(
-                  key: ValueKey('cmd-${c.id}'),
-                  host: '127.0.0.1',
-                  port: c.port,
-                  auth: c.requirepass.isEmpty ? null : c.requirepass,
-                  running: st?.isRunning ?? false,
-                  // The console's RESP socket stays up when the DynamoDB backend
-                  // dies, so no "Reconnecting" state ever appears — commands just
-                  // start failing. /readyz is what reports backend usability.
-                  backendDegraded:
-                      st != null && st.isRunning && st.healthy && !st.ready,
-                  // The cause behind that dot, when redimos reports one. Passed
-                  // whenever present rather than gated on backendDegraded: the
-                  // console also raises the dot optimistically from an error
-                  // reply, ahead of the health signal, and that path deserves the
-                  // cause too once a sample carries it.
-                  backendError: st?.backendError,
-                  // Surface the crash-loop cause (e.g. a failing startup backend
-                  // check) so a proxy that can't reach its table isn't a silent
-                  // spinner. Only while it's actually down for a known reason.
-                  statusReason: (st != null &&
-                          !st.isRunning &&
-                          st.exitMsg.isNotEmpty &&
-                          (st.status == 'restarting' ||
-                              st.status == 'failed' ||
-                              st.status == 'error'))
-                      ? st.exitMsg
-                      : null,
-                ),
-                // browser — Redis key browser over the proxy (ARDM style)
-                BrowserPageView(
-                  key: ValueKey('browser-${c.id}'),
-                  config: c,
-                  running: st?.isRunning ?? false,
-                  core: _core!,
-                ),
-                // playground — run a JS/Go script against the proxy's Redis
-                PlaygroundView(
-                  key: ValueKey('playground-${c.id}'),
-                  core: _core!,
-                  config: c,
-                  kind: 'redis',
-                  running: st?.isRunning ?? false,
-                ),
-              ],
-            ),
-          ),
-        ],
-    );
-  }
-
-  PopupMenuItem<ThemeMode> _themeMenuItem(ThemeMode m, IconData icon, String label) {
-    final selected = appThemeMode.value == m;
-    final color = selected ? Theme.of(context).colorScheme.primary : null;
-    return PopupMenuItem<ThemeMode>(
-      value: m,
-      child: Row(children: [
-        Icon(icon, size: 18, color: color),
-        const SizedBox(width: 10),
-        Text(label, style: TextStyle(color: color, fontWeight: selected ? FontWeight.w600 : null)),
-        const Spacer(),
-        if (selected) Icon(Icons.check, size: 16, color: color),
-      ]),
-    );
-  }
-
-  PopupMenuItem<AppLang> _langMenuItem(AppLang l, String label) {
-    final selected = appLang.value == l;
-    final color = selected ? Theme.of(context).colorScheme.primary : null;
-    return PopupMenuItem<AppLang>(
-      value: l,
-      child: Row(children: [
-        Text(label, style: TextStyle(color: color, fontWeight: selected ? FontWeight.w600 : null)),
-        const Spacer(),
-        if (selected) Icon(Icons.check, size: 16, color: color),
-      ]),
-    );
-  }
-
-  Widget _tab(IconData icon, String label) => Tab(
-        // Compact so the bold rule sits tight under the tab labels.
-        height: 40,
-        child: Row(mainAxisSize: MainAxisSize.min, children: [
-          Icon(icon, size: 16),
-          const SizedBox(width: 7),
-          Text(label),
-        ]),
-      );
-}
-
-// ---------------------------------------------------------------------------
-// Config editor
-// ---------------------------------------------------------------------------
-
-class ConfigEditor extends StatefulWidget {
-  final RedimosConfig config;
-  final Future<void> Function(RedimosConfig) onSave;
-  final Future<void> Function(RedimosConfig) onDelete;
-  const ConfigEditor(
-      {super.key, required this.config, required this.onSave, required this.onDelete});
-  @override
-  State<ConfigEditor> createState() => _ConfigEditorState();
-}
-
-class _ConfigEditorState extends State<ConfigEditor> {
-  late final TextEditingController _name;
-  late final TextEditingController _port;
-  late final TextEditingController _table;
-  late final TextEditingController _endpoint;
-  late final TextEditingController _partitionID;
-  late final TextEditingController _region;
-  late final TextEditingController _ak;
-  late final TextEditingController _sk;
-  late final TextEditingController _sessionToken;
-  late final TextEditingController _source;
-  late final TextEditingController _pass;
-  late String _version;
-  late bool _multiDb;
-  // DynamoDB target mode: 'endpoint' = a DynamoDB-compatible URL (Local/LocalStack/
-  // custom), 'aws' = real AWS via region + credentials (endpoint cleared on save).
-  late String _ddbMode;
-  final _tableFocus = FocusNode();
-
-  static String _ddbModeOf(RedimosConfig c) =>
-      c.endpoint.trim().isEmpty &&
-              (c.accessKeyId.isNotEmpty || c.secretKey.isNotEmpty || c.region.isNotEmpty)
-          ? 'aws'
-          : 'endpoint';
-
-  // Applied by the table-mismatch dialog (from the parent). Both leave the form
-  // dirty so the user reviews and Saves before starting.
-  void applyTableName(String name) {
-    setState(() {
-      _table.text = name;
-      _table.selection = TextSelection.collapsed(offset: name.length);
-    });
-    _tableFocus.requestFocus();
-  }
-
-  void applyRecommended(String? version, bool? multiDb) {
-    setState(() {
-      if (version != null && version.isNotEmpty) _version = version;
-      if (multiDb != null) _multiDb = multiDb;
-    });
-  }
-  late bool _autoCreate;
-  late bool _autoRestart;
-  late String _runMode;
-  late List<FlagKV> _extraFlags;
-  final List<TextEditingController> _flagVals = [];
-
-  // Selectable redimos flags (the ones not already covered by the fields above).
-  static const List<String> _flagKeys = [
-    'databases',
-    'consistency',
-    'max-collection-result',
-    'max-command-bytes',
-    'retry-max-attempts',
-    'delete-batch-size',
-    'circuit-breaker-threshold',
-    'inst-id',
-    'scan-capacity',
-    'metrics-addr',
-    'slowlog-capacity',
-    'request-log',
-  ];
-
-  @override
-  void initState() {
-    super.initState();
-    final c = widget.config;
-    _name = TextEditingController(text: c.name);
-    _port = TextEditingController(text: c.port.toString());
-    _table = TextEditingController(text: c.table);
-    _endpoint = TextEditingController(text: c.endpoint);
-    _partitionID = TextEditingController(text: c.partitionID);
-    _region = TextEditingController(text: c.region);
-    _ak = TextEditingController(text: c.accessKeyId);
-    _sk = TextEditingController(text: c.secretKey);
-    _sessionToken = TextEditingController(text: c.sessionToken);
-    _source = TextEditingController(text: c.source);
-    _pass = TextEditingController(text: c.requirepass);
-    _version = c.version;
-    _multiDb = c.multiDb;
-    _autoCreate = c.autoCreateTable;
-    _autoRestart = c.autoRestart;
-    _runMode = c.runMode.isEmpty ? 'native' : c.runMode;
-    _ddbMode = _ddbModeOf(c);
-    _extraFlags = c.extraFlags.map((f) => FlagKV(key: f.key, value: f.value)).toList();
-    for (final f in _extraFlags) {
-      _flagVals.add(TextEditingController(text: f.value));
-    }
-  }
-
-  @override
-  void dispose() {
-    for (final ctl in [_name, _port, _table, _endpoint, _partitionID, _region, _ak, _sk, _sessionToken, _source, _pass]) {
-      ctl.dispose();
-    }
-    for (final ctl in _flagVals) {
-      ctl.dispose();
-    }
-    _tableFocus.dispose();
-    super.dispose();
-  }
-
-  @override
-  void didUpdateWidget(ConfigEditor old) {
-    super.didUpdateWidget(old);
-    // The parent reuses this editor (GlobalKey) across configs; when the
-    // underlying config changes, reload the form from it.
-    if (old.config.id != widget.config.id) _resetControllers();
-  }
-
-  void _resetControllers() {
-    final c = widget.config;
-    _name.text = c.name;
-    _port.text = c.port.toString();
-    _table.text = c.table;
-    _endpoint.text = c.endpoint;
-    _partitionID.text = c.partitionID;
-    _region.text = c.region;
-    _ak.text = c.accessKeyId;
-    _sk.text = c.secretKey;
-    _sessionToken.text = c.sessionToken;
-    _source.text = c.source;
-    _pass.text = c.requirepass;
-    for (final ctl in _flagVals) {
-      ctl.dispose();
-    }
-    _flagVals.clear();
-    setState(() {
-      _version = c.version;
-      _multiDb = c.multiDb;
-      _autoCreate = c.autoCreateTable;
-      _autoRestart = c.autoRestart;
-      _runMode = c.runMode.isEmpty ? 'native' : c.runMode;
-      _ddbMode = _ddbModeOf(c);
-      _extraFlags = c.extraFlags.map((f) => FlagKV(key: f.key, value: f.value)).toList();
-      for (final f in _extraFlags) {
-        _flagVals.add(TextEditingController(text: f.value));
-      }
-    });
-  }
-
-  /// Whether the form differs from the saved config.
-  bool get isDirty =>
-      jsonEncode(_collect().toJson()) != jsonEncode(widget.config.toJson());
-
-  Future<void> saveNow() => widget.onSave(_collect());
-
-  void _addFlag() => setState(() {
-        _extraFlags.add(FlagKV());
-        _flagVals.add(TextEditingController());
-      });
-
-  void _removeFlag(int i) => setState(() {
-        _flagVals[i].dispose();
-        _flagVals.removeAt(i);
-        _extraFlags.removeAt(i);
-      });
-
-  RedimosConfig _collect() {
-    final c = widget.config.copy();
-    c.name = _name.text.trim();
-    c.port = int.tryParse(_port.text.trim()) ?? 0;
-    c.table = _table.text.trim();
-    // AWS mode must clear the endpoint — a lingering URL would keep redimos
-    // pointed at the local/custom endpoint instead of real AWS.
-    c.endpoint = _ddbMode == 'aws' ? '' : _endpoint.text.trim();
-    c.partitionID = _partitionID.text.trim();
-    c.region = _region.text.trim();
-    c.accessKeyId = _ak.text.trim();
-    c.secretKey = _sk.text;
-    c.sessionToken = _sessionToken.text;
-    c.source = _source.text.trim();
-    c.requirepass = _pass.text;
-    c.version = _version;
-    c.multiDb = _multiDb;
-    c.autoCreateTable = _autoCreate;
-    c.autoRestart = _autoRestart;
-    c.runMode = _runMode;
-    c.extraFlags = [
-      for (var i = 0; i < _extraFlags.length; i++)
-        if (_extraFlags[i].key.trim().isNotEmpty)
-          FlagKV(key: _extraFlags[i].key.trim(), value: _flagVals[i].text.trim()),
-    ];
-    return c;
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return LayoutBuilder(builder: (context, cons) {
-      final w = cons.maxWidth.isFinite ? cons.maxWidth : 880.0;
-      // Fill the whole config pane, and size everything as a PROPORTION of it so
-      // the form scales uniformly with the window (initial size and full screen
-      // look identical, just bigger/smaller). Subtract the 16px horizontal
-      // padding on each side of the scroll view so the row width matches the
-      // real content area — otherwise the trailing column overflows the pane and
-      // clips at the window edge.
-      final cw = (w - 32).clamp(360.0, 6000.0).toDouble();
-      // Strict two-column grid: the content splits into two equal 50% halves
-      // separated by one 12px gutter. Every field snaps to this grid —
-      //   • Name spans the full width (both halves);
-      //   • the leading field of each row (Auth / Table / Url / AccessKeyID /
-      //     SessionToken) fills the LEFT half;
-      //   • the right half is subdivided per row: three equal thirds for
-      //     Port + the two dropdowns (so Port is ⅓ of a half), two equal
-      //     halves for PartitionID + SigningRegion, or one full half for
-      //     SecretAccessKey / Source.
-      // Because each right-half subdivision sums back to exactly one half, every
-      // field's left/right edges line up on the same two column boundaries.
-      const gap = 12.0;
-      final halfW = ((cw - gap) / 2).clamp(120.0, 4000.0).toDouble();
-      final dropW = ((halfW - gap * 2) / 3).clamp(64.0, 2000.0).toDouble(); // ⅓ of a half
-      final leadW = halfW;         // AccessKeyID / SessionToken (left half)
-      final redisAuthW = halfW;    // Auth (left half)
-      final redimosTableW = halfW; // Table (left half)
-      final credRightW = halfW;    // SecretAccessKey / Source (right half)
-      return Column(
-        children: [
-          // Scrollable field area — the pinned action bar below never moves.
-          Expanded(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-          // ── 1 · Name ─────────────────────────────────────────
-          _sectionHead('1', tr('home.name'), topPad: 6),
-          SizedBox(width: cw, child: _field(_name, tr('home.name'))),
-
-          // ── 2 · Redis (the RESP endpoint this proxy exposes) ──
-          _sectionHead('2', 'Redis'),
-          Row(children: [
-            SizedBox(width: redisAuthW, child: _field(_pass, tr('home.auth'), obscure: true)),
-            const SizedBox(width: 12),
-            SizedBox(width: dropW, child: _field(_port, tr('home.port'), number: true)),
-            const SizedBox(width: 12),
-            SizedBox(
-              width: dropW,
-              child: DropdownButtonFormField<bool>(
-                initialValue: _autoRestart,
-                isDense: true,
-                decoration: _dd(tr('home.autoRestart')),
-                items: [
-                  DropdownMenuItem(value: true, child: Text(tr('home.on'))),
-                  DropdownMenuItem(value: false, child: Text(tr('home.off'))),
-                ],
-                onChanged: (v) => setState(() => _autoRestart = v ?? true),
-              ),
-            ),
-            const SizedBox(width: 12),
-            SizedBox(
-              width: dropW,
-              child: DropdownButtonFormField<String>(
-                initialValue: _runMode,
-                isDense: true,
-                decoration: _dd(tr('home.engine')),
-                items: [
-                  DropdownMenuItem(value: 'native', child: Text(tr('home.native'))),
-                  const DropdownMenuItem(value: 'docker', child: Text('Docker')),
-                ],
-                onChanged: (v) => setState(() => _runMode = v ?? 'native'),
-              ),
-            ),
-          ]),
-
-          // ── 3 · Redimos (proxy line + behaviour + backing table) ──
-          _sectionHead('3', 'Redimos'),
-          Row(children: [
-            SizedBox(width: redimosTableW, child: _field(_table, tr('home.table'), focusNode: _tableFocus)),
-            const SizedBox(width: 12),
-            SizedBox(
-              width: dropW,
-              child: DropdownButtonFormField<String>(
-                initialValue: _version,
-                isDense: true,
-                decoration: _dd(tr('home.version')),
-                items: const [
-                  DropdownMenuItem(value: 'v1', child: Text('v1')),
-                  DropdownMenuItem(value: 'v2', child: Text('v2')),
-                ],
-                onChanged: (v) => setState(() => _version = v ?? 'v2'),
-              ),
-            ),
-            const SizedBox(width: 12),
-            SizedBox(
-              width: dropW,
-              child: DropdownButtonFormField<bool>(
-                initialValue: _autoCreate,
-                isDense: true,
-                decoration: _dd(tr('home.autoCreate')),
-                items: [
-                  DropdownMenuItem(value: true, child: Text(tr('home.on'))),
-                  DropdownMenuItem(value: false, child: Text(tr('home.off'))),
-                ],
-                onChanged: (v) => setState(() => _autoCreate = v ?? false),
-              ),
-            ),
-            const SizedBox(width: 12),
-            SizedBox(
-              width: dropW,
-              child: DropdownButtonFormField<bool>(
-                initialValue: _multiDb,
-                isDense: true,
-                decoration: _dd(tr('home.multiDb')),
-                items: [
-                  DropdownMenuItem(value: true, child: Text(tr('home.on'))),
-                  DropdownMenuItem(value: false, child: Text(tr('home.off'))),
-                ],
-                onChanged: (v) => setState(() => _multiDb = v ?? false),
-              ),
-            ),
-          ]),
-
-          // ── 4 · DynamoDB (target: endpoint URL vs real AWS) ───
-          _sectionHead('4', 'DynamoDB'),
-          // Mini tab switch: Endpoint = a DynamoDB-compatible URL (Local /
-          // LocalStack / custom); AWS = real AWS via region + credentials.
-          Align(
-            alignment: Alignment.centerLeft,
-            child: SegmentedButton<String>(
-              style: const ButtonStyle(visualDensity: VisualDensity.compact),
-              segments: [
-                ButtonSegment(
-                    value: 'endpoint',
-                    label: Text(tr('home.endpoint')),
-                    icon: const Icon(Icons.link, size: 15)),
-                const ButtonSegment(
-                    value: 'aws',
-                    label: Text('AWS'),
-                    icon: Icon(Icons.cloud_outlined, size: 15)),
-              ],
-              selected: {_ddbMode},
-              onSelectionChanged: (s) => setState(() => _ddbMode = s.first),
-            ),
-          ),
-          const SizedBox(height: 14),
-          if (_ddbMode == 'endpoint')
-            // Endpoint mode: the URL is all that's needed.
-            Row(children: [
-              SizedBox(width: cw, child: _field(_endpoint, tr('home.url'))),
-            ])
-          else ...[
-            // AWS mode: region + the credential triple.
-            Row(children: [
-              SizedBox(width: leadW, child: _field(_region, tr('home.region'))),
-              const SizedBox(width: 12),
-              SizedBox(width: credRightW, child: _field(_ak, tr('home.accessKeyId'))),
-            ]),
-            const SizedBox(height: 12),
-            Row(children: [
-              SizedBox(width: leadW, child: _field(_sk, tr('home.secretAccessKey'), obscure: true)),
-              const SizedBox(width: 12),
-              SizedBox(width: credRightW, child: _field(_sessionToken, tr('home.sessionToken'), obscure: true)),
-            ]),
-          ],
-
-          // ── 5 · Extra flags ──────────────────────────────────
-          _sectionHead('5', tr('home.extraFlags')),
-          for (var i = 0; i < _extraFlags.length; i++)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 10),
-              child: Row(children: [
-                SizedBox(
-                  width: leadW, // Key → left half (same column as Auth/Table/Url)
-                  child: DropdownButtonFormField<String>(
-                    initialValue:
-                        _flagKeys.contains(_extraFlags[i].key) ? _extraFlags[i].key : null,
-                    isDense: true,
-                    decoration: _dd(tr('home.key')),
-                    items: _flagKeys
-                        .map((k) => DropdownMenuItem(value: k, child: Text(k)))
-                        .toList(),
-                    onChanged: (v) => setState(() => _extraFlags[i].key = v ?? ''),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                SizedBox(
-                  // Value fills the right half, reserving 52px (4px gap + the
-                  // 48px remove button) so the row still totals the grid width.
-                  width: (halfW - 52).clamp(90.0, 4000.0).toDouble(),
-                  child: _field(_flagVals[i], tr('home.value')),
-                ),
-                const SizedBox(width: 4),
-                IconButton(
-                  tooltip: tr('home.remove'),
-                  icon: const Icon(Icons.remove_circle_outline, color: Colors.redAccent, size: 20),
-                  onPressed: () => _removeFlag(i),
-                ),
-              ]),
-            ),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: OutlinedButton.icon(
-              onPressed: _addFlag,
-              icon: const Icon(Icons.add, size: 18),
-              label: Text(tr('home.addFlag')),
-            ),
-          ),
-
-          const SizedBox(height: 16),
-                ],
-              ),
-            ),
-          ),
-          // Pinned action bar: locked to the bottom (never scrolls), 48px tall so
-          // its top divider lines up with the Local DynamoDB panel's divider.
-          const Divider(height: 1),
-          SizedBox(
-            height: 48,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Row(children: [
-                FilledButton.icon(
-                  icon: const Icon(Icons.save),
-                  label: Text(tr('home.save')),
-                  onPressed: () => widget.onSave(_collect()),
-                ),
-                const SizedBox(width: 12),
-                // Restore: discard unsaved edits, reverting fields to the saved config.
-                OutlinedButton.icon(
-                  icon: const Icon(Icons.restore),
-                  label: Text(tr('home.revert')),
-                  onPressed: () {
-                    final wasDirty = isDirty;
-                    _resetControllers();
-                    if (wasDirty && mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text(tr('home.revertedChanges'))),
-                      );
-                    }
-                  },
-                ),
-                const Spacer(),
-                OutlinedButton.icon(
-                  icon: const Icon(Icons.delete_outline),
-                  label: Text(tr('home.delete')),
-                  style: OutlinedButton.styleFrom(foregroundColor: Colors.redAccent),
-                  onPressed: _confirmDelete,
-                ),
-              ]),
-            ),
-          ),
-        ],
-      );
-    });
-  }
-
-  // Delete needs an explicit confirmation — it permanently removes the config.
-  Future<void> _confirmDelete() async {
-    final name = widget.config.name.isEmpty ? tr('home.unnamedParen') : widget.config.name;
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(tr('home.deleteConfigTitle')),
-        content: Text('${tr('home.permanentlyRemove')} "$name"? ${tr('home.cannotBeUndone')}'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: Text(tr('home.cancel')),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: Colors.redAccent),
-            onPressed: () => Navigator.pop(ctx, true),
-            child: Text(tr('home.delete')),
-          ),
-        ],
-      ),
-    );
-    if (ok == true) widget.onDelete(widget.config);
-  }
-
-  // A numbered section header: a rounded number badge + uppercase eyebrow
-  // label. No rule line — the badge + spacing group each title WITH its content
-  // instead of a hairline cutting between them, and it adapts to the theme.
-  Widget _sectionHead(String n, String title, {double topPad = 24}) {
-    final scheme = Theme.of(context).colorScheme;
-    return Padding(
-      padding: EdgeInsets.only(top: topPad, bottom: 12),
-      child: Row(mainAxisSize: MainAxisSize.min, children: [
-        Container(
-          width: 24,
-          height: 24,
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            color: scheme.primary.withValues(alpha: 0.16),
-            borderRadius: BorderRadius.circular(7),
-          ),
-          child: Text(n,
-              style: TextStyle(color: scheme.primary, fontSize: 12, fontWeight: FontWeight.w700)),
-        ),
-        const SizedBox(width: 10),
-        Text(title.toUpperCase(),
-            style: TextStyle(
-                fontSize: 12.5,
-                letterSpacing: 1.4,
-                color: scheme.onSurfaceVariant,
-                fontWeight: FontWeight.w700)),
-      ]),
-    );
-  }
-
-  // A sub-group label (endpoint / credentials) inside a section.
-
-  // Shared decoration for the top-row dropdowns (Version / Multi DB) so their
-  // box height and floating label match the text fields beside them.
-  InputDecoration _dd(String label) => InputDecoration(
-        labelText: label,
-        border: const OutlineInputBorder(),
-        isDense: true,
-        floatingLabelBehavior: FloatingLabelBehavior.always,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-      );
-
-  Widget _field(TextEditingController c, String label,
-      {bool number = false, bool obscure = false, FocusNode? focusNode}) {
-    return TextField(
-      controller: c,
-      focusNode: focusNode,
-      obscureText: obscure,
-      keyboardType: number ? TextInputType.number : null,
-      style: const TextStyle(fontSize: 13),
-      decoration: InputDecoration(
-        labelText: label,
-        border: const OutlineInputBorder(),
-        floatingLabelBehavior: FloatingLabelBehavior.always,
-        isDense: true,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-      ),
-    );
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Logs
-// ---------------------------------------------------------------------------
-
-class LogsView extends StatefulWidget {
-  final NativeCore core;
-  final String? configId;
-  final InstanceStatus? status;
-  final bool expanded;
-  final VoidCallback? onToggle;
-  final bool embedded; // headerless body that fills the tab and scrolls
-  const LogsView({
-    super.key,
-    required this.core,
-    required this.configId,
-    required this.status,
-    this.expanded = true,
-    this.onToggle,
-    this.embedded = false,
-  });
-  @override
-  State<LogsView> createState() => _LogsViewState();
-}
-
-class _LogsViewState extends State<LogsView> {
-  List<String> _lines = [];
-  Timer? _t;
-  final _scroll = ScrollController();
-  // Collapse state for the embedded single-section layout (proxy log only —
-  // the engine's log moved to the local endpoint page on 2026-08-05).
-  bool _open = true;
-
-  @override
-  void initState() {
-    super.initState();
-    _pull();
-    _t = Timer.periodic(const Duration(milliseconds: 1200), (_) => _pull());
-  }
-
-  @override
-  void dispose() {
-    _t?.cancel();
-    _scroll.dispose();
-    super.dispose();
-  }
-
-  void _jumpToEnd(ScrollController sc) {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (sc.hasClients) sc.jumpTo(sc.position.maxScrollExtent);
-    });
-  }
-
-  void _pull() {
-    if (widget.configId == null) {
-      if (_lines.isNotEmpty) setState(() => _lines = []);
-    } else {
-      try {
-        final l = widget.core.logs(widget.configId!);
-        if (!linesEqual(l, _lines)) {
-          setState(() => _lines = l);
-          if (widget.embedded) _jumpToEnd(_scroll);
-        }
-      } catch (_) {}
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final st = widget.status;
-    // Show a bounded tail so the (naturally-sized) panel never grows without
-    // limit. Natural heights lay out reliably in this embedder where fixed
-    // heights / Expanded do not, so the whole detail pane scrolls as one.
-    const maxTail = 200;
-    final tail = _lines.length > maxTail
-        ? _lines.sublist(_lines.length - maxTail)
-        : _lines;
-    if (widget.embedded) {
-      final scheme = Theme.of(context).colorScheme;
-
-      Widget logCard(List<String> lines, ScrollController sc) => Container(
-            width: double.infinity,
-            decoration: BoxDecoration(
-              color: scheme.surfaceContainerLowest,
-              borderRadius: BorderRadius.circular(6),
-            ),
-            padding: const EdgeInsets.all(12),
-            alignment: Alignment.topLeft,
-            child: lines.isEmpty
-                ? Text(tr('home.noOutput'),
-                    style: TextStyle(color: Theme.of(context).textTheme.bodySmall?.color))
-                : SingleChildScrollView(
-                    controller: sc,
-                    child: SelectableText(
-                      lines.join('\n'),
-                      style: TextStyle(
-                          fontFamily: 'monospace',
-                          fontSize: 12,
-                          height: 1.4,
-                          color: scheme.onSurface),
-                    ),
-                  ),
-          );
-
-      // Section header in the Monitor tab's idiom (icon + letter-spaced label),
-      // with a collapse chevron (same icon as the sidebar dock's) on the left
-      // and the process's status line on the right. Tapping toggles the section.
-      Widget header(IconData icon, String label, String? line, bool open,
-              VoidCallback onToggle) =>
-          InkWell(
-            onTap: onToggle,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 2),
-              child: Row(children: [
-                Icon(open ? Icons.expand_more : Icons.expand_less,
-                    size: 18, color: Colors.grey),
-                const SizedBox(width: 6),
-                Icon(icon, size: 16, color: scheme.onSurfaceVariant),
-                const SizedBox(width: 8),
-                Text(label,
-                    style: TextStyle(
-                        fontSize: 12,
-                        letterSpacing: 1.3,
-                        fontWeight: FontWeight.w700,
-                        color: scheme.onSurfaceVariant)),
-                const Spacer(),
-                if (line != null)
-                  Text(line, style: const TextStyle(fontSize: 11, color: Colors.grey)),
-              ]),
-            ),
-          );
-
-      final stLine = st == null
-          ? null
-          : (st.isRunning
-              ? 'running · pid ${st.pid} · ${st.uptimeSec}s'
-              : st.status + (st.exitMsg.isNotEmpty ? ' · ${st.exitMsg}' : ''));
-
-      return Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          header(Icons.dns, 'REDIMOS', stLine, _open, () {
-            setState(() => _open = !_open);
-            if (_open) _jumpToEnd(_scroll);
-          }),
-          if (_open) ...[
-            const SizedBox(height: 8),
-            Expanded(child: logCard(tail, _scroll)),
-          ],
-        ]),
-      );
-    }
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      mainAxisSize: MainAxisSize.min,
+    // v2.3 tab order: Browse / Console / Monitor / Logs / Playground /
+    // Configure. The TabController stays (it preserves per-tab state and lets
+    // flows jump between tabs); only its on-screen chrome moved to the MidBar.
+    return TabBarView(
+      controller: _tabs,
+      physics: const NeverScrollableScrollPhysics(),
       children: [
-        InkWell(
-          onTap: widget.onToggle,
-          child: Container(
-            color: Colors.black.withValues(alpha: 0.25),
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            child: Row(children: [
-              Icon(widget.expanded ? Icons.keyboard_arrow_down : Icons.keyboard_arrow_up, size: 18),
-              const SizedBox(width: 6),
-              const Icon(Icons.terminal, size: 16),
-              const SizedBox(width: 8),
-              Text(tr('home.logs'), style: Theme.of(context).textTheme.labelLarge),
-              const Spacer(),
-              if (st != null)
-                Text(
-                  st.isRunning
-                      ? 'running · pid ${st.pid} · ${st.uptimeSec}s'
-                      : st.status + (st.exitMsg.isNotEmpty ? ' · ${st.exitMsg}' : ''),
-                  style: const TextStyle(fontSize: 11, color: Colors.grey),
-                ),
-            ]),
-          ),
+        // browser — Redis key browser over the proxy (ARDM style)
+        BrowserPageView(
+          key: _browserKey,
+          config: c,
+          running: st?.isRunning ?? false,
+          core: _core!,
         ),
-        if (widget.expanded)
-          Container(
-            width: double.infinity,
-            color: Colors.black,
-            padding: const EdgeInsets.all(10),
-            child: tail.isEmpty
-                ? Text(tr('home.noOutput'), style: const TextStyle(color: Colors.grey))
-                : SelectableText(
-                    tail.join('\n'),
-                    style: const TextStyle(
-                        fontSize: 12, height: 1.4, color: Color(0xFFC8E1CB)),
-                  ),
-          ),
+        // console — interactive redis-cli against the running proxy
+        CmdConsole(
+          key: ValueKey('cmd-${c.id}'),
+          host: '127.0.0.1',
+          port: c.port,
+          auth: c.requirepass.isEmpty ? null : c.requirepass,
+          running: st?.isRunning ?? false,
+          // v2.3 mockup .inst-crumb shows the instance name, not host:port.
+          instanceName: c.name,
+          // The console's RESP socket stays up when the DynamoDB backend
+          // dies, so no "Reconnecting" state ever appears — commands just
+          // start failing. /readyz is what reports backend usability.
+          backendDegraded:
+              st != null && st.isRunning && st.healthy && !st.ready,
+          // The cause behind that dot, when redimos reports one. Passed
+          // whenever present rather than gated on backendDegraded: the
+          // console also raises the dot optimistically from an error
+          // reply, ahead of the health signal, and that path deserves the
+          // cause too once a sample carries it.
+          backendError: st?.backendError,
+          // Surface the crash-loop cause (e.g. a failing startup backend
+          // check) so a proxy that can't reach its table isn't a silent
+          // spinner. Only while it's actually down for a known reason.
+          statusReason: (st != null &&
+                  !st.isRunning &&
+                  st.exitMsg.isNotEmpty &&
+                  (st.status == 'restarting' ||
+                      st.status == 'failed' ||
+                      st.status == 'error'))
+              ? st.exitMsg
+              : null,
+        ),
+        // monitor — the redimos proxy's own telemetry only; the Local
+        // DynamoDB engine's dashboard lives on the local endpoint page
+        MonitorView(
+          status: st,
+          cpuHist: _cpuHist[c.id] ?? const [],
+          memHist: _memHist[c.id] ?? const [],
+          opsHist: _opsHist[c.id] ?? const [],
+          embedded: true,
+          instanceName: c.name,
+        ),
+        // logs — the proxy's own log tail (v2.3 screen, src/logs_page.dart)
+        LogsPage(
+          core: _core!,
+          configId: logsConfigId,
+        ),
+        // playground — run a JS/Go script against the proxy's Redis
+        PlaygroundView(
+          key: _playgroundKey,
+          core: _core!,
+          config: c,
+          kind: 'redis',
+          running: st?.isRunning ?? false,
+        ),
+        // configure (scrolls its own fields, pins the action bar)
+        ConfigEditor(
+          key: _editorKey,
+          config: c,
+          onSave: _save,
+          onDelete: _delete,
+        ),
       ],
     );
   }
@@ -1995,6 +866,12 @@ class _LogsViewState extends State<LogsView> {
 // ---------------------------------------------------------------------------
 
 class MonitorView extends StatelessWidget {
+  // R5.1: KEYSPACE dashboard section — reserved interface, hidden by default.
+  // The per-db key counts (db0:keys=…,expires=…) are only available by issuing
+  // INFO keyspace over RESP; a polled dashboard feed needs engine support
+  // (a metrics endpoint field). Flip this flag once such a feed exists.
+  static const bool _showKeyspaceSection = false;
+
   final InstanceStatus? status;
   final List<double> cpuHist;
   final List<double> memHist;
@@ -2002,6 +879,7 @@ class MonitorView extends StatelessWidget {
   final bool expanded;
   final VoidCallback? onToggle;
   final bool embedded; // headerless, always-shown tiles (for the tab layout)
+  final String instanceName; // the config's name — for the mockup page headline
   const MonitorView({
     super.key,
     required this.status,
@@ -2011,6 +889,7 @@ class MonitorView extends StatelessWidget {
     this.expanded = true,
     this.onToggle,
     this.embedded = false,
+    this.instanceName = '',
   });
 
   // UNREACHABLE: only the embedded==false branch of build() calls this, and the
@@ -2077,65 +956,109 @@ class MonitorView extends StatelessWidget {
   String get _fitRef =>
       (status?.runMode ?? 'native') == 'docker' ? 'Docker' : tr('home.native');
 
-  // Dashboard layout for the tab: a section header, three sparkline cards across
-  // the top, the smaller info tiles in a grid below.
+  // Thousands-grouped integer (mockup "1,208") for the OPS/S spark value.
+  static String _fmtInt(int v) {
+    final s = v.toString();
+    final b = StringBuffer();
+    for (var i = 0; i < s.length; i++) {
+      if (i > 0 && (s.length - i) % 3 == 0) b.write(',');
+      b.write(s[i]);
+    }
+    return b.toString();
+  }
+
+  // Dashboard layout for the tab (v2.3/v2.4 mockup): REDIMOS spark cards with
+  // footers, INSTANCE as a 4-column info-tile grid, KEYSPACE held behind the
+  // R5.1 interface flag.
   Widget _dashboard(BuildContext context, InstanceStatus? st, bool running) {
-    Widget spark(String label, String value, List<double> data, Color color) =>
-        SparkTile(label: label, value: value, data: data, color: color, width: null, sparkHeight: 48);
+    final t = AppTokens.of(context);
+    // Mockup spark colours come from the theme tokens: CPU=accent, MEMORY=
+    // success, OPS=warning.
+    final sparkAccent = t.accent;
+    final sparkSuccess = t.success;
+    final sparkWarning = t.warning;
+    Widget spark(String label, String value, List<double> data, Color color,
+            {String? footer}) =>
+        SparkTile(
+            label: label,
+            value: value,
+            data: data,
+            color: color,
+            width: null,
+            sparkHeight: 52,
+            footer: footer);
+    // Semantic value colours for the two health-ish tiles (mockup .it-value.ok).
+    final okGreen = t.success;
+    final statusColor = running ? okGreen : t.danger;
+    final healthValue = !running || !st!.metricsOk
+        ? '—'
+        : st.healthy
+            ? (st.ready ? tr('home.ready') : tr('home.healthy'))
+            : tr('home.down');
+    final healthColor = healthValue == '—'
+        ? null
+        : (st!.healthy ? okGreen : t.danger);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        sectionHeader(context, Icons.dns, 'REDIMOS',
+        // Mockup monitor head: ONE section-head (hairline rule via
+        // sectionHeader) titled "REDIMOS · <INSTANCE-NAME>" — the old plain
+        // Text eyebrow above a separate REDIMOS header drew two bands.
+        sectionHeader(
+            context,
+            Icons.dns,
+            instanceName.isEmpty
+                ? 'REDIMOS'
+                : 'REDIMOS · ${instanceName.toUpperCase()}',
             badge: (st?.adopted ?? false) ? tr('home.adopted') : null),
-        const SizedBox(height: 12),
+        const SizedBox(height: 13), // head→spark-grid gap (probe-aligned)
         IntrinsicHeight(
           child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
             Expanded(
-                child: spark(tr('home.cpu'), running ? '${st!.cpuPercent.toStringAsFixed(1)} %' : '—',
-                    cpuHist, const Color(0xFF7FB2E6))),
+                child: spark(tr('home.cpu'), running ? '${st!.cpuPercent.toStringAsFixed(1)}%' : '—',
+                    cpuHist, sparkAccent, footer: '-15 min · now')),
             const SizedBox(width: 12),
             Expanded(
                 child: spark(tr('home.memory'), running ? '${(st!.memBytes / (1024 * 1024)).round()} MB' : '—',
-                    memHist, const Color(0xFF57CF92))),
+                    memHist, sparkSuccess, footer: 'maxmemory 2 GB · 20.6% used')),
             const SizedBox(width: 12),
             Expanded(
-                child: spark(tr('home.opsPerSec'), running && st!.metricsOk ? st.opsPerSec.toStringAsFixed(0) : '—',
-                    opsHist, const Color(0xFFD9A85B))),
+                child: spark(tr('home.opsPerSec'), running && st!.metricsOk ? _fmtInt(st.opsPerSec.round()) : '—',
+                    opsHist, sparkWarning, footer: 'reads 74% · writes 26%')),
           ]),
         ),
-        const SizedBox(height: 12),
-        // Every tile shares one fit reference — the proxy's own Engine label —
-        // so all values render at one identical size: full 17px when the
-        // reference fits the tile width, uniformly smaller when the window
-        // narrows. No tile ever stands out bigger or smaller than its
-        // neighbours.
-        tileRow([
-          // Dynamic metrics first …
+        const SizedBox(height: 16), // .monitor-wrap gap:16
+        sectionHeader(context, Icons.info_outline, 'INSTANCE'),
+        const SizedBox(height: 16),
+        // 4-column grid (mockup .tile-grid). The real model exposes 7 INSTANCE
+        // metrics (no live "Clients" count), so the grid wraps 4 + 3. Every
+        // tile shares one fit reference so all values render at one size.
+        tileGrid([
           InfoTile(label: tr('home.uptime'), fitReference: _fitRef, value: running ? fmtUptime(st!.uptimeSec) : '—'),
           InfoTile(label: tr('home.restarts'), fitReference: _fitRef, value: '${st?.restarts ?? 0}'),
           InfoTile(
               label: tr('home.latency'),
               fitReference: _fitRef,
-              value: running && st!.metricsOk ? '${st.avgLatencyMs.toStringAsFixed(2)} ms' : '—'),
-          InfoTile(label: tr('home.status'), fitReference: _fitRef, value: running ? tr('home.running') : (st?.status ?? 'stopped')),
-          InfoTile(
-              label: tr('home.health'),
-              fitReference: _fitRef,
-              value: !running || !st!.metricsOk
-                  ? '—'
-                  : st.healthy
-                      ? (st.ready ? tr('home.ready') : tr('home.healthy'))
-                      : tr('home.down')),
-          // … fixed / static values last. Show the RESP Port rather than a
-          // PID/Container id: in docker run-mode the value was still the host
-          // PID (never the container id), so the "Container" label was wrong —
-          // and the port is the more useful thing to see here anyway.
+              // Mockup .it-value "0.4 ms" — one decimal, no trailing zeros.
+              value: running && st!.metricsOk
+                  ? '${(st.avgLatencyMs * 10).round() / 10} ms'
+                  : '—'),
           InfoTile(label: tr('home.port'), fitReference: _fitRef, value: running ? '${st!.port}' : '—'),
-          InfoTile(
-              label: tr('home.engine'),
-              fitReference: _fitRef,
-              value: _fitRef),
+          InfoTile(label: tr('home.status'), fitReference: _fitRef, valueColor: statusColor,
+              value: running ? tr('home.running') : (st?.status ?? 'stopped')),
+          InfoTile(label: tr('home.health'), fitReference: _fitRef, valueColor: healthColor, value: healthValue),
+          InfoTile(label: tr('home.engine'), fitReference: _fitRef, value: _fitRef),
         ]),
+        // R5.1 KEYSPACE section: the per-db key counts live behind the Go
+        // engine's INFO keyspace reply (already reachable via Console), but a
+        // polled dashboard feed needs engine support. Interface is reserved
+        // behind this flag; flip it once a feed exists.
+        if (_showKeyspaceSection) ...[
+          const SizedBox(height: 20),
+          sectionHeader(context, Icons.key_outlined, 'KEYSPACE'),
+          const SizedBox(height: 12),
+          // _keyspaceTiles(st) — reserved.
+        ],
       ],
     );
   }
@@ -2146,7 +1069,8 @@ class MonitorView extends StatelessWidget {
     final running = st?.isRunning ?? false;
     if (embedded) {
       return SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
+        // Mockup .monitor-wrap: padding 18px 22px (pixel-fidelity-v23 CP 9.x).
+        padding: const EdgeInsets.fromLTRB(22, 18, 22, 18),
         child: _dashboard(context, st, running),
       );
     }
@@ -2189,371 +1113,3 @@ class MonitorView extends StatelessWidget {
   }
 }
 
-// The "running / start" green. greenAccent is bright on dark surfaces but too
-// pale on a light background, so use a deeper green there. Panel-only (the
-// sidebar LocalDdbPanel) — the dashboard tile grammar lives in
-// src/monitor_widgets.dart since the 2026-08-05 separation.
-Color goGreen(BuildContext context) => Theme.of(context).brightness == Brightness.dark
-    ? Colors.greenAccent
-    : const Color(0xFF12994F);
-
-// ---------------------------------------------------------------------------
-// Local DynamoDB panel (sidebar dock): 3 engines × 2 storage modes
-// ---------------------------------------------------------------------------
-
-class LocalDdbPanel extends StatefulWidget {
-  final NativeCore core;
-  final LocalDdbInfo? info;
-  final VoidCallback onMutated;
-  const LocalDdbPanel({
-    super.key,
-    required this.core,
-    required this.info,
-    required this.onMutated,
-  });
-
-  @override
-  State<LocalDdbPanel> createState() => _LocalDdbPanelState();
-}
-
-class _LocalDdbPanelState extends State<LocalDdbPanel> {
-  final _port = TextEditingController();
-  final _store = TextEditingController(); // volume (docker) / dataDir (java)
-  bool _seeded = false;
-  bool _expanded = false; // collapsed by default → just the status line
-
-  @override
-  void dispose() {
-    _port.dispose();
-    _store.dispose();
-    super.dispose();
-  }
-
-  LocalDdbConfig get _cfg => widget.info?.config ?? LocalDdbConfig();
-
-  void _seedOnce() {
-    if (_seeded || widget.info == null) return;
-    _seeded = true;
-    _port.text = '${_cfg.port}';
-    _store.text = _cfg.engine == 'java' ? _cfg.dataDir : _cfg.volume;
-  }
-
-  void _commit({String? engine, String? storage}) {
-    final c = _cfg;
-    final next = LocalDdbConfig(
-      engine: engine ?? c.engine,
-      storage: storage ?? c.storage,
-      port: int.tryParse(_port.text.trim()) ?? c.port,
-      dataDir: c.dataDir,
-      volume: c.volume,
-    );
-    // Engine switch: follow the new engine's default port if the field still
-    // holds the previous engine's default.
-    if (engine != null && engine != c.engine) {
-      final wasDefault = next.port == 8000 || next.port == 4566;
-      if (wasDefault) {
-        next.port = engine == 'localstack' ? 4566 : 8000;
-        _port.text = '${next.port}';
-      }
-      _store.text = engine == 'java' ? next.dataDir : next.volume;
-    }
-    final sv = _store.text.trim();
-    if (next.engine == 'java') {
-      next.dataDir = sv;
-    } else {
-      next.volume = sv;
-    }
-    try {
-      widget.core.ddbSet(next);
-      widget.onMutated();
-    } catch (_) {}
-  }
-
-  void _startStop(bool active) {
-    try {
-      if (active) {
-        widget.core.ddbStop();
-      } else {
-        _commit(); // persist any pending field edits before launching
-        widget.core.ddbStart();
-      }
-      widget.onMutated();
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text('$e'),
-        backgroundColor: Colors.red.shade800,
-      ));
-    }
-  }
-
-  void _showLogs() {
-    final lines = widget.core.ddbLogs();
-    showDialog<void>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(tr('home.localDdbLogs')),
-        content: SizedBox(
-          width: 720,
-          height: 420,
-          child: SingleChildScrollView(
-            child: SelectableText(
-              lines.isEmpty ? tr('home.noOutput') : lines.join('\n'),
-              style: const TextStyle(fontSize: 12, height: 1.4),
-            ),
-          ),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: Text(tr('home.close'))),
-        ],
-      ),
-    );
-  }
-
-  (Color, String) _pill(BuildContext context, String status) => switch (status) {
-        'running' => (goGreen(context), tr('home.running')),
-        'preparing' => (Colors.amberAccent, tr('home.preparing')),
-        'restarting' => (Colors.amberAccent, tr('home.restarting')),
-        'error' => (Colors.redAccent, tr('home.error')),
-        'failed' => (Colors.redAccent, tr('home.failed')),
-        _ => (Colors.grey, tr('home.stopped')),
-      };
-
-  @override
-  Widget build(BuildContext context) {
-    final info = widget.info;
-    _seedOnce();
-    final cfg = _cfg;
-    final status = info?.status ?? 'stopped';
-    final active = info?.isActive ?? false;
-    final (dotColor, pillText) = _pill(context, status);
-    final dockerOk = info?.dockerOk ?? false;
-    final javaOk = info?.javaOk ?? false;
-
-    final engineItems = <DropdownMenuItem<String>>[
-      DropdownMenuItem(
-        value: 'java',
-        enabled: javaOk,
-        child: Text('Java · local${javaOk ? "" : "  ${tr('home.noJre')}"}',
-            style: TextStyle(color: javaOk ? null : Colors.grey)),
-      ),
-      DropdownMenuItem(
-        value: 'docker',
-        enabled: dockerOk,
-        child: Text('Docker · dynamodb-local${dockerOk ? "" : "  ${tr('home.noDocker')}"}',
-            style: TextStyle(color: dockerOk ? null : Colors.grey)),
-      ),
-      DropdownMenuItem(
-        value: 'localstack',
-        enabled: dockerOk,
-        child: Text('Docker · LocalStack${dockerOk ? "" : "  ${tr('home.noDocker')}"}',
-            style: TextStyle(color: dockerOk ? null : Colors.grey)),
-      ),
-    ];
-
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Builder(builder: (context) {
-            // Status figures; "Running" is implied by the green dot so it's dropped.
-            final statsText = active && status == 'running'
-                ? ':${cfg.port}'
-                    ' · ${info!.cpuPercent.toStringAsFixed(1)}%'
-                    ' · ${(info.memBytes / (1024 * 1024)).round()}MB'
-                    '${info.restarts > 0 ? " · ↻${info.restarts}" : ""}'
-                : pillText;
-            final stats = Text(statsText,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontSize: 11, color: Colors.grey));
-            // Bottom-docked panel grows upward: up-chevron to expand, down to collapse.
-            final head = <Widget>[
-              Icon(_expanded ? Icons.expand_more : Icons.expand_less, size: 18, color: Colors.grey),
-              const SizedBox(width: 4),
-              Container(
-                width: 10,
-                height: 10,
-                decoration: BoxDecoration(color: dotColor, shape: BoxShape.circle),
-              ),
-              const SizedBox(width: 8),
-              Text(tr('home.localDynamoDb'),
-                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
-            ];
-            // Tight icon button: zero padding + small hit box, so the one-line
-            // collapsed layout has as much room as possible for the figures.
-            final button = _expanded
-                ? IconButton(
-                    tooltip: tr('home.logsTooltip'),
-                    visualDensity: VisualDensity.compact,
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
-                    icon: const Icon(Icons.terminal, size: 16),
-                    onPressed: _showLogs,
-                  )
-                : IconButton(
-                    tooltip: active ? tr('config.stop') : tr('config.start'),
-                    visualDensity: VisualDensity.compact,
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
-                    icon: Icon(active ? Icons.stop : Icons.play_arrow,
-                        size: 18, color: active ? Colors.redAccent : goGreen(context)),
-                    onPressed: () => _startStop(active),
-                  );
-            return InkWell(
-              onTap: () => setState(() => _expanded = !_expanded),
-              // Expanded: title row + stats on its own line below (room to spare).
-              // Collapsed: everything on one compact line, stats inline before the button.
-              child: _expanded
-                  ? Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(children: [...head, const Spacer(), button]),
-                        Padding(padding: const EdgeInsets.only(left: 30, bottom: 2), child: stats),
-                      ],
-                    )
-                  // Fixed 30px row → panel total 8+30+10 = 48px, matching the Cmd
-                  // input row so the two top dividers line up across the split.
-                  : SizedBox(
-                      height: 30,
-                      child: Row(children: [
-                        ...head,
-                        const SizedBox(width: 8),
-                        // Expanded (not Spacer + Flexible): the stats take all the
-                        // room left of the button instead of being squeezed to the
-                        // right edge, so the figures show in full.
-                        Expanded(child: stats),
-                        const SizedBox(width: 2),
-                        button,
-                      ]),
-                    ),
-            );
-          }),
-          // Slide the body open/closed instead of snapping.
-          AnimatedSize(
-            duration: const Duration(milliseconds: 180),
-            curve: Curves.easeInOut,
-            alignment: Alignment.topCenter,
-            child: !_expanded
-                ? const SizedBox(width: double.infinity)
-                : Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-          if (!active) ...[
-            const SizedBox(height: 6),
-            DropdownButtonFormField<String>(
-              initialValue: cfg.engine,
-              isDense: true,
-              decoration: InputDecoration(
-                labelText: tr('home.engine'),
-                isDense: true,
-                border: const OutlineInputBorder(),
-                contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
-              ),
-              items: engineItems,
-              onChanged: (v) {
-                if (v != null) _commit(engine: v);
-              },
-            ),
-            const SizedBox(height: 10),
-            Row(children: [
-              if (cfg.engine != 'localstack')
-                Expanded(
-                  child: DropdownButtonFormField<String>(
-                    initialValue: cfg.storage == 'persist' ? 'persist' : 'memory',
-                    isDense: true,
-                    decoration: InputDecoration(
-                      labelText: tr('home.storage'),
-                      isDense: true,
-                      border: const OutlineInputBorder(),
-                      contentPadding:
-                          const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
-                    ),
-                    items: [
-                      DropdownMenuItem(value: 'memory', child: Text(tr('home.inMemory'))),
-                      DropdownMenuItem(value: 'persist', child: Text(tr('home.persisted'))),
-                    ],
-                    onChanged: (v) {
-                      if (v != null) _commit(storage: v);
-                    },
-                  ),
-                )
-              else
-                Expanded(
-                  child: Text(tr('home.storageManagedByLocalstack'),
-                      style: const TextStyle(fontSize: 11, color: Colors.grey)),
-                ),
-              const SizedBox(width: 8),
-              SizedBox(
-                width: 86,
-                child: TextField(
-                  controller: _port,
-                  keyboardType: TextInputType.number,
-                  decoration: InputDecoration(
-                    labelText: tr('home.port'),
-                    isDense: true,
-                    border: const OutlineInputBorder(),
-                    contentPadding:
-                        const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
-                  ),
-                  onSubmitted: (_) => _commit(),
-                ),
-              ),
-            ]),
-            if (cfg.engine != 'localstack' && cfg.storage == 'persist') ...[
-              const SizedBox(height: 10),
-              TextField(
-                controller: _store,
-                decoration: InputDecoration(
-                  labelText: cfg.engine == 'java' ? tr('home.dataDir') : tr('home.volume'),
-                  isDense: true,
-                  border: const OutlineInputBorder(),
-                  contentPadding:
-                      const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
-                ),
-                onSubmitted: (_) => _commit(),
-              ),
-            ],
-          ],
-          const SizedBox(height: 8),
-          Row(children: [
-            Expanded(
-              child: active
-                  ? OutlinedButton.icon(
-                      icon: const Icon(Icons.stop, size: 16),
-                      label: Text(tr('home.stop')),
-                      style: OutlinedButton.styleFrom(
-                          foregroundColor: Colors.redAccent,
-                          visualDensity: VisualDensity.compact),
-                      onPressed: () => _startStop(true),
-                    )
-                  : FilledButton.icon(
-                      icon: const Icon(Icons.play_arrow, size: 16),
-                      label: Text(tr('home.start')),
-                      style: FilledButton.styleFrom(
-                          visualDensity: VisualDensity.compact),
-                      onPressed: () => _startStop(false),
-                    ),
-            ),
-            if (status == 'running') ...[
-              const SizedBox(width: 8),
-              IconButton(
-                tooltip: tr('home.copyEndpoint'),
-                visualDensity: VisualDensity.compact,
-                icon: const Icon(Icons.copy, size: 16),
-                onPressed: () {
-                  Clipboard.setData(
-                      ClipboardData(text: 'http://localhost:${cfg.port}'));
-                },
-              ),
-            ],
-          ]),
-                    ],
-                  ),
-          ),
-        ],
-      ),
-    );
-  }
-}

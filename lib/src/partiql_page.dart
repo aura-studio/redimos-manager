@@ -14,9 +14,11 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'code_editor.dart';
 import 'i18n.dart';
 import 'models.dart';
 import 'native.dart';
+import 'ui_tokens.dart';
 
 // Denser theme for this data surface — smaller controls / tighter tap targets.
 ThemeData _denseTabTheme(BuildContext context) => Theme.of(context).copyWith(
@@ -35,7 +37,9 @@ class PartiqlPageView extends StatefulWidget {
 
 class _PartiqlPageViewState extends State<PartiqlPageView>
     with AutomaticKeepAliveClientMixin {
-  final _stmt = TextEditingController();
+  // v2.3: the statement editor takes the shared token-highlighted CodeField
+  // (Playground grammar; PartiQL sits close enough to JS for the highlighter).
+  late final CodeHighlightController _stmt = CodeHighlightController(lang: 'js');
   final _find = TextEditingController();
   bool _running = false;
   bool _jsonView = false;
@@ -210,22 +214,17 @@ class _PartiqlPageViewState extends State<PartiqlPageView>
     ));
   }
 
+  // v2.3: the big in-page title folds into the MidBar's PartiQL tab — what
+  // stays is the context chrome (AWS read-only chip + templates menu).
   Widget _headerRow() {
-    final scheme = Theme.of(context).colorScheme;
+    final tok = AppTokens.of(context);
     return Row(children: [
-      Icon(Icons.code, size: 18, color: scheme.primary),
-      const SizedBox(width: 8),
-      Text(tr('pq.partiqlEditor'), style: const TextStyle(fontSize: 15.5, fontWeight: FontWeight.w600)),
-      const SizedBox(width: 12),
-      Text(widget.config.table,
-          style: TextStyle(fontSize: 13, color: Theme.of(context).hintColor)),
       if (_awsMode) ...[
-        const SizedBox(width: 10),
         Chip(
           visualDensity: VisualDensity.compact,
-          avatar: Icon(Icons.lock_outline, size: 15, color: Colors.amber.shade700),
+          avatar: Icon(Icons.lock_outline, size: 15, color: tok.warning),
           label: Text(tr('ep.awsReadOnly'),
-              style: TextStyle(color: Colors.amber.shade700)),
+              style: TextStyle(color: tok.warning)),
         ),
       ],
       const Spacer(),
@@ -240,7 +239,7 @@ class _PartiqlPageViewState extends State<PartiqlPageView>
           icon: const Icon(Icons.description_outlined, size: 18),
           label: Text(tr('pq.templates')),
           style: OutlinedButton.styleFrom(
-            disabledForegroundColor: scheme.primary,
+            disabledForegroundColor: tok.accent,
           ),
         ),
       ),
@@ -254,30 +253,23 @@ class _PartiqlPageViewState extends State<PartiqlPageView>
         child: Padding(padding: const EdgeInsets.all(11), child: child),
       );
 
-  Widget _editorCard() => _card(
+  Widget _editorCard() {
+    final t = AppTokens.of(context);
+    return _card(
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          TextField(
-            controller: _stmt,
-            minLines: 3,
-            maxLines: 8,
-            style: const TextStyle(fontFamily: 'monospace', fontSize: 13.5),
-            decoration: InputDecoration(
-              hintText: 'SELECT * FROM "${widget.config.table}" — ${tr('pq.typeStatement')}',
-              hintStyle: const TextStyle(fontFamily: 'monospace', fontSize: 13),
-              border: const OutlineInputBorder(),
-              contentPadding: const EdgeInsets.all(10),
+          // v2.3: the editor takes the token palette (shared with Playground).
+          SizedBox(
+            height: 120,
+            child: CodeField(
+              controller: _stmt,
+              hintText:
+                  'SELECT * FROM "${widget.config.table}" — ${tr('pq.typeStatement')}',
+              onChanged: (_) => setState(() {}), // Run enable/disable
             ),
-            onChanged: (_) => setState(() {}), // Run enable/disable
           ),
           const SizedBox(height: 12),
           Row(children: [
-            FilledButton(
-              onPressed: _stmt.text.trim().isEmpty || _running ? null : () => _run(),
-              child: _running
-                  ? const SizedBox(
-                      width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-                  : Text(tr('pq.run')),
-            ),
+            _runCta(t),
             const SizedBox(width: 12),
             OutlinedButton(
               onPressed: () => setState(() {
@@ -297,7 +289,33 @@ class _PartiqlPageViewState extends State<PartiqlPageView>
             ),
           ]),
         ]),
-      );
+    );
+  }
+
+  // v2.3 primary CTA grammar (dark = white fill + near-black text), same as
+  // the Playground Run button and the MidBar endGroup.
+  Widget _runCta(AppTokens t) {
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    final bg = dark ? const Color(0xFFF5F7FB) : t.accent;
+    final fg = dark ? const Color(0xFF10142E) : t.onAccent;
+    return SizedBox(
+      height: Dim.ctlH,
+      child: FilledButton(
+        onPressed: _stmt.text.trim().isEmpty || _running ? null : () => _run(),
+        style: FilledButton.styleFrom(
+          backgroundColor: bg,
+          foregroundColor: fg,
+          minimumSize: const Size(0, Dim.ctlH),
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+        ),
+        child: _running
+            ? SizedBox(
+                width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: fg))
+            : Text(tr('pq.run'),
+                style: Ts.style(size: Ts.md, weight: FontWeight.w600)),
+      ),
+    );
+  }
 
   // ---- status + error ----
 
@@ -307,8 +325,8 @@ class _PartiqlPageViewState extends State<PartiqlPageView>
 
   Widget _statusLine() {
     final failed = _error != null;
-    const okColor = Color(0xFF2E7D32);
-    final color = failed ? Theme.of(context).colorScheme.error : okColor;
+    final t = AppTokens.of(context);
+    final color = failed ? t.danger : t.success;
     final ms = failed ? null : _res?.timeMs;
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Row(children: [
@@ -321,22 +339,23 @@ class _PartiqlPageViewState extends State<PartiqlPageView>
         Padding(
           padding: const EdgeInsets.only(top: 4),
           child: Text('${tr('pq.startedOn')} ${_fmtTs(_startedAt!)}'
-              '${ms != null ? '   ·   ${tr('pq.elapsedTime')} ${ms}ms' : ''}'),
+              '${ms != null ? '   ·   ${tr('pq.elapsedTime')} ${ms}ms' : ''}',
+              style: Ts.style(size: Ts.md, color: t.text2, tabularNums: true)),
         ),
     ]);
   }
 
   Widget _errorBanner() {
-    final scheme = Theme.of(context).colorScheme;
+    final t = AppTokens.of(context);
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: scheme.error),
-        color: scheme.error.withValues(alpha: 0.08),
+        border: Border.all(color: t.danger),
+        color: t.danger.withValues(alpha: 0.08),
       ),
       child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Icon(Icons.error_outline, color: scheme.error, size: 20),
+        Icon(Icons.error_outline, color: t.danger, size: 20),
         const SizedBox(width: 8),
         Expanded(
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -463,10 +482,13 @@ class _PartiqlPageViewState extends State<PartiqlPageView>
                   ),
               ],
               rows: [
-                for (final r in rows)
+                for (var i = 0; i < rows.length; i++)
                   DataRow(
-                    onSelectChanged: (_) => _showItemJson(r),
-                    cells: [for (final c in cols) DataCell(_cellWidget(r.cells[c]))],
+                    // v2.3: zebra on panel2 (endpoint chrome convergence).
+                    color: WidgetStatePropertyAll(
+                        i.isOdd ? AppTokens.of(context).panel2 : null),
+                    onSelectChanged: (_) => _showItemJson(rows[i]),
+                    cells: [for (final c in cols) DataCell(_cellWidget(rows[i].cells[c]))],
                   ),
               ],
             ),

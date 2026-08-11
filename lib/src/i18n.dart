@@ -196,7 +196,7 @@ const Map<String, Map<AppLang, String>> _strings = {
   },
 
   // --- config sidebar ---
-  'config.new': {AppLang.en: 'New config', AppLang.zh: '新建配置'},
+  'config.new': {AppLang.en: 'Instance', AppLang.zh: '新建实例'},
   'config.pick': {AppLang.en: 'Select or create a config', AppLang.zh: '选择或新建一个配置'},
   'config.unnamed': {AppLang.en: '(unnamed)', AppLang.zh: '(未命名)'},
   'config.start': {AppLang.en: 'Start', AppLang.zh: '启动'},
@@ -345,7 +345,7 @@ const Map<String, Map<AppLang, String>> _strings = {
   'home.noOutput': {AppLang.en: '(no output)', AppLang.zh: '(无输出)'},
   'home.off': {AppLang.en: 'Off', AppLang.zh: '关'},
   'home.on': {AppLang.en: 'On', AppLang.zh: '开'},
-  'home.opsPerSec': {AppLang.en: 'Ops/s', AppLang.zh: '操作/秒'},
+  'home.opsPerSec': {AppLang.en: 'Ops / sec', AppLang.zh: '操作/秒'},
   'home.permanentlyRemove': {AppLang.en: 'Permanently remove', AppLang.zh: '永久删除'},
   'home.persisted': {AppLang.en: 'Persisted', AppLang.zh: '持久化'},
   // A universal term — stays "PID" in Chinese.
