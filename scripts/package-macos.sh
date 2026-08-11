@@ -53,11 +53,12 @@ First run
      download. Clear it once:
          xattr -dr com.apple.quarantine "Redimos Manager.app"
      (or right-click the app -> Open -> Open.)
-  2. Move the app anywhere you like (e.g. /Applications) and keep the bin/
-     folder somewhere stable (e.g. ~/redimos/bin).
-  3. Launch the app, open Settings (gear icon), and point the v1 / v2 binary
-     paths at bin/redimos-v1 and bin/redimos-v2.
-  4. Create a config, hit the play button, connect any Redis client to the port.
+  2. Keep the Redimos Manager.app and the bin/ folder TOGETHER (both live at
+     the top of this DMG). The app auto-detects bin/redimos-v1 and
+     bin/redimos-v2 sitting next to it - no Settings path entry needed.
+     (Only if you move the app away from bin/: open Settings and point the
+     v1 / v2 binary paths at your bin/redimos-v1 and bin/redimos-v2.)
+  3. Create a config, hit the play button, connect any Redis client to the port.
 
 Notes
   - v1 tables use String (S) pk/sk keys; v2 tables use Binary (B) keys - use a
