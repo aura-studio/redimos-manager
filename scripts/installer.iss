@@ -42,7 +42,8 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 ; The whole Flutter Release folder: redimos_manager.exe + flutter_windows.dll
 ; + data\ + redimos_core.dll (build.ps1 drops the DLL next to the exe).
 Source: "..\build\windows\x64\runner\Release\*"; DestDir: "{app}"; Flags: recursesubdirs ignoreversion
-; redimos server binaries — point Settings at {app}\bin\redimos-v*.exe.
+; redimos server binaries — auto-detected by the core at {app}\bin\redimos-v*.exe
+; (no Settings path entry needed).
 Source: "..\bin\redimos-v1.exe"; DestDir: "{app}\bin"; Flags: ignoreversion
 Source: "..\bin\redimos-v2.exe"; DestDir: "{app}\bin"; Flags: ignoreversion
 

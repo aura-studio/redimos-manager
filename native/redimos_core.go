@@ -509,12 +509,52 @@ func (m *manager) binaryFor(cfg *Config) (string, error) {
 		return "", fmt.Errorf("config %q has unknown version %q (want v1 or v2)", cfg.Name, cfg.Version)
 	}
 	if strings.TrimSpace(p) == "" {
-		return "", fmt.Errorf("no redimos %s binary path set (Settings)", cfg.Version)
+		// No explicit path configured: auto-detect the bundled binary in a
+		// bin/ dir next to the manager's own executable (the release packages
+		// ship redimos-v1(.exe) / redimos-v2(.exe) there — see
+		// scripts/build-windows-prep.sh). Falls back to the plain name on
+		// non-Windows so macOS/Linux unpackaged runs work too.
+		if d := detectBundledBinary(cfg.Version); d != "" {
+			return d, nil
+		}
+		return "", fmt.Errorf("no redimos %s binary path set (Settings); also not found at bin/redimos-%s(.exe) next to the app", cfg.Version, cfg.Version)
 	}
 	if _, err := os.Stat(p); err != nil {
 		return "", fmt.Errorf("redimos %s binary not found: %s", cfg.Version, p)
 	}
 	return p, nil
+}
+
+// detectBundledBinary returns the absolute path of bin/redimos-<version>[.exe]
+// sitting next to the current executable, or "" if not present.
+func detectBundledBinary(version string) string {
+	exe, err := os.Executable()
+	if err != nil || exe == "" {
+		return ""
+	}
+	// Resolve symlinks so the bin/ lookup anchors to the real binary location.
+	if r, err := filepath.EvalSymlinks(exe); err == nil {
+		exe = r
+	}
+	return findBundledBinary(filepath.Dir(exe), version)
+}
+
+// findBundledBinary looks for bin/redimos-<version>[.exe] under dir. Split out
+// from detectBundledBinary so tests can point it at a temp dir.
+func findBundledBinary(dir, version string) string {
+	base := filepath.Join(dir, "bin", "redimos-"+version)
+	name := base
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	if _, err := os.Stat(name); err == nil {
+		return name
+	}
+	// Cross-platform convenience: accept the extensionless name too.
+	if _, err := os.Stat(base); err == nil {
+		return base
+	}
+	return ""
 }
 
 func (cfg *Config) args() []string { return cfg.argsFor(cfg.Endpoint, ":0") }
