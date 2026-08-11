@@ -663,7 +663,9 @@ func (in *instance) spawn() error {
 	if in.container != "" {
 		// A containerised child runs through a foreground `docker run --rm --name X`
 		// CLI, so the container may survive a dead CLI; clear any leftover first.
-		_ = exec.Command(in.bin, "rm", "-f", in.container).Run()
+		rmCmd := exec.Command(in.bin, "rm", "-f", in.container)
+		hideWindow(rmCmd)
+		_ = rmCmd.Run()
 	}
 	cmd := exec.Command(in.bin, in.launchArgs...)
 	// Sentinel env marker: identifies the child as ours to `ps -E`-style
@@ -695,7 +697,9 @@ func (in *instance) spawn() error {
 		if cont != "" {
 			// The killed process is only the `docker run` CLI; remove the
 			// container it may have spawned, matching terminate()'s docker path.
-			_ = exec.Command(in.bin, "rm", "-f", cont).Run()
+			rmCmd := exec.Command(in.bin, "rm", "-f", cont)
+			hideWindow(rmCmd)
+			_ = rmCmd.Run()
 		}
 		go func() { _ = cmd.Wait() }() // reap; no supervision for a child we just killed
 		return nil
@@ -936,7 +940,9 @@ func (in *instance) terminate() {
 	}
 	if cont != "" {
 		// Removing the container makes the foreground docker CLI exit on its own.
-		_ = exec.Command(bin, "rm", "-f", cont).Run()
+		rmCmd := exec.Command(bin, "rm", "-f", cont)
+		hideWindow(rmCmd)
+		_ = rmCmd.Run()
 	} else if running && pid > 0 {
 		// The cmd.Wait goroutine (or adoption watcher) may have already reaped
 		// this pid a moment ago without superviseExit yet flipping status off

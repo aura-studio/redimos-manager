@@ -1012,6 +1012,7 @@ func rm_format_custom(in *C.char) (ret *C.char) {
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, req.Command, args...)
+	hideWindow(cmd)
 	// Don't hand the app's full environment (which may carry AWS_* / *SECRET* /
 	// *TOKEN* credentials) to a formatter subprocess — strip credential-bearing
 	// vars.

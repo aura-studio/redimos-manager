@@ -126,6 +126,7 @@ func findTool(name string, fallbacks ...string) (string, bool) {
 		if name == "docker" {
 			probe = exec.Command(cand, "version", "--format", "{{.Client.Version}}")
 		}
+		hideWindow(probe)
 		done := make(chan error, 1)
 		if err := probe.Start(); err != nil {
 			continue
@@ -191,6 +192,7 @@ func javaBin() (string, bool) {
 // percent-of-one-core scale; the caller divides by NumCPU like the host path.
 func sampleContainer(dockerPath, name string) (cpu float64, mem uint64, diskBytes uint64, err error) {
 	cmd := exec.Command(dockerPath, "stats", "--no-stream", "--format", "{{.CPUPerc}}|{{.MemUsage}}|{{.BlockIO}}", name)
+	hideWindow(cmd)
 	out := make(chan []byte, 1)
 	errc := make(chan error, 1)
 	go func() {
@@ -574,13 +576,17 @@ func (m *manager) sweepLabeledContainers(skip map[string]bool) {
 	if !ok {
 		return
 	}
-	out, err := exec.Command(docker, "ps", "-aq", "--filter", "label=redimos.manager").Output()
+	psCmd := exec.Command(docker, "ps", "-aq", "--filter", "label=redimos.manager")
+	hideWindow(psCmd)
+	out, err := psCmd.Output()
 	if err != nil {
 		return
 	}
 	for _, cid := range strings.Fields(string(out)) {
-		insp, err := exec.Command(docker, "inspect", "-f",
-			`{{index .Config.Labels "redimos.manager.session"}}|{{.Name}}`, cid).Output()
+		inspCmd := exec.Command(docker, "inspect", "-f",
+			`{{index .Config.Labels "redimos.manager.session"}}|{{.Name}}`, cid)
+		hideWindow(inspCmd)
+		insp, err := inspCmd.Output()
 		if err != nil {
 			continue
 		}
@@ -592,7 +598,9 @@ func (m *manager) sweepLabeledContainers(skip map[string]bool) {
 		if sess == m.sessionID || skip[name] {
 			continue
 		}
-		_ = exec.Command(docker, "rm", "-f", cid).Run()
+		rmCmd := exec.Command(docker, "rm", "-f", cid)
+		hideWindow(rmCmd)
+		_ = rmCmd.Run()
 	}
 }
 

@@ -110,7 +110,9 @@ func (m *manager) tryAdoptNativeDdb(rec childRec) bool {
 func dockerContainerRunning(docker, name string) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, docker, "inspect", "-f", "{{.State.Running}}", name).Output()
+	inspCmd := exec.CommandContext(ctx, docker, "inspect", "-f", "{{.State.Running}}", name)
+	hideWindow(inspCmd)
+	out, err := inspCmd.Output()
 	return err == nil && strings.TrimSpace(string(out)) == "true"
 }
 
@@ -205,6 +207,7 @@ func (m *manager) tryAdoptDocker(rec childRec) bool {
 	// every path — the earlier asymmetric StdoutPipe/StderrPipe leaked fds when
 	// only the second pipe or Start failed.
 	logsCmd := exec.Command(docker, "logs", "--tail", "200", "-f", rec.Container)
+	hideWindow(logsCmd)
 	if pr, pw, perr := os.Pipe(); perr == nil {
 		logsCmd.Stdout, logsCmd.Stderr = pw, pw
 		if logsCmd.Start() == nil {
@@ -221,7 +224,9 @@ func (m *manager) tryAdoptDocker(rec childRec) bool {
 	// declaring a spurious exit that would trigger a restart.
 	go func() {
 		for {
-			out, werr := exec.Command(docker, "wait", rec.Container).Output()
+			waitCmd := exec.Command(docker, "wait", rec.Container)
+			hideWindow(waitCmd)
+			out, werr := waitCmd.Output()
 			code := strings.TrimSpace(string(out))
 			if werr == nil && code != "" {
 				if code == "0" {

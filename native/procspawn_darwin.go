@@ -20,6 +20,12 @@ func preSpawn(cmd *exec.Cmd) {
 	cmd.SysProcAttr.Setpgid = true
 }
 
+// hideWindow is a no-op on darwin: the console-window problem is Windows-only
+// (a GUI WIN32 parent with no console gets one allocated for each console child).
+// macOS children never pop a window, so there is nothing to set. Kept as a
+// per-OS sibling of preSpawn/postSpawn so callers can stay platform-agnostic.
+func hideWindow(cmd *exec.Cmd) {}
+
 // postSpawn runs right after a successful Start(). Nothing to do on darwin —
 // the process group was created by the kernel as part of the fork.
 func postSpawn(in *instance, cmd *exec.Cmd) {}

@@ -65,6 +65,7 @@ const (
 	processTerminate = 0x0001 // PROCESS_TERMINATE
 
 	createSuspended = 0x00000004 // CREATE_SUSPENDED (processthreadsapi)
+	createNoWindow  = 0x08000000 // CREATE_NO_WINDOW (processthreadsapi)
 
 	jobObjectExtendedLimitInformation = 9          // JobObjectExtendedLimitInformation
 	jobObjectLimitKillOnJobClose      = 0x00002000 // JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
@@ -111,12 +112,31 @@ var (
 
 // preSpawn makes the child start SUSPENDED so postSpawn can jail it before its
 // first instruction. syscall.StartProcess ORs SysProcAttr.CreationFlags into
-// the CreateProcess flags, so this composes with Go's own flags.
+// the CreateProcess flags, so this composes with Go's own flags. It also hides
+// the console window (CREATE_NO_WINDOW) so the long-lived child never pops one.
 func preSpawn(cmd *exec.Cmd) {
 	if cmd.SysProcAttr == nil {
 		cmd.SysProcAttr = &syscall.SysProcAttr{}
 	}
-	cmd.SysProcAttr.CreationFlags |= createSuspended
+	cmd.SysProcAttr.CreationFlags |= createSuspended | createNoWindow
+	cmd.SysProcAttr.HideWindow = true
+}
+
+// hideWindow runs a console-subsystem child with no visible console window.
+// The manager is a GUI (WIN32) process with no console of its own, so without
+// this every docker.exe/java.exe/redimos child would be allocated a fresh,
+// visible console window by CreateProcess. CREATE_NO_WINDOW is the deterministic
+// fix (the child carries no visible console at all); HideWindow is a harmless
+// belt-and-braces for any console the child might otherwise inherit. Both are
+// orthogonal to preSpawn's CREATE_SUSPENDED and compose on the same
+// CreationFlags; stdout/stderr pipe capture is unaffected (std handles travel
+// via STARTF_USESTDHANDLES, an independent channel from console allocation).
+func hideWindow(cmd *exec.Cmd) {
+	if cmd.SysProcAttr == nil {
+		cmd.SysProcAttr = &syscall.SysProcAttr{}
+	}
+	cmd.SysProcAttr.HideWindow = true
+	cmd.SysProcAttr.CreationFlags |= createNoWindow
 }
 
 // postSpawn runs right after a successful cmd.Start(): create the instance's
