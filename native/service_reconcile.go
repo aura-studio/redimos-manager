@@ -156,7 +156,9 @@ func (m *manager) adoptServiceContainer(rt *serviceRuntime, ad serviceEngine, re
 	if rec.Port != sc.Port {
 		// Provably ours but mapped for an old port: remove it so the fresh
 		// start under the current config owns the right mapping.
-		_ = exec.Command(docker, "rm", "-f", name).Run()
+		rmCmd := exec.Command(docker, "rm", "-f", name)
+		hideWindow(rmCmd)
+		_ = rmCmd.Run()
 		regRemove(rec.Role)
 		return ""
 	}

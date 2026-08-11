@@ -142,7 +142,9 @@ func parseVolumeLabels(out []byte) (map[string]string, error) {
 // mounting an unproven volume could expose another workload's data.
 func ensureServiceVolume(dockerPath string, sc ServiceConfig) error {
 	name := sc.Storage.Volume
-	out, err := exec.Command(dockerPath, "volume", "inspect", name).Output()
+	inspectCmd := exec.Command(dockerPath, "volume", "inspect", name)
+	hideWindow(inspectCmd)
+	out, err := inspectCmd.Output()
 	if err == nil {
 		labels, perr := parseVolumeLabels(out)
 		if perr == nil && serviceLabelsMatch(labels, sc) {
@@ -155,7 +157,9 @@ func ensureServiceVolume(dockerPath string, sc ServiceConfig) error {
 		args = append(args, "--label", l)
 	}
 	args = append(args, name)
-	if err := exec.Command(dockerPath, args...).Run(); err != nil {
+	createCmd := exec.Command(dockerPath, args...)
+	hideWindow(createCmd)
+	if err := createCmd.Run(); err != nil {
 		return fmt.Errorf("create volume %s: %w", name, err)
 	}
 	return nil
@@ -167,7 +171,9 @@ func ensureServiceVolume(dockerPath string, sc ServiceConfig) error {
 // volume is success (nothing to clean).
 func removeOwnedServiceVolume(dockerPath string, sc ServiceConfig) error {
 	name := sc.Storage.Volume
-	out, err := exec.Command(dockerPath, "volume", "inspect", name).Output()
+	inspectCmd := exec.Command(dockerPath, "volume", "inspect", name)
+	hideWindow(inspectCmd)
+	out, err := inspectCmd.Output()
 	if err != nil {
 		return nil // already gone
 	}
@@ -183,7 +189,9 @@ func removeOwnedServiceVolume(dockerPath string, sc ServiceConfig) error {
 		return fmt.Errorf("%w: volume %q is still mounted by %s; stop them or clean it up manually",
 			errUnownedVolume, name, strings.Join(mounts, ", "))
 	}
-	if err := exec.Command(dockerPath, "volume", "rm", name).Run(); err != nil {
+	rmCmd := exec.Command(dockerPath, "volume", "rm", name)
+	hideWindow(rmCmd)
+	if err := rmCmd.Run(); err != nil {
 		return fmt.Errorf("remove volume %s: %w", name, err)
 	}
 	return nil
@@ -193,7 +201,9 @@ func removeOwnedServiceVolume(dockerPath string, sc ServiceConfig) error {
 // (`docker ps -a --filter volume=NAME`). Failing to list is an error, not an
 // empty answer: the cross-mount proof must not fail open.
 func volumeMountedBy(dockerPath, name string) ([]string, error) {
-	out, err := exec.Command(dockerPath, "ps", "-a", "--filter", "volume="+name, "--format", "{{.Names}}").Output()
+	psCmd := exec.Command(dockerPath, "ps", "-a", "--filter", "volume="+name, "--format", "{{.Names}}")
+	hideWindow(psCmd)
+	out, err := psCmd.Output()
 	if err != nil {
 		return nil, err
 	}
@@ -210,8 +220,10 @@ func volumeMountedBy(dockerPath, name string) ([]string, error) {
 // container. Ownership requires the exact label quartet; a same-name container
 // without it is treated as a stranger's.
 func inspectServiceContainer(dockerPath, name string, sc ServiceConfig) (exists, owned, running bool) {
-	out, err := exec.Command(dockerPath, "inspect", "-f",
-		`{{json .Config.Labels}}|{{.State.Running}}`, name).Output()
+	inspectCmd := exec.Command(dockerPath, "inspect", "-f",
+		`{{json .Config.Labels}}|{{.State.Running}}`, name)
+	hideWindow(inspectCmd)
+	out, err := inspectCmd.Output()
 	if err != nil {
 		return false, false, false
 	}

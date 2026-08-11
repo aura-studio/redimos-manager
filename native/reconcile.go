@@ -130,7 +130,9 @@ func (m *manager) setLegacyMigrationNotice() {
 func dockerContainerRunning(docker, name string) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, docker, "inspect", "-f", "{{.State.Running}}", name).Output()
+	inspCmd := exec.CommandContext(ctx, docker, "inspect", "-f", "{{.State.Running}}", name)
+	hideWindow(inspCmd)
+	out, err := inspCmd.Output()
 	return err == nil && strings.TrimSpace(string(out)) == "true"
 }
 
@@ -141,6 +143,7 @@ func dockerContainerRunning(docker, name string) bool {
 // Start failed.
 func pumpDockerLogs(docker, name string, in *instance) {
 	logsCmd := exec.Command(docker, "logs", "--tail", "200", "-f", name)
+	hideWindow(logsCmd)
 	pr, pw, perr := os.Pipe()
 	if perr != nil {
 		return
@@ -165,7 +168,9 @@ func watchDockerExit(docker, name string, in *instance) {
 	go func() {
 		defer in.superviseWG.Done()
 		for {
-			out, werr := exec.Command(docker, "wait", name).Output()
+			waitCmd := exec.Command(docker, "wait", name)
+			hideWindow(waitCmd)
+			out, werr := waitCmd.Output()
 			code := strings.TrimSpace(string(out))
 			if werr == nil && code != "" {
 				if code == "0" {

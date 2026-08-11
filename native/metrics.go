@@ -127,7 +127,9 @@ func (m *manager) probeDdbLatency() {
 // startup log line "... metrics=<bind> ...".
 func resolveMetricsAddr(bin, container string, logs []string) string {
 	if container != "" {
-		out, err := exec.Command(bin, "port", container, "9121").Output()
+		portCmd := exec.Command(bin, "port", container, "9121")
+		hideWindow(portCmd)
+		out, err := portCmd.Output()
 		if err != nil {
 			return ""
 		}
