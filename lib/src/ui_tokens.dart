@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
-/// v2.3 design tokens (source of truth: base2.css). Two static instances,
-/// light and dark, exposed as a ThemeExtension so any widget can read
+/// Codex-inspired semantic design tokens. Two static instances, light and dark,
+/// are exposed as a ThemeExtension so any widget can read
 /// `AppTokens.of(context)` without threading values down the tree.
 class AppTokens extends ThemeExtension<AppTokens> {
   const AppTokens({
@@ -24,6 +24,15 @@ class AppTokens extends ThemeExtension<AppTokens> {
     required this.warning,
     required this.highlight,
     required this.highlightSoft,
+    required this.railBg,
+    required this.railBgTop,
+    required this.railBgBottom,
+    required this.railFg,
+    required this.railFgActive,
+    required this.railActiveBg,
+    required this.railGlow,
+    required this.railIndicatorTop,
+    required this.railIndicatorBottom,
     required this.typeString,
     required this.typeHash,
     required this.typeList,
@@ -55,6 +64,31 @@ class AppTokens extends ThemeExtension<AppTokens> {
   final Color highlight;
   final Color highlightSoft;
 
+  /// Theme-aware application rail roles. The rail keeps its fixed geometry but
+  /// follows the active light/dark paint system instead of using legacy navy.
+  final Color railBg;
+  final Color railBgTop;
+  final Color railBgBottom;
+  final Color railFg;
+  final Color railFgActive;
+  final Color railActiveBg;
+  final Color railGlow;
+  final Color railIndicatorTop;
+  final Color railIndicatorBottom;
+
+  LinearGradient get railGradient => LinearGradient(
+        begin: Alignment.topCenter,
+        end: Alignment.bottomCenter,
+        colors: [railBgTop, railBg, railBgBottom],
+        stops: const [0.0, 0.52, 1.0],
+      );
+
+  LinearGradient get railIndicatorGradient => LinearGradient(
+        begin: Alignment.topCenter,
+        end: Alignment.bottomCenter,
+        colors: [railIndicatorTop, railIndicatorBottom],
+      );
+
   // Type colour phases (seven): STRING/HASH/LIST/SET/ZSET/STREAM/JSON.
   // Light = pastel fill + navy text; dark = saturated fill + white text.
   final RedisTypeColors typeString;
@@ -65,88 +99,127 @@ class AppTokens extends ThemeExtension<AppTokens> {
   final RedisTypeColors typeStream;
   final RedisTypeColors typeJson;
 
-  // ---------------------------------------------------------------- rail ---
-  /// The rail stays dark navy regardless of theme (v2.3 constant).
-  static const Color railBg = Color(0xFF0F1633);
-  static const Color railFg = Color(0xFF8F9AC2);
-  static const Color railFgActive = Color(0xFFC3D0FF);
-  static const Color railActiveBg = Color(0x298BA2FF); // rgba(139,162,255,.16)
-  static const Color railGlow = Color(0x668BA2FF); // rgba(139,162,255,.4)
-
-  /// v2.3 rail vertical gradient (#141c42 → #0f1633 52% → #0c1229).
-  static const LinearGradient railGradient = LinearGradient(
-    begin: Alignment.topCenter,
-    end: Alignment.bottomCenter,
-    colors: [Color(0xFF141C42), Color(0xFF0F1633), Color(0xFF0C1229)],
-    stops: [0.0, 0.52, 1.0],
-  );
-
-  /// Rail active left indicator gradient (#d0daff → #8ba2ff).
-  static const LinearGradient railIndicatorGradient = LinearGradient(
-    begin: Alignment.topCenter,
-    end: Alignment.bottomCenter,
-    colors: [Color(0xFFD0DAFF), Color(0xFF8BA2FF)],
-  );
-
   // ------------------------------------------------------------ instances ---
   static const AppTokens light = AppTokens(
-    bg: Color(0xFFFFFFFF),
-    panel: Color(0xFFFFFFFF),
-    panel2: Color(0xFFF6F7F9),
-    sidebar: Color(0xFFFFFFFF),
-    border: Color(0xFFC1CBD9),
-    hairline: Color(0xFFE4EAF2),
-    text: Color(0xFF173369),
-    text2: Color(0xFF415681),
-    text3: Color(0xFF7A8BB0),
-    accent: Color(0xFF3953C3),
+    bg: Color(0xFFF7F5F0),
+    panel: Color(0xFFFCFBF8),
+    panel2: Color(0xFFF1EEE7),
+    sidebar: Color(0xFFF3F0EA),
+    border: Color(0xFFC9C4BA),
+    hairline: Color(0xFFE2DED5),
+    text: Color(0xFF25231F),
+    text2: Color(0xFF5F5A51),
+    text3: Color(0xFF6F695F),
+    accent: Color(0xFFB84E17),
     onAccent: Color(0xFFFFFFFF),
-    hover: Color(0xFFE9EDFA),
-    selection: Color(0xFFD7E3FA),
-    focus: Color(0xFF3953C3),
+    hover: Color(0xFFEEE9E0),
+    selection: Color(0xFFF5DEC9),
+    focus: Color(0xFFA94312),
     danger: Color(0xFFAD0017),
-    success: Color(0xFF13A450),
-    warning: Color(0xFF9D6901),
-    highlight: Color(0xD9FFFFFF), // rgba(255,255,255,.85)
-    highlightSoft: Color(0x8CFFFFFF), // rgba(255,255,255,.55)
-    // Light type phases: pastel fill, navy-ish text, 1px outline.
-    typeString: RedisTypeColors(fill: Color(0xFFC7B0EA), fg: Color(0xFF173369), border: Color(0x7B173369)),
-    typeHash: RedisTypeColors(fill: Color(0xFFCDDDF8), fg: Color(0xFF173369), border: Color(0x7B173369)),
-    typeList: RedisTypeColors(fill: Color(0xFFA5D4C3), fg: Color(0xFF0C4A33), border: Color(0x7B173369)),
-    typeSet: RedisTypeColors(fill: Color(0xFFD4BAA7), fg: Color(0xFF5C320F), border: Color(0x7B173369)),
-    typeZset: RedisTypeColors(fill: Color(0xFFD9A0C6), fg: Color(0xFF63113F), border: Color(0x7B173369)),
-    typeStream: RedisTypeColors(fill: Color(0xFFB8C5DB), fg: Color(0xFF20335A), border: Color(0x7B173369)),
-    typeJson: RedisTypeColors(fill: Color(0xFFDFE3EA), fg: Color(0xFF415681), border: Color(0x7B173369)),
+    success: Color(0xFF137A42),
+    warning: Color(0xFF8A5A00),
+    highlight: Color(0xD9FFFFFF),
+    highlightSoft: Color(0x8CFFFFFF),
+    railBg: Color(0xFFF1EEE7),
+    railBgTop: Color(0xFFF1EEE7),
+    railBgBottom: Color(0xFFF1EEE7),
+    railFg: Color(0xFF6F695F),
+    railFgActive: Color(0xFF25231F),
+    railActiveBg: Color(0xFFF5DEC9),
+    railGlow: Color(0x00B84E17),
+    railIndicatorTop: Color(0xFFB84E17),
+    railIndicatorBottom: Color(0xFFB84E17),
+    // Redis type colours remain data-semantic; neutral text and outlines avoid
+    // reintroducing the legacy navy palette through shared badge chrome.
+    typeString: RedisTypeColors(
+        fill: Color(0xFFC7B0EA),
+        fg: Color(0xFF25231F),
+        border: Color(0x6625231F)),
+    typeHash: RedisTypeColors(
+        fill: Color(0xFFCDDDF8),
+        fg: Color(0xFF25231F),
+        border: Color(0x6625231F)),
+    typeList: RedisTypeColors(
+        fill: Color(0xFFA5D4C3),
+        fg: Color(0xFF0C4A33),
+        border: Color(0x6625231F)),
+    typeSet: RedisTypeColors(
+        fill: Color(0xFFD4BAA7),
+        fg: Color(0xFF5C320F),
+        border: Color(0x6625231F)),
+    typeZset: RedisTypeColors(
+        fill: Color(0xFFD9A0C6),
+        fg: Color(0xFF63113F),
+        border: Color(0x6625231F)),
+    typeStream: RedisTypeColors(
+        fill: Color(0xFFB8C5DB),
+        fg: Color(0xFF20335A),
+        border: Color(0x6625231F)),
+    typeJson: RedisTypeColors(
+        fill: Color(0xFFDFE3EA),
+        fg: Color(0xFF5F5A51),
+        border: Color(0x6625231F)),
   );
 
   static const AppTokens dark = AppTokens(
-    bg: Color(0xFF121212),
-    panel: Color(0xFF202020),
-    panel2: Color(0xFF171717),
-    sidebar: Color(0xFF161616),
-    border: Color(0xFF3D3D3D),
-    hairline: Color(0xFF2B2B2B),
-    text: Color(0xFFDFE5EF),
-    text2: Color(0xFFB5B6C0),
-    text3: Color(0xFF7D7F8A),
-    accent: Color(0xFF8BA2FF),
-    onAccent: Color(0xFF10142E),
-    hover: Color(0xFF2B2B2B),
-    selection: Color(0xFF002F47),
-    focus: Color(0xFF8BA2FF),
-    danger: Color(0xFFFF6280),
-    success: Color(0xFF5BC69B),
-    warning: Color(0xFFFFAF2B),
-    highlight: Color(0x17FFFFFF), // rgba(255,255,255,.09)
-    highlightSoft: Color(0x0DFFFFFF), // rgba(255,255,255,.05)
+    bg: Color(0xFF151411),
+    panel: Color(0xFF1F1E1A),
+    panel2: Color(0xFF191815),
+    sidebar: Color(0xFF1A1916),
+    border: Color(0xFF3B3933),
+    hairline: Color(0xFF2D2B27),
+    text: Color(0xFFF1EEE7),
+    text2: Color(0xFFC5C0B5),
+    text3: Color(0xFF928C80),
+    accent: Color(0xFFFCBF35),
+    onAccent: Color(0xFF241B07),
+    hover: Color(0xFF2A2823),
+    selection: Color(0xFF3A2E16),
+    focus: Color(0xFFFDC851),
+    danger: Color(0xFFFF6B6B),
+    success: Color(0xFF62C98D),
+    warning: Color(0xFFE2A640),
+    highlight: Color(0x17FFFFFF),
+    highlightSoft: Color(0x0DFFFFFF),
+    railBg: Color(0xFF191815),
+    railBgTop: Color(0xFF191815),
+    railBgBottom: Color(0xFF191815),
+    railFg: Color(0xFF928C80),
+    railFgActive: Color(0xFFF1EEE7),
+    railActiveBg: Color(0xFF3A2E16),
+    railGlow: Color(0x00FCBF35),
+    railIndicatorTop: Color(0xFFFCBF35),
+    railIndicatorBottom: Color(0xFFFCBF35),
+    // Redis data-type colours remain semantic, not brand accents.
     // Dark type phases: saturated fill + white text.
-    typeString: RedisTypeColors(fill: Color(0xFF6A1DC3), fg: Color(0xFFFFFFFF), border: Color(0x4DFFFFFF)),
-    typeHash: RedisTypeColors(fill: Color(0xFF364CFF), fg: Color(0xFFFFFFFF), border: Color(0x4DFFFFFF)),
-    typeList: RedisTypeColors(fill: Color(0xFF008556), fg: Color(0xFFFFFFFF), border: Color(0x4DFFFFFF)),
-    typeSet: RedisTypeColors(fill: Color(0xFF9C5C2B), fg: Color(0xFFFFFFFF), border: Color(0x4DFFFFFF)),
-    typeZset: RedisTypeColors(fill: Color(0xFFA00A6B), fg: Color(0xFFFFFFFF), border: Color(0x4DFFFFFF)),
-    typeStream: RedisTypeColors(fill: Color(0xFF5A6B85), fg: Color(0xFFFFFFFF), border: Color(0x4DFFFFFF)),
-    typeJson: RedisTypeColors(fill: Color(0xFF3F4B5F), fg: Color(0xFFFFFFFF), border: Color(0x4DFFFFFF)),
+    typeString: RedisTypeColors(
+        fill: Color(0xFF6A1DC3),
+        fg: Color(0xFFFFFFFF),
+        border: Color(0x4DFFFFFF)),
+    typeHash: RedisTypeColors(
+        fill: Color(0xFF364CFF),
+        fg: Color(0xFFFFFFFF),
+        border: Color(0x4DFFFFFF)),
+    typeList: RedisTypeColors(
+        fill: Color(0xFF008556),
+        fg: Color(0xFFFFFFFF),
+        border: Color(0x4DFFFFFF)),
+    typeSet: RedisTypeColors(
+        fill: Color(0xFF9C5C2B),
+        fg: Color(0xFFFFFFFF),
+        border: Color(0x4DFFFFFF)),
+    typeZset: RedisTypeColors(
+        fill: Color(0xFFA00A6B),
+        fg: Color(0xFFFFFFFF),
+        border: Color(0x4DFFFFFF)),
+    typeStream: RedisTypeColors(
+        fill: Color(0xFF5A6B85),
+        fg: Color(0xFFFFFFFF),
+        border: Color(0x4DFFFFFF)),
+    typeJson: RedisTypeColors(
+        fill: Color(0xFF3F4B5F),
+        fg: Color(0xFFFFFFFF),
+        border: Color(0x4DFFFFFF)),
   );
 
   static AppTokens of(BuildContext context) {
@@ -156,7 +229,8 @@ class AppTokens extends ThemeExtension<AppTokens> {
   }
 
   /// Resolve by brightness without context (e.g. inside theme factories).
-  static AppTokens forBrightness(Brightness b) => b == Brightness.dark ? dark : light;
+  static AppTokens forBrightness(Brightness b) =>
+      b == Brightness.dark ? dark : light;
 
   /// Type colour lookup by Redis key-type name.
   RedisTypeColors typeColors(String type) {
@@ -180,7 +254,8 @@ class AppTokens extends ThemeExtension<AppTokens> {
   }
 
   @override
-  AppTokens copyWith() => this; // tokens are immutable constants; no partial copy needed
+  AppTokens copyWith() =>
+      this; // tokens are immutable constants; no partial copy needed
 
   @override
   AppTokens lerp(ThemeExtension<AppTokens>? other, double t) =>
@@ -189,7 +264,8 @@ class AppTokens extends ThemeExtension<AppTokens> {
 
 /// Fill / foreground / outline triple for one Redis key-type phase.
 class RedisTypeColors {
-  const RedisTypeColors({required this.fill, required this.fg, required this.border});
+  const RedisTypeColors(
+      {required this.fill, required this.fg, required this.border});
   final Color fill;
   final Color fg;
   final Color border;
@@ -210,6 +286,9 @@ class Dim {
   static const double rowH = 30;
   static const double ctlH = 30;
   static const double tablesSideW = 230;
+  static const double trailingSlot = 28;
+  static const double wellInsetH = 3;
+  static const double borderW = 1;
 
   static const double radiusS = 6;
   static const double radiusM = 8;
@@ -229,11 +308,15 @@ class Ts {
   static const double xl = 13.5;
   static const double xxl = 15.5;
 
-  /// UI font stack — bundled Inter first (pixel-fidelity-v23 CP 4.7), then
-  /// system sans for CJK + platforms without the bundled face
-  /// (SF Pro on macOS, Segoe UI on Windows, …).
-  static const List<String> sans = [
-    'Inter',
+  /// Bundled production font families. The mono asset is intentionally
+  /// registered as `monospace` in pubspec.yaml so legacy editor/data styles and
+  /// [style] resolve to the same JetBrains Mono face.
+  static const String uiFamily = 'Inter';
+  static const String monoFamily = 'monospace';
+
+  /// Platform and CJK fallbacks used after bundled Inter. Keep platform-native
+  /// UI faces ahead of broad sans families while explicitly covering Chinese.
+  static const List<String> sansFallback = [
     '-apple-system',
     '.SF NS Text',
     'SF Pro Text',
@@ -245,18 +328,25 @@ class Ts {
     'sans-serif',
   ];
 
-  /// Data/mono stack — the bundled JetBrains Mono is registered under the
-  /// family name `monospace` (pixel-fidelity-v23 CP 4.5), so leading with it
-  /// here and in the bare `fontFamily: 'monospace'` styles both resolve to
-  /// the same face; system mono fallbacks cover CJK.
-  static const List<String> mono = [
-    'monospace',
+  /// Complete UI stack for assertions and non-ThemeData consumers.
+  static const List<String> sans = [uiFamily, ...sansFallback];
+
+  /// System mono faces followed by CJK-capable platform fonts. CJK glyphs are
+  /// not monospace in the bundled asset, so the explicit fallbacks avoid tofu
+  /// while preserving JetBrains Mono for commands, identifiers, and data.
+  static const List<String> monoFallback = [
     'ui-monospace',
     'SF Mono',
     'Menlo',
     'Consolas',
     'Courier',
+    'PingFang SC',
+    'Microsoft YaHei',
+    'sans-serif',
   ];
+
+  /// Complete data stack for assertions and direct consumers.
+  static const List<String> mono = [monoFamily, ...monoFallback];
 
   /// Tabular figures for all numeric readouts (metrics, latency, counts).
   static const List<FontFeature> tabular = [FontFeature('tnum')];
@@ -265,18 +355,25 @@ class Ts {
   /// distribution is proportional (ascent-weighted), so any text given an
   /// explicit `height` sits off-centre in its line box versus the CSS mockups,
   /// which use half-leading. even splits the added leading above/below.
-  static const TextLeadingDistribution cssLeading = TextLeadingDistribution.even;
+  static const TextLeadingDistribution cssLeading =
+      TextLeadingDistribution.even;
 
   /// ThemeData/TextTheme.apply have no leading hook, so stamp [cssLeading]
   /// onto every theme style: the theme-derived DefaultTextStyle then gives
   /// CSS leading semantics to all text that doesn't override it.
   static TextTheme withCssLeading(TextTheme tt) => tt.copyWith(
-        displayLarge: tt.displayLarge?.copyWith(leadingDistribution: cssLeading),
-        displayMedium: tt.displayMedium?.copyWith(leadingDistribution: cssLeading),
-        displaySmall: tt.displaySmall?.copyWith(leadingDistribution: cssLeading),
-        headlineLarge: tt.headlineLarge?.copyWith(leadingDistribution: cssLeading),
-        headlineMedium: tt.headlineMedium?.copyWith(leadingDistribution: cssLeading),
-        headlineSmall: tt.headlineSmall?.copyWith(leadingDistribution: cssLeading),
+        displayLarge:
+            tt.displayLarge?.copyWith(leadingDistribution: cssLeading),
+        displayMedium:
+            tt.displayMedium?.copyWith(leadingDistribution: cssLeading),
+        displaySmall:
+            tt.displaySmall?.copyWith(leadingDistribution: cssLeading),
+        headlineLarge:
+            tt.headlineLarge?.copyWith(leadingDistribution: cssLeading),
+        headlineMedium:
+            tt.headlineMedium?.copyWith(leadingDistribution: cssLeading),
+        headlineSmall:
+            tt.headlineSmall?.copyWith(leadingDistribution: cssLeading),
         titleLarge: tt.titleLarge?.copyWith(leadingDistribution: cssLeading),
         titleMedium: tt.titleMedium?.copyWith(leadingDistribution: cssLeading),
         titleSmall: tt.titleSmall?.copyWith(leadingDistribution: cssLeading),
@@ -305,77 +402,125 @@ class Ts {
         letterSpacing: letterSpacing,
         leadingDistribution: cssLeading,
         // CP 4.5 intent: mono text must LEAD with the mono family, else the
-        // theme's ui family wins the merge and values render proportional
-        // (and a bare null family degrades to the test env's box glyphs).
-        fontFamily: monoFont ? mono.first : null,
-        fontFamilyFallback: monoFont ? mono : sans,
+        // theme's ui family wins the merge and values render proportional.
+        fontFamily: monoFont ? monoFamily : null,
+        fontFamilyFallback: monoFont ? monoFallback : sansFallback,
         fontFeatures: tabularNums ? tabular : null,
       );
+
+  /// Resolves an explicit UI face for Material components that install their
+  /// own [DefaultTextStyle] instead of inheriting the app-level theme face.
+  ///
+  /// Keeping [style] inheritable lets deterministic tests inject `ui`, while
+  /// this helper prevents those isolated component styles from falling back to
+  /// Flutter's block-glyph test font.
+  static TextStyle themedStyle(
+    ThemeData theme, {
+    double size = md,
+    FontWeight weight = FontWeight.normal,
+    Color? color,
+    bool monoFont = false,
+    bool tabularNums = false,
+    double? height,
+    double? letterSpacing,
+  }) {
+    final result = style(
+      size: size,
+      weight: weight,
+      color: color,
+      monoFont: monoFont,
+      tabularNums: tabularNums,
+      height: height,
+      letterSpacing: letterSpacing,
+    );
+    if (monoFont) return result;
+    return result.copyWith(
+      fontFamily: theme.textTheme.bodyMedium?.fontFamily ?? uiFamily,
+    );
+  }
 }
 
 // ---------------------------------------------------------------------------
-// Depth / elevation helpers (R1.5, R1.6) — v2.3 composite "D": hairline
-// highlights + two soft elevations + sunken wells + rail gradients.
+// Depth / elevation helpers (R1.5, R1.6) — Codex-style hairline
+// highlights, restrained elevations, sunken wells, and rail separation.
 // ---------------------------------------------------------------------------
 class Depth {
   Depth._();
 
-  /// elev-1: horizontal bars (topbar, midbar). CSS box-shadow blur = 2σ while
-  /// Flutter blurRadius = σ, so the CSS values are HALVED (CP 6.1):
-  /// light `0 1px 2px rgba(23,51,105,.07)` / dark `0 2px 4px rgba(0,0,0,.55)`.
-  static List<BoxShadow> elev1(Brightness b) => b == Brightness.dark
-      ? const [BoxShadow(color: Color(0x8C000000), blurRadius: 2, offset: Offset(0, 2))]
-      : const [BoxShadow(color: Color(0x12173369), blurRadius: 1, offset: Offset(0, 1))];
+  /// Low-contrast shell separation. Light and dark use identical shadow
+  /// geometry; only the paint changes, so theme switching cannot alter bounds.
+  static List<BoxShadow> elev1(Brightness b) => [
+        BoxShadow(
+          color: b == Brightness.dark
+              ? const Color(0x52000000)
+              : const Color(0x14241F18),
+          blurRadius: 2,
+          offset: const Offset(0, 1),
+        ),
+      ];
 
-  /// elev-2: cards (valuepanes, cmd blocks, spark tiles, info tiles, ov-cards,
-  /// cfg-sections). Blur halved (CP 6.2): light `0 1px 2px rgba(23,51,105,.05)`
-  /// + `0 4px 14px rgba(23,51,105,.08)` / dark `0 1px 3px rgba(0,0,0,.5)` +
-  /// `0 8px 24px rgba(0,0,0,.35)`.
-  static List<BoxShadow> elev2(Brightness b) => b == Brightness.dark
-      ? const [
-          BoxShadow(color: Color(0x80000000), blurRadius: 1.5, offset: Offset(0, 1)),
-          BoxShadow(color: Color(0x59000000), blurRadius: 12, offset: Offset(0, 8)),
-        ]
-      : const [
-          BoxShadow(color: Color(0x0D173369), blurRadius: 1, offset: Offset(0, 1)),
-          BoxShadow(color: Color(0x14173369), blurRadius: 7, offset: Offset(0, 4)),
-        ];
+  /// Restrained card elevation. The contact and ambient layers share geometry
+  /// across themes and avoid the legacy navy cast.
+  static List<BoxShadow> elev2(Brightness b) => [
+        BoxShadow(
+          color: b == Brightness.dark
+              ? const Color(0x4D000000)
+              : const Color(0x12241F18),
+          blurRadius: 2,
+          offset: const Offset(0, 1),
+        ),
+        BoxShadow(
+          color: b == Brightness.dark
+              ? const Color(0x33000000)
+              : const Color(0x14241F18),
+          blurRadius: 8,
+          offset: const Offset(0, 4),
+        ),
+      ];
 
-  /// Sidebar soft right-edge shadow. Blur halved (CP 6.3):
-  /// light `2px 0 6px rgba(23,51,105,.08)` / dark `2px 0 8px rgba(0,0,0,.5)`.
-  static List<BoxShadow> elevSide(Brightness b) => b == Brightness.dark
-      ? const [BoxShadow(color: Color(0x80000000), blurRadius: 4, offset: Offset(2, 0))]
-      : const [BoxShadow(color: Color(0x14173369), blurRadius: 3, offset: Offset(2, 0))];
+  /// Sidebar soft right-edge separation with theme-invariant geometry.
+  static List<BoxShadow> elevSide(Brightness b) => [
+        BoxShadow(
+          color: b == Brightness.dark
+              ? const Color(0x47000000)
+              : const Color(0x14241F18),
+          blurRadius: 4,
+          offset: const Offset(2, 0),
+        ),
+      ];
 
-  /// Rail's right-edge shadow, layered (CP 6.4). Mockup v2.4 override:
-  /// `6px 0 18px -8px rgba(8,12,32,.55)` — blur halved, offset corrected to
-  /// the CSS 6px and colour matched; the tight second layer approximates the
-  /// -8px spread's darkened contact edge.
-  static List<BoxShadow> railShadow = const [
-    BoxShadow(color: Color(0x8C080C20), blurRadius: 9, offset: Offset(6, 0)),
-    BoxShadow(color: Color(0x33080C20), blurRadius: 3, offset: Offset(1, 0)),
+  /// Rail right-edge separation. The warm near-black paint replaces the old
+  /// blue-black cast while retaining the existing fixed rail footprint.
+  static const List<BoxShadow> railShadow = [
+    BoxShadow(color: Color(0x70201C16), blurRadius: 8, offset: Offset(4, 0)),
+    BoxShadow(color: Color(0x33110F0C), blurRadius: 2, offset: Offset(1, 0)),
   ];
 
-  /// Rail active item glow — CSS `0 0 12px rgba(139,162,255,.4)`, blur halved
-  /// (CP 6.5).
-  static List<BoxShadow> railItemGlow = const [
-    BoxShadow(color: AppTokens.railGlow, blurRadius: 6, spreadRadius: 0),
-  ];
+  /// Rail active item glow. The colour comes from the active theme so the fixed
+  /// rail geometry can switch palettes without retaining a legacy blue halo.
+  static List<BoxShadow> railItemGlow(Color glow) => [
+        BoxShadow(color: glow, blurRadius: 6, spreadRadius: 0),
+      ];
 
   /// Top-edge hairline highlight — Flutter has no inset shadow, so we fake
   /// the top 1px inner highlight with a top border of the highlight colour.
-  static Border topHighlight(Color hl) => Border(top: BorderSide(color: hl, width: 1));
+  static Border topHighlight(Color hl) =>
+      Border(top: BorderSide(color: hl, width: Dim.borderW));
 
-  /// Sunken wells (CP 6.9): Flutter fakes the CSS inset shadow with a top
-  /// black→transparent gradient strip. Two tiers matching the mockup —
-  /// cli-body `inset 0 2px 5px rgba(23,51,105,.06)` (dark `0 2px 6px
-  /// rgba(0,0,0,.45)`) vs logs-body `inset 0 1px 3px rgba(23,51,105,.06)`
-  /// (dark `0 1px 4px rgba(0,0,0,.5)`).
+  /// Sunken-well top inset. Flutter approximates the inner shadow with a short
+  /// warm-neutral gradient strip. Geometry is shared by both themes; only the
+  /// paint opacity changes.
   static BoxDecoration wellTopCli(Brightness b) => _well(
-      b == Brightness.dark ? const Color(0x73000000) : const Color(0x0F173369));
+        b == Brightness.dark
+            ? const Color(0x52000000)
+            : const Color(0x12241F18),
+      );
 
   static BoxDecoration wellTopLogs(Brightness b) => _well(
-      b == Brightness.dark ? const Color(0x80000000) : const Color(0x0F173369));
+        b == Brightness.dark
+            ? const Color(0x47000000)
+            : const Color(0x10241F18),
+      );
 
   static BoxDecoration _well(Color top) => BoxDecoration(
         gradient: LinearGradient(
@@ -391,109 +536,256 @@ class Depth {
 // Material default suppression (pixel-fidelity-v23 CP 7.x)
 // ---------------------------------------------------------------------------
 /// The v2.3 mockups carry NO Material chrome: no ripples, no 48px icon-button
-/// targets, no M3 surface tints, no ornamented inputs. Both theme factories —
-/// main.dart `_appTheme` and test/screen_fixtures.dart `goldenTheme` — apply
-/// this ONE builder, so the live app and the golden/capture channels can
-/// never drift apart (the hand-mirrored themes are the known false-green
-/// trap).
+/// targets, no M3 surface tints, no ornamented inputs. The shared appTheme
+/// factory applies this builder for production, goldens, and captures so those
+/// rendering paths cannot drift apart.
 class MatSuppress {
   MatSuppress._();
 
   static ThemeData apply(ThemeData td, AppTokens t) {
+    const transparent = Color(0x00000000);
     final radius = BorderRadius.circular(Dim.radiusS);
+    final shape = RoundedRectangleBorder(borderRadius: radius);
+    final controlText =
+        Ts.themedStyle(td, size: Ts.md, weight: FontWeight.w600);
+    final compactControl = ButtonStyle(
+      minimumSize: const WidgetStatePropertyAll(Size(0, Dim.ctlH)),
+      padding: const WidgetStatePropertyAll(
+        EdgeInsets.symmetric(horizontal: 12),
+      ),
+      visualDensity: const VisualDensity(horizontal: -4),
+      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      shape: WidgetStatePropertyAll(shape),
+      textStyle: WidgetStatePropertyAll(controlText),
+      overlayColor: const WidgetStatePropertyAll(transparent),
+      elevation: const WidgetStatePropertyAll(0),
+      surfaceTintColor: const WidgetStatePropertyAll(transparent),
+      shadowColor: const WidgetStatePropertyAll(transparent),
+    );
+
+    Color? interactionFill(Set<WidgetState> states) {
+      if (states.contains(WidgetState.disabled)) return transparent;
+      if (states.contains(WidgetState.pressed)) return t.selection;
+      if (states.contains(WidgetState.hovered)) return t.hover;
+      return transparent;
+    }
+
     return td.copyWith(
-      // CP 7.1 — kill InkWell ripple/highlight; pressed states stay silent,
-      // matching the static mockups.
+      // Codex controls use paint-state feedback rather than Material ink.
       splashFactory: NoSplash.splashFactory,
-      highlightColor: const Color(0x00000000),
-      // CP 7.2 — mockup .ibtn/.tbtn: zero padding, compact density, 26px
-      // (.ibtn) floor; call sites that want the 30px .tbtn tier already pass
-      // explicit constraints, which win over the theme minimum.
+      highlightColor: transparent,
+      hoverColor: transparent,
+      focusColor: transparent,
       iconButtonTheme: IconButtonThemeData(
         style: IconButton.styleFrom(
           padding: EdgeInsets.zero,
           visualDensity: VisualDensity.compact,
           minimumSize: const Size(26, 26),
-          // Mockup .ibtn/.tbtn colour is var(--text-2). This SDK's
-          // styleFrom names the icon colour foregroundColor.
           foregroundColor: t.text2,
-          // styleFrom derives hover/press overlays from foregroundColor;
-          // the mockups are static, so silence those too (CP 7.1).
-          overlayColor: const Color(0x00000000),
+          disabledForegroundColor: t.text3.withValues(alpha: 0.55),
+          overlayColor: transparent,
+        ).copyWith(
+          backgroundColor: WidgetStateProperty.resolveWith(interactionFill),
+          side: WidgetStateProperty.resolveWith(
+            (states) => states.contains(WidgetState.focused)
+                ? BorderSide(color: t.focus, width: Dim.borderW)
+                : BorderSide.none,
+          ),
+          shape: WidgetStatePropertyAll(shape),
         ),
       ),
-      // CP 7.3 — bare Icon()s read the token grey instead of M3 onSurface.
       iconTheme: IconThemeData(color: t.text2),
-      // CP 7.4 — menus were never mocked; dock them to the v2.3 surface
-      // tokens (--shadow-lg tier, panel bg, radius-sm) and kill the M3
-      // surface-tint chrome.
+      filledButtonTheme: FilledButtonThemeData(
+        style: compactControl.copyWith(
+          backgroundColor: WidgetStateProperty.resolveWith(
+            (states) => states.contains(WidgetState.disabled)
+                ? t.accent.withValues(alpha: 0.3)
+                : states.contains(WidgetState.pressed)
+                    ? Color.alphaBlend(t.text.withValues(alpha: 0.12), t.accent)
+                    : states.contains(WidgetState.hovered)
+                        ? Color.alphaBlend(
+                            t.text.withValues(alpha: 0.07), t.accent)
+                        : t.accent,
+          ),
+          foregroundColor: WidgetStateProperty.resolveWith(
+            (states) => states.contains(WidgetState.disabled)
+                ? t.onAccent.withValues(alpha: 0.55)
+                : t.onAccent,
+          ),
+          side: WidgetStateProperty.resolveWith(
+            (states) => states.contains(WidgetState.focused)
+                ? BorderSide(color: t.focus, width: Dim.borderW)
+                : BorderSide.none,
+          ),
+        ),
+      ),
+      outlinedButtonTheme: OutlinedButtonThemeData(
+        style: compactControl.copyWith(
+          backgroundColor: WidgetStateProperty.resolveWith(interactionFill),
+          foregroundColor: WidgetStateProperty.resolveWith(
+            (states) => states.contains(WidgetState.disabled)
+                ? t.text3.withValues(alpha: 0.55)
+                : t.text,
+          ),
+          side: WidgetStateProperty.resolveWith(
+            (states) => BorderSide(
+              color: states.contains(WidgetState.focused) ? t.focus : t.border,
+              width: Dim.borderW,
+            ),
+          ),
+        ),
+      ),
+      textButtonTheme: TextButtonThemeData(
+        style: compactControl.copyWith(
+          backgroundColor: WidgetStateProperty.resolveWith(interactionFill),
+          foregroundColor: WidgetStateProperty.resolveWith(
+            (states) => states.contains(WidgetState.disabled)
+                ? t.text3.withValues(alpha: 0.55)
+                : t.text2,
+          ),
+          side: WidgetStateProperty.resolveWith(
+            (states) => states.contains(WidgetState.focused)
+                ? BorderSide(color: t.focus, width: Dim.borderW)
+                : BorderSide.none,
+          ),
+        ),
+      ),
       popupMenuTheme: PopupMenuThemeData(
         color: t.panel,
-        surfaceTintColor: const Color(0x00000000),
+        surfaceTintColor: transparent,
+        shadowColor: Colors.black.withValues(alpha: 0.28),
         elevation: 8,
-        shape: RoundedRectangleBorder(borderRadius: radius),
+        shape: shape.copyWith(side: BorderSide(color: t.border)),
         menuPadding: const EdgeInsets.symmetric(vertical: 4),
+        textStyle: Ts.themedStyle(td, size: Ts.md, color: t.text),
       ),
-      dropdownMenuTheme: DropdownMenuThemeData(
-        menuStyle: MenuStyle(
+      menuTheme: MenuThemeData(
+        style: MenuStyle(
           backgroundColor: WidgetStatePropertyAll(t.panel),
-          surfaceTintColor: const WidgetStatePropertyAll(Color(0x00000000)),
+          surfaceTintColor: const WidgetStatePropertyAll(transparent),
+          shadowColor: WidgetStatePropertyAll(
+            Colors.black.withValues(alpha: 0.28),
+          ),
           elevation: const WidgetStatePropertyAll(8),
           shape: WidgetStatePropertyAll(
-              RoundedRectangleBorder(borderRadius: radius)),
+            shape.copyWith(side: BorderSide(color: t.border)),
+          ),
           padding: const WidgetStatePropertyAll(
-              EdgeInsets.symmetric(vertical: 4)),
+            EdgeInsets.symmetric(vertical: 4),
+          ),
+          visualDensity: VisualDensity.compact,
         ),
       ),
-      // CP 7.6 — mockup .f-input baseline: 30px control, 0 10px padding,
-      // radius-sm, 1px --border. Borderless inputs that sit inside styled
-      // containers shield themselves with contentPadding: EdgeInsets.zero
-      // (search box, console/CLI input).
-      // Base `border` slot ONLY: a theme-level enabledBorder/focusedBorder
-      // would outrank a WIDGET-level base border (input_decorator resolves
-      // state borders before _getDefaultBorder) and would stamp outline
-      // boxes onto InputBorder.none embeds. The base slot is the one the
-      // widget's own border wins against.
+      dropdownMenuTheme: DropdownMenuThemeData(
+        textStyle: Ts.themedStyle(td, size: Ts.md, color: t.text),
+        menuStyle: MenuStyle(
+          backgroundColor: WidgetStatePropertyAll(t.panel),
+          surfaceTintColor: const WidgetStatePropertyAll(transparent),
+          shadowColor: WidgetStatePropertyAll(
+            Colors.black.withValues(alpha: 0.28),
+          ),
+          elevation: const WidgetStatePropertyAll(8),
+          shape: WidgetStatePropertyAll(
+            shape.copyWith(side: BorderSide(color: t.border)),
+          ),
+          padding: const WidgetStatePropertyAll(
+            EdgeInsets.symmetric(vertical: 4),
+          ),
+          visualDensity: VisualDensity.compact,
+        ),
+      ),
+      dialogTheme: DialogThemeData(
+        backgroundColor: t.panel,
+        surfaceTintColor: transparent,
+        shadowColor: Colors.black.withValues(alpha: 0.32),
+        elevation: 12,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(Dim.radiusL),
+          side: BorderSide(color: t.border),
+        ),
+        titleTextStyle: Ts.themedStyle(
+          td,
+          size: Ts.xxl,
+          weight: FontWeight.w600,
+          color: t.text,
+        ),
+        contentTextStyle:
+            Ts.themedStyle(td, size: Ts.md, color: t.text2, height: 1.4),
+        actionsPadding: const EdgeInsets.fromLTRB(16, 4, 16, 14),
+      ),
+      tooltipTheme: TooltipThemeData(
+        decoration: BoxDecoration(
+          color: t.text,
+          borderRadius: radius,
+          boxShadow: Depth.elev1(td.brightness),
+        ),
+        textStyle: Ts.themedStyle(td, size: Ts.xs, color: t.bg),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+        margin: const EdgeInsets.all(8),
+        waitDuration: const Duration(milliseconds: 450),
+        showDuration: const Duration(seconds: 3),
+      ),
+      // Keep only the base border slot. Theme-level state borders would outrank
+      // widget-level InputBorder.none used by search, console, and editor embeds.
       inputDecorationTheme: InputDecorationTheme(
         isDense: true,
+        filled: false,
         contentPadding: const EdgeInsets.symmetric(horizontal: 10),
         border: OutlineInputBorder(
-            borderRadius: radius, borderSide: BorderSide(color: t.border)),
-        hintStyle: Ts.style(size: Ts.md, color: t.text3),
+          borderRadius: radius,
+          borderSide: BorderSide(color: t.border),
+        ),
+        hintStyle: Ts.themedStyle(td, size: Ts.md, color: t.text3),
+        labelStyle: Ts.themedStyle(td, size: Ts.md, color: t.text2),
+        floatingLabelStyle: Ts.themedStyle(td, size: Ts.sm, color: t.focus),
+        errorStyle: Ts.themedStyle(td, size: Ts.xs, color: t.danger),
+        prefixIconColor: t.text3,
+        suffixIconColor: t.text3,
       ),
-      // CP 7.7 — no TabBar widgets exist (midbar/cli/ktabs are hand-rolled
-      // to the .mtab 2px-accent underline); pin the theme so any future
-      // TabBar inherits the same look, with the M3 overlay removed.
+      textSelectionTheme: TextSelectionThemeData(
+        cursorColor: t.focus,
+        selectionColor: t.selection,
+        selectionHandleColor: t.accent,
+      ),
       tabBarTheme: TabBarThemeData(
-        indicatorSize: TabBarIndicatorSize.label,
-        overlayColor: const WidgetStatePropertyAll(Color(0x00000000)),
-        dividerColor: t.border,
+        indicatorSize: TabBarIndicatorSize.tab,
+        indicator: UnderlineTabIndicator(
+          borderSide: BorderSide(color: t.accent, width: 2),
+        ),
+        overlayColor: const WidgetStatePropertyAll(transparent),
+        dividerColor: t.hairline,
         labelColor: t.text,
         unselectedLabelColor: t.text3,
+        labelStyle: Ts.themedStyle(td, size: Ts.md, weight: FontWeight.w600),
+        unselectedLabelStyle: Ts.themedStyle(td, size: Ts.md),
       ),
-      // CP 7.8 — the mockups render native auto-hiding scrollbars (no CSS
-      // scrollbar rules exist). Match a neutral thumb, never force
-      // visibility: rest-state captures stay scrollbar-free like the
-      // mockups'.
       scrollbarTheme: ScrollbarThemeData(
-        thickness: const WidgetStatePropertyAll(8),
+        thickness: WidgetStateProperty.resolveWith(
+          (states) => states.contains(WidgetState.dragged) ? 8 : 6,
+        ),
         radius: const Radius.circular(4),
-        thumbColor: WidgetStatePropertyAll(t.text3.withValues(alpha: 0.35)),
-        trackColor: const WidgetStatePropertyAll(Color(0x00000000)),
-        trackBorderColor: const WidgetStatePropertyAll(Color(0x00000000)),
+        thumbColor: WidgetStateProperty.resolveWith(
+          (states) => t.text3.withValues(
+            alpha: states.contains(WidgetState.dragged)
+                ? 0.7
+                : states.contains(WidgetState.hovered)
+                    ? 0.52
+                    : 0.35,
+          ),
+        ),
+        trackColor: const WidgetStatePropertyAll(transparent),
+        trackBorderColor: const WidgetStatePropertyAll(transparent),
         thumbVisibility: const WidgetStatePropertyAll(false),
         trackVisibility: const WidgetStatePropertyAll(false),
+        interactive: true,
       ),
     );
   }
 }
 
-// The "running / start" green. greenAccent is bright on dark surfaces but too
-// pale on a light background, so use a deeper green there. Panel-only (the
-// sidebar LocalDdbPanel) — the dashboard tile grammar lives in
-// src/monitor_widgets.dart since the 2026-08-05 separation. (Moved here from
-// main.dart in CP 9.x so the extracted home chrome can share it without an
-// import cycle.)
-Color goGreen(BuildContext context) => Theme.of(context).brightness == Brightness.dark
-    ? Colors.greenAccent
-    : const Color(0xFF12994F);
+/// Compatibility accessor for existing running/start call sites.
+///
+/// Operational success always resolves through the canonical semantic role;
+/// callers can migrate to `AppTokens.of(context).success` without changing
+/// paint behavior.
+Color goGreen(BuildContext context) => AppTokens.of(context).success;

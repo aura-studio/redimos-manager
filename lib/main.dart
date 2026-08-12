@@ -16,6 +16,9 @@ import 'src/models.dart';
 import 'src/monitor_widgets.dart';
 import 'src/native.dart';
 import 'src/playground_page.dart';
+import 'src/ui_states.dart';
+import 'src/ui_surfaces.dart';
+import 'src/ui_theme.dart';
 import 'src/ui_tokens.dart';
 
 void main() {
@@ -29,9 +32,11 @@ final ValueNotifier<ThemeMode> appThemeMode = ValueNotifier(ThemeMode.system);
 
 // The theme choice is persisted next to the Go core's store, in ~/.redimos/theme.
 File? _themeFile() {
-  final home = Platform.environment['HOME'] ?? Platform.environment['USERPROFILE'];
+  final home =
+      Platform.environment['HOME'] ?? Platform.environment['USERPROFILE'];
   if (home == null || home.isEmpty) return null;
-  return File('$home${Platform.pathSeparator}.redimos${Platform.pathSeparator}theme');
+  return File(
+      '$home${Platform.pathSeparator}.redimos${Platform.pathSeparator}theme');
 }
 
 void _loadThemeMode() {
@@ -60,39 +65,6 @@ void _saveThemeMode(ThemeMode m) {
   } catch (_) {}
 }
 
-ThemeData _appTheme(Brightness b) {
-  final t = AppTokens.forBrightness(b);
-  final td = ThemeData(
-    useMaterial3: true,
-    brightness: b,
-    scaffoldBackgroundColor: t.bg,
-    dividerColor: t.hairline,
-    // colorScheme (not colorSchemeSeed): the two are mutually exclusive — seed
-    // would also re-derive every role off the accent instead of the tuned
-    // token panel/surface below.
-    colorScheme: b == Brightness.dark
-        ? const ColorScheme.dark().copyWith(primary: t.accent, surface: t.panel)
-        : const ColorScheme.light().copyWith(primary: t.accent, surface: t.panel),
-    extensions: [t],
-    // UI defaults to the system sans stack (no more global monospace — data
-    // widgets opt into the mono fallback stack via Ts.style(monoFont:true)).
-    fontFamilyFallback: Ts.sans,
-    // One consistent weight/colour for every rule in the app (sidebar splits,
-    // tab bar, section separators) so no line looks bolder than another.
-    dividerTheme: DividerThemeData(
-      thickness: 1,
-      space: 1,
-      color: t.hairline,
-    ),
-  );
-  // CP 5.1/5.2: CSS half-leading for every theme-derived text style; the
-  // golden/capture themes in test/screen_fixtures.dart mirror this.
-  // CP 7.x: MatSuppress kills the M3 default chrome — applied here AND in
-  // the test-side goldenTheme so goldens/captures see the same suppression.
-  return MatSuppress.apply(
-      td.copyWith(textTheme: Ts.withCssLeading(td.textTheme)), t);
-}
-
 class RedimosManagerApp extends StatelessWidget {
   const RedimosManagerApp({super.key});
 
@@ -105,9 +77,10 @@ class RedimosManagerApp extends StatelessWidget {
       builder: (_, __) => MaterialApp(
         title: 'Redimos Manager',
         debugShowCheckedModeBanner: false,
-        theme: _appTheme(Brightness.light),
-        darkTheme: _appTheme(Brightness.dark),
+        theme: appTheme(Brightness.light),
+        darkTheme: appTheme(Brightness.dark),
         themeMode: appThemeMode.value,
+        scrollBehavior: appScrollBehavior,
         home: const HomePage(),
       ),
     );
@@ -120,11 +93,13 @@ class HomePage extends StatefulWidget {
   State<HomePage> createState() => _HomePageState();
 }
 
-class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin {
+class _HomePageState extends State<HomePage>
+    with SingleTickerProviderStateMixin {
   NativeCore? _core;
   String? _loadError;
 
-  List<RedimosConfig> _configs = []; // the Instances section (each config = one instance)
+  List<RedimosConfig> _configs =
+      []; // the Instances section (each config = one instance)
   // v1.2: endpoints grouped by backend (from the core's split view).
   List<DdbEndpoint> _endpoints = [];
   Map<String, InstanceStatus> _status = {};
@@ -157,7 +132,8 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   static const _histCap = 90;
   final Map<String, List<double>> _cpuHist = {};
   final Map<String, List<double>> _memHist = {};
-  final Map<String, List<double>> _opsHist = {}; // redimos ops/s (from /metrics)
+  final Map<String, List<double>> _opsHist =
+      {}; // redimos ops/s (from /metrics)
   // The Local DynamoDB child's own CPU / memory history (singleton).
   final List<double> _ddbCpuHist = [];
   final List<double> _ddbMemHist = [];
@@ -184,7 +160,8 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     try {
       _core = NativeCore();
       _reload();
-      _poll = Timer.periodic(const Duration(milliseconds: 1500), (_) => _refresh());
+      _poll =
+          Timer.periodic(const Duration(milliseconds: 1500), (_) => _refresh());
       // Kill every managed child before the app exits, so redimos / Local
       // DynamoDB processes don't outlive the app and orphan-hold their ports.
       _lifecycle = AppLifecycleListener(
@@ -212,7 +189,9 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       _configs = data.configs;
       _endpoints = data.endpoints;
       _stopAllSnapshot = data.stopAllSnapshot;
-      if (_selectedId == null && _selEndpointId == null && _configs.isNotEmpty) {
+      if (_selectedId == null &&
+          _selEndpointId == null &&
+          _configs.isNotEmpty) {
         _selectedId = _configs.first.id;
       }
     });
@@ -313,9 +292,15 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
         title: Text(tr('home.unsavedChanges')),
         content: Text(tr('home.unsavedChangesBody')),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, 'cancel'), child: Text(tr('home.cancel'))),
-          TextButton(onPressed: () => Navigator.pop(ctx, 'discard'), child: Text(tr('home.dontSave'))),
-          FilledButton(onPressed: () => Navigator.pop(ctx, 'save'), child: Text(tr('home.save'))),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, 'cancel'),
+              child: Text(tr('home.cancel'))),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, 'discard'),
+              child: Text(tr('home.dontSave'))),
+          FilledButton(
+              onPressed: () => Navigator.pop(ctx, 'save'),
+              child: Text(tr('home.save'))),
         ],
       ),
     );
@@ -450,7 +435,9 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
           ],
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, 'cancel'), child: Text(tr('home.cancel'))),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, 'cancel'),
+              child: Text(tr('home.cancel'))),
           TextButton(
               onPressed: () => Navigator.pop(ctx, 'rename'),
               child: Text(tr('home.changeTableName'))),
@@ -472,13 +459,11 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       st.applyTableName(_suggestTableName(c));
       _toast(tr('home.tableRenamedHint'));
     } else if (choice == 'recommend') {
-      st.applyRecommended(
-          ins.tableVersion.isEmpty ? null : ins.tableVersion,
+      st.applyRecommended(ins.tableVersion.isEmpty ? null : ins.tableVersion,
           ins.tableMultiDbKnown ? ins.tableMultiDb : null);
       _toast(tr('home.configUpdatedHint'));
     }
   }
-
 
   @override
   Widget build(BuildContext context) {
@@ -551,7 +536,8 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       // Browse → New Key
       final c = _selected;
       if (c != null) {
-        return chromeCta(context, Icons.add, tr('br.newKey'), () => _focusBrowserNewKey(c));
+        return chromeCta(
+            context, Icons.add, tr('br.newKey'), () => _focusBrowserNewKey(c));
       }
     }
     if (!isEp && idx == 4) {
@@ -594,12 +580,26 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   // v2.3 mockups label the instance tab 'Browse' but the endpoint tab
   // 'Browser'; the two screens must not share one i18n value. Reuse the
   // existing 'ep.browse' ('Browse') key for the instance side — no new keys.
-  static const _instanceTabKeys = ['ep.browse', 'tab.console', 'tab.monitor', 'tab.logs', 'tab.playground', 'tab.configure'];
-  List<String> _instanceTabLabels() => [for (final k in _instanceTabKeys) tr(k)];
+  static const _instanceTabKeys = [
+    'ep.browse',
+    'tab.console',
+    'tab.monitor',
+    'tab.logs',
+    'tab.playground',
+    'tab.configure'
+  ];
+  List<String> _instanceTabLabels() =>
+      [for (final k in _instanceTabKeys) tr(k)];
 
   List<String> _epTabLabels() {
-    final showDdb = _selEndpoint != null && _ddbForEndpoint(_selEndpoint!) != null;
-    final labels = [tr('tab.overview'), tr('tab.browser'), tr('tab.partiql'), tr('tab.playground')];
+    final showDdb =
+        _selEndpoint != null && _ddbForEndpoint(_selEndpoint!) != null;
+    final labels = [
+      tr('tab.overview'),
+      tr('tab.browser'),
+      tr('tab.partiql'),
+      tr('tab.playground')
+    ];
     if (showDdb) labels.addAll([tr('tab.monitor'), tr('tab.logs')]);
     return labels;
   }
@@ -611,33 +611,36 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     return null;
   }
 
-  Widget _errorScaffold() => Scaffold(
-        body: Center(
-          child: Padding(
-            padding: const EdgeInsets.all(32),
-            child: Column(mainAxisSize: MainAxisSize.min, children: [
-              const Icon(Icons.error_outline, size: 48, color: Colors.redAccent),
-              const SizedBox(height: 16),
-              Text(tr('home.coreLoadFailed')),
-              const SizedBox(height: 8),
-              SelectableText('$_loadError',
-                  style: const TextStyle(color: Colors.orangeAccent)),
-              const SizedBox(height: 16),
-              Text(
-                tr('home.coreBuildHint'),
-                textAlign: TextAlign.center,
-              ),
-            ]),
-          ),
+  Widget _errorScaffold() {
+    final t = AppTokens.of(context);
+    return Scaffold(
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Icon(Icons.error_outline, size: 48, color: t.danger),
+            const SizedBox(height: 16),
+            Text(tr('home.coreLoadFailed')),
+            const SizedBox(height: 8),
+            SelectableText('$_loadError', style: TextStyle(color: t.warning)),
+            const SizedBox(height: 16),
+            Text(
+              tr('home.coreBuildHint'),
+              textAlign: TextAlign.center,
+            ),
+          ]),
         ),
-      );
+      ),
+    );
+  }
 
   void _stopAll() {
     final snap = _core?.stopAll() ?? [];
     setState(() => _stopAllSnapshot = snap);
     _refresh();
     if (snap.isNotEmpty) {
-      _toast('${tr('home.stopped')} ${snap.length} ${tr('home.configsSuffix')} — ${tr('home.tapToRestore')}');
+      _toast(
+          '${tr('home.stopped')} ${snap.length} ${tr('home.configsSuffix')} — ${tr('home.tapToRestore')}');
     }
   }
 
@@ -645,7 +648,8 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     final started = _core?.restoreAll() ?? [];
     setState(() => _stopAllSnapshot = []);
     _refresh();
-    _toast('${tr('home.restored')} ${started.length} ${tr('home.configsSuffix')}');
+    _toast(
+        '${tr('home.restored')} ${started.length} ${tr('home.configsSuffix')}');
   }
 
   void _selectEndpoint(String id) {
@@ -704,22 +708,27 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
           child: Column(mainAxisSize: MainAxisSize.min, children: [
             TextField(
               controller: nameCtl,
-              decoration: const InputDecoration(labelText: 'Name', isDense: true),
+              decoration:
+                  const InputDecoration(labelText: 'Name', isDense: true),
             ),
             const SizedBox(height: 12),
             TextField(
               controller: endpointCtl,
-              decoration: InputDecoration(labelText: tr('ep.ovEndpoint'), isDense: true),
+              decoration: InputDecoration(
+                  labelText: tr('ep.ovEndpoint'), isDense: true),
             ),
             const SizedBox(height: 12),
             TextField(
               controller: regionCtl,
-              decoration: InputDecoration(labelText: tr('ep.ovRegion'), isDense: true),
+              decoration:
+                  InputDecoration(labelText: tr('ep.ovRegion'), isDense: true),
             ),
           ]),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: Text(tr('home.cancel'))),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: Text(tr('home.cancel'))),
           FilledButton(
             onPressed: () => Navigator.pop(
                 ctx,
@@ -760,7 +769,8 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
         }
       }
       _reload();
-      _toast('${tr('home.saved')} "${saved.name}"${synced > 0 ? ' · $synced' : ''}');
+      _toast(
+          '${tr('home.saved')} "${saved.name}"${synced > 0 ? ' · $synced' : ''}');
     } catch (err) {
       _toast('${tr('home.saveFailed')}: $err', error: true);
     }
@@ -783,79 +793,87 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     // v2.3 tab order: Browse / Console / Monitor / Logs / Playground /
     // Configure. The TabController stays (it preserves per-tab state and lets
     // flows jump between tabs); only its on-screen chrome moved to the MidBar.
+    final screens = <Widget>[
+      // browser — Redis key browser over the proxy (ARDM style)
+      BrowserPageView(
+        key: _browserKey,
+        config: c,
+        running: st?.isRunning ?? false,
+        core: _core!,
+      ),
+      // console — interactive redis-cli against the running proxy
+      CmdConsole(
+        key: ValueKey('cmd-${c.id}'),
+        host: '127.0.0.1',
+        port: c.port,
+        auth: c.requirepass.isEmpty ? null : c.requirepass,
+        running: st?.isRunning ?? false,
+        // v2.3 mockup .inst-crumb shows the instance name, not host:port.
+        instanceName: c.name,
+        // The console's RESP socket stays up when the DynamoDB backend
+        // dies, so no "Reconnecting" state ever appears — commands just
+        // start failing. /readyz is what reports backend usability.
+        backendDegraded: st != null && st.isRunning && st.healthy && !st.ready,
+        // The cause behind that dot, when redimos reports one. Passed
+        // whenever present rather than gated on backendDegraded: the
+        // console also raises the dot optimistically from an error
+        // reply, ahead of the health signal, and that path deserves the
+        // cause too once a sample carries it.
+        backendError: st?.backendError,
+        // Surface the crash-loop cause (e.g. a failing startup backend
+        // check) so a proxy that can't reach its table isn't a silent
+        // spinner. Only while it's actually down for a known reason.
+        statusReason: (st != null &&
+                !st.isRunning &&
+                st.exitMsg.isNotEmpty &&
+                (st.status == 'restarting' ||
+                    st.status == 'failed' ||
+                    st.status == 'error'))
+            ? st.exitMsg
+            : null,
+      ),
+      // monitor — the redimos proxy's own telemetry only; the Local
+      // DynamoDB engine's dashboard lives on the local endpoint page
+      MonitorView(
+        status: st,
+        cpuHist: _cpuHist[c.id] ?? const [],
+        memHist: _memHist[c.id] ?? const [],
+        opsHist: _opsHist[c.id] ?? const [],
+        embedded: true,
+        instanceName: c.name,
+      ),
+      // logs — the proxy's own log tail (v2.3 screen, src/logs_page.dart)
+      LogsPage(
+        core: _core!,
+        configId: logsConfigId,
+      ),
+      // playground — run a JS/Go script against the proxy's Redis
+      PlaygroundView(
+        key: _playgroundKey,
+        core: _core!,
+        config: c,
+        kind: 'redis',
+        running: st?.isRunning ?? false,
+      ),
+      // configure (scrolls its own fields, pins the action bar)
+      ConfigEditor(
+        key: _editorKey,
+        config: c,
+        onSave: _save,
+        onDelete: _delete,
+      ),
+    ];
+    final activeIndex = _tabs.index;
     return TabBarView(
       controller: _tabs,
       physics: const NeverScrollableScrollPhysics(),
       children: [
-        // browser — Redis key browser over the proxy (ARDM style)
-        BrowserPageView(
-          key: _browserKey,
-          config: c,
-          running: st?.isRunning ?? false,
-          core: _core!,
-        ),
-        // console — interactive redis-cli against the running proxy
-        CmdConsole(
-          key: ValueKey('cmd-${c.id}'),
-          host: '127.0.0.1',
-          port: c.port,
-          auth: c.requirepass.isEmpty ? null : c.requirepass,
-          running: st?.isRunning ?? false,
-          // v2.3 mockup .inst-crumb shows the instance name, not host:port.
-          instanceName: c.name,
-          // The console's RESP socket stays up when the DynamoDB backend
-          // dies, so no "Reconnecting" state ever appears — commands just
-          // start failing. /readyz is what reports backend usability.
-          backendDegraded:
-              st != null && st.isRunning && st.healthy && !st.ready,
-          // The cause behind that dot, when redimos reports one. Passed
-          // whenever present rather than gated on backendDegraded: the
-          // console also raises the dot optimistically from an error
-          // reply, ahead of the health signal, and that path deserves the
-          // cause too once a sample carries it.
-          backendError: st?.backendError,
-          // Surface the crash-loop cause (e.g. a failing startup backend
-          // check) so a proxy that can't reach its table isn't a silent
-          // spinner. Only while it's actually down for a known reason.
-          statusReason: (st != null &&
-                  !st.isRunning &&
-                  st.exitMsg.isNotEmpty &&
-                  (st.status == 'restarting' ||
-                      st.status == 'failed' ||
-                      st.status == 'error'))
-              ? st.exitMsg
-              : null,
-        ),
-        // monitor — the redimos proxy's own telemetry only; the Local
-        // DynamoDB engine's dashboard lives on the local endpoint page
-        MonitorView(
-          status: st,
-          cpuHist: _cpuHist[c.id] ?? const [],
-          memHist: _memHist[c.id] ?? const [],
-          opsHist: _opsHist[c.id] ?? const [],
-          embedded: true,
-          instanceName: c.name,
-        ),
-        // logs — the proxy's own log tail (v2.3 screen, src/logs_page.dart)
-        LogsPage(
-          core: _core!,
-          configId: logsConfigId,
-        ),
-        // playground — run a JS/Go script against the proxy's Redis
-        PlaygroundView(
-          key: _playgroundKey,
-          core: _core!,
-          config: c,
-          kind: 'redis',
-          running: st?.isRunning ?? false,
-        ),
-        // configure (scrolls its own fields, pins the action bar)
-        ConfigEditor(
-          key: _editorKey,
-          config: c,
-          onSave: _save,
-          onDelete: _delete,
-        ),
+        for (var screenIndex = 0; screenIndex < screens.length; screenIndex++)
+          ExcludeFocus(
+            key: ValueKey('instance-screen-$screenIndex-focus'),
+            excluding: screenIndex != activeIndex,
+            child: screens[screenIndex],
+          ),
       ],
     );
   }
@@ -865,7 +883,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
 // Monitor (per-child graphical monitoring: CPU / memory / uptime / restarts)
 // ---------------------------------------------------------------------------
 
-class MonitorView extends StatelessWidget {
+class MonitorView extends StatefulWidget {
   // R5.1: KEYSPACE dashboard section — reserved interface, hidden by default.
   // The per-db key counts (db0:keys=…,expires=…) are only available by issuing
   // INFO keyspace over RESP; a polled dashboard feed needs engine support
@@ -892,11 +910,21 @@ class MonitorView extends StatelessWidget {
     this.instanceName = '',
   });
 
+  @override
+  State<MonitorView> createState() => _MonitorViewState();
+}
+
+class _MonitorViewState extends State<MonitorView>
+    with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
+
   // UNREACHABLE: only the embedded==false branch of build() calls this, and the
   // sole MonitorView construction passes embedded: true. Its Latency/Health tiles
   // are stale duplicates — the live grid is _dashboard. Kept (not deleted) so the
   // collapsible non-embedded layout still compiles; edit _dashboard, not this.
-  Widget _tiles(InstanceStatus? st, bool running) {
+  Widget _tiles(BuildContext context, InstanceStatus? st, bool running) {
+    final tokens = AppTokens.of(context);
     return Wrap(
       spacing: 10,
       runSpacing: 10,
@@ -904,27 +932,32 @@ class MonitorView extends StatelessWidget {
         SparkTile(
           label: tr('home.cpu'),
           value: running ? '${st!.cpuPercent.toStringAsFixed(1)} %' : '—',
-          data: cpuHist,
-          color: const Color(0xFF7FB2E6),
+          data: widget.cpuHist,
+          color: tokens.accent,
         ),
         SparkTile(
           label: tr('home.memory'),
           value: running ? '${(st!.memBytes / (1024 * 1024)).round()} MB' : '—',
-          data: memHist,
-          color: const Color(0xFF57CF92),
+          data: widget.memHist,
+          color: tokens.success,
         ),
         SparkTile(
           label: tr('home.opsPerSec'),
-          value: running && st!.metricsOk ? st.opsPerSec.toStringAsFixed(0) : '—',
-          data: opsHist,
-          color: const Color(0xFFD9A85B),
+          value:
+              running && st!.metricsOk ? st.opsPerSec.toStringAsFixed(0) : '—',
+          data: widget.opsHist,
+          color: tokens.warning,
         ),
-        InfoTile(label: tr('home.uptime'), value: running ? fmtUptime(st!.uptimeSec) : '—'),
+        InfoTile(
+            label: tr('home.uptime'),
+            value: running ? fmtUptime(st!.uptimeSec) : '—'),
         InfoTile(label: tr('home.restarts'), value: '${st?.restarts ?? 0}'),
         InfoTile(label: tr('home.port'), value: running ? '${st!.port}' : '—'),
         InfoTile(
             label: tr('home.engine'),
-            value: (st?.runMode ?? 'native') == 'docker' ? 'Docker' : tr('home.native')),
+            value: (st?.runMode ?? 'native') == 'docker'
+                ? 'Docker'
+                : tr('home.native')),
         InfoTile(
             label: tr('home.autoRestartLabel'),
             value: (st?.autoRestart ?? false) ? tr('home.on') : tr('home.off')),
@@ -953,8 +986,9 @@ class MonitorView extends StatelessWidget {
   // this view (its dashboard now lives on the local endpoint page), the proxy
   // engine label is the fit reference every tile shares so all values render
   // at one identical, width-adaptive size.
-  String get _fitRef =>
-      (status?.runMode ?? 'native') == 'docker' ? 'Docker' : tr('home.native');
+  String get _fitRef => (widget.status?.runMode ?? 'native') == 'docker'
+      ? 'Docker'
+      : tr('home.native');
 
   // Thousands-grouped integer (mockup "1,208") for the OPS/S spark value.
   static String _fmtInt(int v) {
@@ -995,9 +1029,8 @@ class MonitorView extends StatelessWidget {
         : st.healthy
             ? (st.ready ? tr('home.ready') : tr('home.healthy'))
             : tr('home.down');
-    final healthColor = healthValue == '—'
-        ? null
-        : (st!.healthy ? okGreen : t.danger);
+    final healthColor =
+        healthValue == '—' ? null : (st!.healthy ? okGreen : t.danger);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -1007,24 +1040,40 @@ class MonitorView extends StatelessWidget {
         sectionHeader(
             context,
             Icons.dns,
-            instanceName.isEmpty
+            widget.instanceName.isEmpty
                 ? 'REDIMOS'
-                : 'REDIMOS · ${instanceName.toUpperCase()}',
+                : 'REDIMOS · ${widget.instanceName.toUpperCase()}',
             badge: (st?.adopted ?? false) ? tr('home.adopted') : null),
         const SizedBox(height: 13), // head→spark-grid gap (probe-aligned)
         IntrinsicHeight(
           child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
             Expanded(
-                child: spark(tr('home.cpu'), running ? '${st!.cpuPercent.toStringAsFixed(1)}%' : '—',
-                    cpuHist, sparkAccent, footer: '-15 min · now')),
+                child: spark(
+                    tr('home.cpu'),
+                    running ? '${st!.cpuPercent.toStringAsFixed(1)}%' : '—',
+                    widget.cpuHist,
+                    sparkAccent,
+                    footer: '-15 min · now')),
             const SizedBox(width: 12),
             Expanded(
-                child: spark(tr('home.memory'), running ? '${(st!.memBytes / (1024 * 1024)).round()} MB' : '—',
-                    memHist, sparkSuccess, footer: 'maxmemory 2 GB · 20.6% used')),
+                child: spark(
+                    tr('home.memory'),
+                    running
+                        ? '${(st!.memBytes / (1024 * 1024)).round()} MB'
+                        : '—',
+                    widget.memHist,
+                    sparkSuccess,
+                    footer: 'maxmemory 2 GB · 20.6% used')),
             const SizedBox(width: 12),
             Expanded(
-                child: spark(tr('home.opsPerSec'), running && st!.metricsOk ? _fmtInt(st.opsPerSec.round()) : '—',
-                    opsHist, sparkWarning, footer: 'reads 74% · writes 26%')),
+                child: spark(
+                    tr('home.opsPerSec'),
+                    running && st!.metricsOk
+                        ? _fmtInt(st.opsPerSec.round())
+                        : '—',
+                    widget.opsHist,
+                    sparkWarning,
+                    footer: 'reads 74% · writes 26%')),
           ]),
         ),
         const SizedBox(height: 16), // .monitor-wrap gap:16
@@ -1034,8 +1083,14 @@ class MonitorView extends StatelessWidget {
         // metrics (no live "Clients" count), so the grid wraps 4 + 3. Every
         // tile shares one fit reference so all values render at one size.
         tileGrid([
-          InfoTile(label: tr('home.uptime'), fitReference: _fitRef, value: running ? fmtUptime(st!.uptimeSec) : '—'),
-          InfoTile(label: tr('home.restarts'), fitReference: _fitRef, value: '${st?.restarts ?? 0}'),
+          InfoTile(
+              label: tr('home.uptime'),
+              fitReference: _fitRef,
+              value: running ? fmtUptime(st!.uptimeSec) : '—'),
+          InfoTile(
+              label: tr('home.restarts'),
+              fitReference: _fitRef,
+              value: '${st?.restarts ?? 0}'),
           InfoTile(
               label: tr('home.latency'),
               fitReference: _fitRef,
@@ -1043,17 +1098,28 @@ class MonitorView extends StatelessWidget {
               value: running && st!.metricsOk
                   ? '${(st.avgLatencyMs * 10).round() / 10} ms'
                   : '—'),
-          InfoTile(label: tr('home.port'), fitReference: _fitRef, value: running ? '${st!.port}' : '—'),
-          InfoTile(label: tr('home.status'), fitReference: _fitRef, valueColor: statusColor,
+          InfoTile(
+              label: tr('home.port'),
+              fitReference: _fitRef,
+              value: running ? '${st!.port}' : '—'),
+          InfoTile(
+              label: tr('home.status'),
+              fitReference: _fitRef,
+              valueColor: statusColor,
               value: running ? tr('home.running') : (st?.status ?? 'stopped')),
-          InfoTile(label: tr('home.health'), fitReference: _fitRef, valueColor: healthColor, value: healthValue),
-          InfoTile(label: tr('home.engine'), fitReference: _fitRef, value: _fitRef),
+          InfoTile(
+              label: tr('home.health'),
+              fitReference: _fitRef,
+              valueColor: healthColor,
+              value: healthValue),
+          InfoTile(
+              label: tr('home.engine'), fitReference: _fitRef, value: _fitRef),
         ]),
         // R5.1 KEYSPACE section: the per-db key counts live behind the Go
         // engine's INFO keyspace reply (already reachable via Console), but a
         // polled dashboard feed needs engine support. Interface is reserved
         // behind this flag; flip it once a feed exists.
-        if (_showKeyspaceSection) ...[
+        if (MonitorView._showKeyspaceSection) ...[
           const SizedBox(height: 20),
           sectionHeader(context, Icons.key_outlined, 'KEYSPACE'),
           const SizedBox(height: 12),
@@ -1065,51 +1131,90 @@ class MonitorView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final st = status;
+    super.build(context); // AutomaticKeepAliveClientMixin
+    final st = widget.status;
     final running = st?.isRunning ?? false;
-    if (embedded) {
+    if (widget.embedded) {
+      if (st == null) {
+        return CodexStateShell(
+          key: const ValueKey('monitor-empty-state'),
+          state: CodexContentState.empty,
+          message: tr('fmt.noData'),
+          icon: const Icon(Icons.insights_outlined, size: 22),
+          content: const SizedBox.shrink(),
+          bodyPadding: const EdgeInsets.symmetric(horizontal: 32, vertical: 24),
+        );
+      }
       return SingleChildScrollView(
+        key: ValueKey('monitor-scroll-${st.id}'),
         // Mockup .monitor-wrap: padding 18px 22px (pixel-fidelity-v23 CP 9.x).
         padding: const EdgeInsets.fromLTRB(22, 18, 22, 18),
         child: _dashboard(context, st, running),
       );
     }
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        InkWell(
-          onTap: onToggle,
-          child: Container(
-            color: Colors.black.withValues(alpha: 0.25),
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            child: Row(children: [
-              Icon(expanded ? Icons.keyboard_arrow_down : Icons.keyboard_arrow_up, size: 18),
-              const SizedBox(width: 6),
-              const Icon(Icons.insights, size: 16),
-              const SizedBox(width: 8),
-              Text(tr('home.monitor'), style: Theme.of(context).textTheme.labelLarge),
-              const Spacer(),
-              if (st != null)
-                Text(
-                  running
-                      ? '${st.cpuPercent.toStringAsFixed(1)}% · ${(st.memBytes / (1024 * 1024)).round()}MB'
-                          '${st.metricsOk ? " · ${st.opsPerSec.toStringAsFixed(0)} ops/s" : ""}'
-                          '${st.restarts > 0 ? " · ↻${st.restarts}" : ""}'
-                      : st.status,
-                  style: const TextStyle(fontSize: 11, color: Colors.grey),
-                ),
-            ]),
+
+    final tokens = AppTokens.of(context);
+    return CodexSurface(
+      padding: EdgeInsets.zero,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Material(
+            key: const ValueKey('monitor-toggle-anchor'),
+            color: tokens.panel2,
+            child: InkWell(
+              onTap: widget.onToggle,
+              child: Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                child: Row(children: [
+                  Icon(
+                    widget.expanded
+                        ? Icons.keyboard_arrow_down
+                        : Icons.keyboard_arrow_up,
+                    size: 18,
+                    color: tokens.text2,
+                  ),
+                  const SizedBox(width: 6),
+                  Icon(Icons.insights, size: 16, color: tokens.accent),
+                  const SizedBox(width: 8),
+                  Text(
+                    tr('home.monitor'),
+                    style: Ts.style(
+                      size: Ts.md,
+                      weight: FontWeight.w600,
+                      color: tokens.text,
+                    ),
+                  ),
+                  const Spacer(),
+                  if (st != null)
+                    Text(
+                      running
+                          ? '${st.cpuPercent.toStringAsFixed(1)}% · ${(st.memBytes / (1024 * 1024)).round()}MB'
+                              '${st.metricsOk ? " · ${st.opsPerSec.toStringAsFixed(0)} ops/s" : ""}'
+                              '${st.restarts > 0 ? " · ↻${st.restarts}" : ""}'
+                          : st.status,
+                      style: Ts.style(
+                        size: Ts.xs,
+                        color: tokens.text3,
+                        monoFont: true,
+                        tabularNums: true,
+                      ),
+                    ),
+                ]),
+              ),
+            ),
           ),
-        ),
-        if (expanded)
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.fromLTRB(4, 10, 4, 4),
-            child: _tiles(st, running),
-          ),
-      ],
+          if (widget.expanded) ...[
+            const CodexDivider(),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(10, 12, 10, 10),
+              child: _tiles(context, st, running),
+            ),
+          ],
+        ],
+      ),
     );
   }
 }
-

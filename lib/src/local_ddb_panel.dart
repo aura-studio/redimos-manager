@@ -8,6 +8,10 @@ import 'package:flutter/services.dart';
 import 'i18n.dart';
 import 'models.dart';
 import 'native.dart';
+import 'ui_fields.dart';
+import 'ui_primitives.dart';
+import 'ui_status.dart';
+import 'ui_surfaces.dart';
 import 'ui_tokens.dart';
 
 // ---------------------------------------------------------------------------
@@ -92,10 +96,13 @@ class _LocalDdbPanelState extends State<LocalDdbPanel> {
       }
       widget.onMutated();
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text('$e'),
-        backgroundColor: Colors.red.shade800,
-      ));
+      final tokens = AppTokens.of(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('$e'),
+          backgroundColor: tokens.danger,
+        ),
+      );
     }
   }
 
@@ -103,32 +110,50 @@ class _LocalDdbPanelState extends State<LocalDdbPanel> {
     final lines = widget.core.ddbLogs();
     showDialog<void>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(tr('home.localDdbLogs')),
-        content: SizedBox(
-          width: 720,
-          height: 420,
-          child: SingleChildScrollView(
-            child: SelectableText(
-              lines.isEmpty ? tr('home.noOutput') : lines.join('\n'),
-              style: const TextStyle(fontSize: 12, height: 1.4),
+      builder: (ctx) {
+        final tokens = AppTokens.of(ctx);
+        return AlertDialog(
+          key: const ValueKey('local-ddb-logs-dialog'),
+          title: Text(tr('home.localDdbLogs')),
+          content: SizedBox(
+            width: 720,
+            height: 420,
+            child: CodexSurface(
+              variant: CodexSurfaceVariant.sunken,
+              padding: const EdgeInsets.all(12),
+              child: SingleChildScrollView(
+                key: const ValueKey('local-ddb-logs-scroll'),
+                child: SelectableText(
+                  lines.isEmpty ? tr('home.noOutput') : lines.join('\n'),
+                  key: const ValueKey('local-ddb-logs-content'),
+                  style: Ts.style(
+                    size: Ts.sm,
+                    height: 1.4,
+                    color: tokens.text,
+                    monoFont: true,
+                  ),
+                ),
+              ),
             ),
           ),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: Text(tr('home.close'))),
-        ],
-      ),
+          actions: [
+            CodexButton(
+              label: Text(tr('home.close')),
+              onPressed: () => Navigator.pop(ctx),
+            ),
+          ],
+        );
+      },
     );
   }
 
-  (Color, String) _pill(BuildContext context, String status) => switch (status) {
-        'running' => (goGreen(context), tr('home.running')),
-        'preparing' => (Colors.amberAccent, tr('home.preparing')),
-        'restarting' => (Colors.amberAccent, tr('home.restarting')),
-        'error' => (Colors.redAccent, tr('home.error')),
-        'failed' => (Colors.redAccent, tr('home.failed')),
-        _ => (Colors.grey, tr('home.stopped')),
+  (CodexStatus, String) _status(String status) => switch (status) {
+        'running' => (CodexStatus.running, tr('home.running')),
+        'preparing' => (CodexStatus.warning, tr('home.preparing')),
+        'restarting' => (CodexStatus.warning, tr('home.restarting')),
+        'error' => (CodexStatus.error, tr('home.error')),
+        'failed' => (CodexStatus.danger, tr('home.failed')),
+        _ => (CodexStatus.stopped, tr('home.stopped')),
       };
 
   @override
@@ -138,7 +163,8 @@ class _LocalDdbPanelState extends State<LocalDdbPanel> {
     final cfg = _cfg;
     final status = info?.status ?? 'stopped';
     final active = info?.isActive ?? false;
-    final (dotColor, pillText) = _pill(context, status);
+    final (semanticStatus, statusText) = _status(status);
+    final tokens = AppTokens.of(context);
     final dockerOk = info?.dockerOk ?? false;
     final javaOk = info?.javaOk ?? false;
 
@@ -146,74 +172,121 @@ class _LocalDdbPanelState extends State<LocalDdbPanel> {
       DropdownMenuItem(
         value: 'java',
         enabled: javaOk,
-        child: Text('Java · local${javaOk ? "" : "  ${tr('home.noJre')}"}',
-            style: TextStyle(color: javaOk ? null : Colors.grey)),
+        child: Text(
+          'Java · local${javaOk ? "" : "  ${tr('home.noJre')}"}',
+          style: Ts.style(
+            size: Ts.sm,
+            color: javaOk ? tokens.text : tokens.text3,
+          ),
+        ),
       ),
       DropdownMenuItem(
         value: 'docker',
         enabled: dockerOk,
-        child: Text('Docker · dynamodb-local${dockerOk ? "" : "  ${tr('home.noDocker')}"}',
-            style: TextStyle(color: dockerOk ? null : Colors.grey)),
+        child: Text(
+          'Docker · dynamodb-local${dockerOk ? "" : "  ${tr('home.noDocker')}"}',
+          style: Ts.style(
+            size: Ts.sm,
+            color: dockerOk ? tokens.text : tokens.text3,
+          ),
+        ),
       ),
       DropdownMenuItem(
         value: 'localstack',
         enabled: dockerOk,
-        child: Text('Docker · LocalStack${dockerOk ? "" : "  ${tr('home.noDocker')}"}',
-            style: TextStyle(color: dockerOk ? null : Colors.grey)),
+        child: Text(
+          'Docker · LocalStack${dockerOk ? "" : "  ${tr('home.noDocker')}"}',
+          style: Ts.style(
+            size: Ts.sm,
+            color: dockerOk ? tokens.text : tokens.text3,
+          ),
+        ),
       ),
     ];
 
     return Padding(
+      key: const ValueKey('local-ddb-panel'),
       padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         mainAxisSize: MainAxisSize.min,
         children: [
           Builder(builder: (context) {
-            // Status figures; "Running" is implied by the green dot so it's dropped.
+            // Status figures; "Running" is implied by the status dot.
             final statsText = active && status == 'running'
                 ? ':${cfg.port}'
                     ' · ${info!.cpuPercent.toStringAsFixed(1)}%'
                     ' · ${(info.memBytes / (1024 * 1024)).round()}MB'
                     '${info.restarts > 0 ? " · ↻${info.restarts}" : ""}'
-                : pillText;
-            final stats = Text(statsText,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontSize: 11, color: Colors.grey));
+                : statusText;
+            final stats = Text(
+              statsText,
+              key: const ValueKey('local-ddb-stats'),
+              overflow: TextOverflow.ellipsis,
+              style: Ts.style(
+                size: Ts.xs,
+                color: tokens.text3,
+                monoFont: active && status == 'running',
+                tabularNums: active && status == 'running',
+              ),
+            );
             // Bottom-docked panel grows upward: up-chevron to expand, down to collapse.
             final head = <Widget>[
-              Icon(_expanded ? Icons.expand_more : Icons.expand_less, size: 18, color: Colors.grey),
-              const SizedBox(width: 4),
-              Container(
-                width: 10,
-                height: 10,
-                decoration: BoxDecoration(color: dotColor, shape: BoxShape.circle),
+              Icon(
+                _expanded ? Icons.expand_more : Icons.expand_less,
+                size: 18,
+                color: tokens.text3,
+              ),
+              const SizedBox(width: 5),
+              CodexStatusDot(
+                key: const ValueKey('local-ddb-status'),
+                status: semanticStatus,
+                semanticLabel: statusText,
+                glow: status == 'running',
               ),
               const SizedBox(width: 8),
-              Text(tr('home.localDynamoDb'),
-                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
+              Flexible(
+                child: Tooltip(
+                  message: tr('home.localDynamoDb'),
+                  child: Text(
+                    tr('home.localDynamoDb'),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Ts.style(
+                      size: Ts.md,
+                      weight: FontWeight.w600,
+                      color: tokens.text,
+                    ),
+                  ),
+                ),
+              ),
             ];
-            // Tight icon button: zero padding + small hit box, so the one-line
-            // collapsed layout has as much room as possible for the figures.
             final button = _expanded
-                ? IconButton(
+                ? CodexIconButton(
+                    key: const ValueKey('local-ddb-logs-action'),
                     tooltip: tr('home.logsTooltip'),
-                    visualDensity: VisualDensity.compact,
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
+                    semanticLabel: tr('home.logsTooltip'),
                     icon: const Icon(Icons.terminal, size: 16),
                     onPressed: _showLogs,
                   )
-                : IconButton(
+                : CodexIconButton(
+                    key: const ValueKey('local-ddb-collapsed-action'),
                     tooltip: active ? tr('config.stop') : tr('config.start'),
-                    visualDensity: VisualDensity.compact,
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
-                    icon: Icon(active ? Icons.stop : Icons.play_arrow,
-                        size: 18, color: active ? Colors.redAccent : goGreen(context)),
+                    semanticLabel:
+                        active ? tr('config.stop') : tr('config.start'),
+                    variant: active
+                        ? CodexButtonVariant.danger
+                        : CodexButtonVariant.ghost,
+                    icon: Icon(
+                      active ? Icons.stop : Icons.play_arrow,
+                      size: 18,
+                      color: active ? tokens.danger : tokens.success,
+                    ),
                     onPressed: () => _startStop(active),
                   );
             return InkWell(
+              key: const ValueKey('local-ddb-toggle'),
+              borderRadius: BorderRadius.circular(Dim.radiusS),
               onTap: () => setState(() => _expanded = !_expanded),
               // Expanded: title row + stats on its own line below (room to spare).
               // Collapsed: everything on one compact line, stats inline before the button.
@@ -222,19 +295,19 @@ class _LocalDdbPanelState extends State<LocalDdbPanel> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Row(children: [...head, const Spacer(), button]),
-                        Padding(padding: const EdgeInsets.only(left: 30, bottom: 2), child: stats),
+                        Padding(
+                          padding: const EdgeInsets.only(left: 30, bottom: 2),
+                          child: stats,
+                        ),
                       ],
                     )
                   // Fixed 30px row → panel total 8+30+10 = 48px, matching the Cmd
                   // input row so the two top dividers line up across the split.
                   : SizedBox(
-                      height: 30,
+                      height: Dim.ctlH,
                       child: Row(children: [
                         ...head,
                         const SizedBox(width: 8),
-                        // Expanded (not Spacer + Flexible): the stats take all the
-                        // room left of the button instead of being squeezed to the
-                        // right edge, so the figures show in full.
                         Expanded(child: stats),
                         const SizedBox(width: 2),
                         button,
@@ -242,126 +315,148 @@ class _LocalDdbPanelState extends State<LocalDdbPanel> {
                     ),
             );
           }),
-          // Slide the body open/closed instead of snapping.
-          AnimatedSize(
-            duration: const Duration(milliseconds: 180),
-            curve: Curves.easeInOut,
-            alignment: Alignment.topCenter,
+          // Expansion intentionally snaps to its final bounds. Interpolating this
+          // height pushes the entity list on every animation frame.
+          SizedBox(
+            key: const ValueKey('local-ddb-body'),
             child: !_expanded
                 ? const SizedBox(width: double.infinity)
                 : Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     mainAxisSize: MainAxisSize.min,
                     children: [
-          if (!active) ...[
-            const SizedBox(height: 6),
-            DropdownButtonFormField<String>(
-              initialValue: cfg.engine,
-              isDense: true,
-              decoration: InputDecoration(
-                labelText: tr('home.engine'),
-                isDense: true,
-                border: const OutlineInputBorder(),
-                contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
-              ),
-              items: engineItems,
-              onChanged: (v) {
-                if (v != null) _commit(engine: v);
-              },
-            ),
-            const SizedBox(height: 10),
-            Row(children: [
-              if (cfg.engine != 'localstack')
-                Expanded(
-                  child: DropdownButtonFormField<String>(
-                    initialValue: cfg.storage == 'persist' ? 'persist' : 'memory',
-                    isDense: true,
-                    decoration: InputDecoration(
-                      labelText: tr('home.storage'),
-                      isDense: true,
-                      border: const OutlineInputBorder(),
-                      contentPadding:
-                          const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
-                    ),
-                    items: [
-                      DropdownMenuItem(value: 'memory', child: Text(tr('home.inMemory'))),
-                      DropdownMenuItem(value: 'persist', child: Text(tr('home.persisted'))),
-                    ],
-                    onChanged: (v) {
-                      if (v != null) _commit(storage: v);
-                    },
-                  ),
-                )
-              else
-                Expanded(
-                  child: Text(tr('home.storageManagedByLocalstack'),
-                      style: const TextStyle(fontSize: 11, color: Colors.grey)),
-                ),
-              const SizedBox(width: 8),
-              SizedBox(
-                width: 86,
-                child: TextField(
-                  controller: _port,
-                  keyboardType: TextInputType.number,
-                  decoration: InputDecoration(
-                    labelText: tr('home.port'),
-                    isDense: true,
-                    border: const OutlineInputBorder(),
-                    contentPadding:
-                        const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
-                  ),
-                  onSubmitted: (_) => _commit(),
-                ),
-              ),
-            ]),
-            if (cfg.engine != 'localstack' && cfg.storage == 'persist') ...[
-              const SizedBox(height: 10),
-              TextField(
-                controller: _store,
-                decoration: InputDecoration(
-                  labelText: cfg.engine == 'java' ? tr('home.dataDir') : tr('home.volume'),
-                  isDense: true,
-                  border: const OutlineInputBorder(),
-                  contentPadding:
-                      const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
-                ),
-                onSubmitted: (_) => _commit(),
-              ),
-            ],
-          ],
-          const SizedBox(height: 8),
-          Row(children: [
-            Expanded(
-              child: active
-                  ? OutlinedButton.icon(
-                      icon: const Icon(Icons.stop, size: 16),
-                      label: Text(tr('home.stop')),
-                      style: OutlinedButton.styleFrom(
-                          foregroundColor: Colors.redAccent,
-                          visualDensity: VisualDensity.compact),
-                      onPressed: () => _startStop(true),
-                    )
-                  : FilledButton.icon(
-                      icon: const Icon(Icons.play_arrow, size: 16),
-                      label: Text(tr('home.start')),
-                      style: FilledButton.styleFrom(
-                          visualDensity: VisualDensity.compact),
-                      onPressed: () => _startStop(false),
-                    ),
-            ),
-            if (status == 'running') ...[
-              const SizedBox(width: 8),
-              IconButton(
-                tooltip: tr('home.copyEndpoint'),
-                visualDensity: VisualDensity.compact,
-                icon: const Icon(Icons.copy, size: 16),
-                onPressed: () {
-                  Clipboard.setData(
-                      ClipboardData(text: 'http://localhost:${cfg.port}'));
-                },
-              ),
-            ],
-          ]),
+                      if (!active) ...[
+                        const SizedBox(height: 8),
+                        CodexSelectField<String>(
+                          key: const ValueKey('local-ddb-engine'),
+                          value: cfg.engine,
+                          decoration: InputDecoration(
+                            labelText: tr('home.engine'),
+                          ),
+                          items: engineItems,
+                          onChanged: (value) {
+                            if (value != null) {
+                              _commit(engine: value);
+                            }
+                          },
+                        ),
+                        const SizedBox(height: 8),
+                        Row(children: [
+                          if (cfg.engine != 'localstack')
+                            Expanded(
+                              child: CodexSelectField<String>(
+                                key: const ValueKey('local-ddb-storage'),
+                                value: cfg.storage == 'persist'
+                                    ? 'persist'
+                                    : 'memory',
+                                decoration: InputDecoration(
+                                  labelText: tr('home.storage'),
+                                ),
+                                items: [
+                                  DropdownMenuItem(
+                                    value: 'memory',
+                                    child: Text(tr('home.inMemory')),
+                                  ),
+                                  DropdownMenuItem(
+                                    value: 'persist',
+                                    child: Text(tr('home.persisted')),
+                                  ),
+                                ],
+                                onChanged: (value) {
+                                  if (value != null) {
+                                    _commit(storage: value);
+                                  }
+                                },
+                              ),
+                            )
+                          else
+                            Expanded(
+                              child: Text(
+                                tr('home.storageManagedByLocalstack'),
+                                style: Ts.style(
+                                  size: Ts.xs,
+                                  color: tokens.text3,
+                                ),
+                              ),
+                            ),
+                          const SizedBox(width: 8),
+                          SizedBox(
+                            width: 86,
+                            child: CodexTextField(
+                              key: const ValueKey('local-ddb-port'),
+                              controller: _port,
+                              keyboardType: TextInputType.number,
+                              decoration: InputDecoration(
+                                labelText: tr('home.port'),
+                              ),
+                              style: Ts.style(
+                                size: Ts.sm,
+                                color: tokens.text,
+                                monoFont: true,
+                                tabularNums: true,
+                              ),
+                              onSubmitted: (_) => _commit(),
+                            ),
+                          ),
+                        ]),
+                        if (cfg.engine != 'localstack' &&
+                            cfg.storage == 'persist') ...[
+                          const SizedBox(height: 8),
+                          CodexTextField(
+                            key: const ValueKey('local-ddb-store'),
+                            controller: _store,
+                            decoration: InputDecoration(
+                              labelText: cfg.engine == 'java'
+                                  ? tr('home.dataDir')
+                                  : tr('home.volume'),
+                            ),
+                            style: Ts.style(
+                              size: Ts.sm,
+                              color: tokens.text,
+                              monoFont: true,
+                            ),
+                            onSubmitted: (_) => _commit(),
+                          ),
+                        ],
+                      ],
+                      const SizedBox(height: 8),
+                      Row(children: [
+                        Expanded(
+                          child: CodexButton(
+                            key: const ValueKey('local-ddb-primary-action'),
+                            semanticLabel:
+                                active ? tr('home.stop') : tr('home.start'),
+                            variant: active
+                                ? CodexButtonVariant.danger
+                                : CodexButtonVariant.primary,
+                            icon: Icon(
+                              active ? Icons.stop : Icons.play_arrow,
+                              size: 16,
+                            ),
+                            label: Text(
+                              active ? tr('home.stop') : tr('home.start'),
+                            ),
+                            onPressed: () => _startStop(active),
+                          ),
+                        ),
+                        if (status == 'running') ...[
+                          const SizedBox(width: 8),
+                          CodexIconButton(
+                            key: const ValueKey('local-ddb-copy-endpoint'),
+                            tooltip: tr('home.copyEndpoint'),
+                            semanticLabel: tr('home.copyEndpoint'),
+                            variant: CodexButtonVariant.secondary,
+                            icon: const Icon(Icons.copy, size: 16),
+                            onPressed: () {
+                              Clipboard.setData(
+                                ClipboardData(
+                                  text: 'http://localhost:${cfg.port}',
+                                ),
+                              );
+                            },
+                          ),
+                        ],
+                      ]),
                     ],
                   ),
           ),

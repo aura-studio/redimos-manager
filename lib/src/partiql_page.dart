@@ -18,12 +18,34 @@ import 'code_editor.dart';
 import 'i18n.dart';
 import 'models.dart';
 import 'native.dart';
+import 'ui_table.dart';
 import 'ui_tokens.dart';
 
 // Denser theme for this data surface — smaller controls / tighter tap targets.
 ThemeData _denseTabTheme(BuildContext context) => Theme.of(context).copyWith(
       visualDensity: const VisualDensity(horizontal: -2, vertical: -2),
       materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+    );
+
+Widget _semanticIconButton({
+  required String label,
+  required Widget icon,
+  required VoidCallback? onPressed,
+}) =>
+    Tooltip(
+      message: label,
+      excludeFromSemantics: true,
+      child: Semantics(
+        label: label,
+        button: true,
+        enabled: onPressed != null,
+        onTap: onPressed,
+        excludeSemantics: true,
+        child: IconButton(
+          onPressed: onPressed,
+          icon: icon,
+        ),
+      ),
     );
 
 class PartiqlPageView extends StatefulWidget {
@@ -39,7 +61,8 @@ class _PartiqlPageViewState extends State<PartiqlPageView>
     with AutomaticKeepAliveClientMixin {
   // v2.3: the statement editor takes the shared token-highlighted CodeField
   // (Playground grammar; PartiQL sits close enough to JS for the highlighter).
-  late final CodeHighlightController _stmt = CodeHighlightController(lang: 'js');
+  late final CodeHighlightController _stmt =
+      CodeHighlightController(lang: 'js');
   final _find = TextEditingController();
   bool _running = false;
   bool _jsonView = false;
@@ -58,7 +81,8 @@ class _PartiqlPageViewState extends State<PartiqlPageView>
   @override
   void didUpdateWidget(PartiqlPageView old) {
     super.didUpdateWidget(old);
-    if (old.config.id != widget.config.id || old.config.table != widget.config.table) {
+    if (old.config.id != widget.config.id ||
+        old.config.table != widget.config.table) {
       setState(() {
         _stmt.clear();
         _res = null;
@@ -96,7 +120,10 @@ class _PartiqlPageViewState extends State<PartiqlPageView>
         // into the read-only wall anyway (R7).
         if (!_awsMode) ...[
           (tr('pq.tplInsertItem'), "INSERT INTO $_q VALUE {'pk': ?, 'sk': ?}"),
-          (tr('pq.tplUpdateItem'), "UPDATE $_q SET attr = ? WHERE pk = ? AND sk = ?"),
+          (
+            tr('pq.tplUpdateItem'),
+            "UPDATE $_q SET attr = ? WHERE pk = ? AND sk = ?"
+          ),
           (tr('pq.tplDeleteItem'), 'DELETE FROM $_q WHERE pk = ? AND sk = ?'),
         ],
       ];
@@ -113,7 +140,8 @@ class _PartiqlPageViewState extends State<PartiqlPageView>
     final host = (Uri.tryParse(ep)?.host ?? '').toLowerCase();
     return host == 'amazonaws.com' ||
         host.endsWith('.amazonaws.com') ||
-        host.endsWith('.amazonaws.com.cn'); // explicit AWS host (incl. China partition)
+        host.endsWith(
+            '.amazonaws.com.cn'); // explicit AWS host (incl. China partition)
   }
 
   // ---- execution ----
@@ -139,8 +167,12 @@ class _PartiqlPageViewState extends State<PartiqlPageView>
           content: Text(trp('pq.modifyDataWarning',
               {'table': widget.config.table, 'stmt': stmt})),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(tr('pq.cancel'))),
-            FilledButton(onPressed: () => Navigator.pop(ctx, true), child: Text(tr('pq.run'))),
+            TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: Text(tr('pq.cancel'))),
+            FilledButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: Text(tr('pq.run'))),
           ],
         ),
       );
@@ -191,27 +223,28 @@ class _PartiqlPageViewState extends State<PartiqlPageView>
   Widget build(BuildContext context) {
     super.build(context);
     return Theme(
-      data: _denseTabTheme(context),
-      child: SingleChildScrollView(
-      padding: const EdgeInsets.all(12),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        _headerRow(),
-        const SizedBox(height: 10),
-        _editorCard(),
-        if (_error != null || _res != null) ...[
-          const SizedBox(height: 12),
-          _statusLine(),
-        ],
-        if (_error != null) ...[
-          const SizedBox(height: 8),
-          _errorBanner(),
-        ],
-        if (_error == null && _res != null) ...[
-          const SizedBox(height: 12),
-          _jsonView ? _jsonCard() : _resultsCard(),
-        ],
-      ]),
-    ));
+        data: _denseTabTheme(context),
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(12),
+          child:
+              Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            _headerRow(),
+            const SizedBox(height: 10),
+            _editorCard(),
+            if (_error != null || _res != null) ...[
+              const SizedBox(height: 12),
+              _statusLine(),
+            ],
+            if (_error != null) ...[
+              const SizedBox(height: 8),
+              _errorBanner(),
+            ],
+            if (_error == null && _res != null) ...[
+              const SizedBox(height: 12),
+              _jsonView ? _jsonCard() : _resultsCard(),
+            ],
+          ]),
+        ));
   }
 
   // v2.3: the big in-page title folds into the MidBar's PartiQL tab — what
@@ -223,8 +256,8 @@ class _PartiqlPageViewState extends State<PartiqlPageView>
         Chip(
           visualDensity: VisualDensity.compact,
           avatar: Icon(Icons.lock_outline, size: 15, color: tok.warning),
-          label: Text(tr('ep.awsReadOnly'),
-              style: TextStyle(color: tok.warning)),
+          label:
+              Text(tr('ep.awsReadOnly'), style: TextStyle(color: tok.warning)),
         ),
       ],
       const Spacer(),
@@ -232,7 +265,8 @@ class _PartiqlPageViewState extends State<PartiqlPageView>
         tooltip: tr('pq.statementTemplates'),
         onSelected: (s) => setState(() => _stmt.text = s),
         itemBuilder: (_) => [
-          for (final t in _templates) PopupMenuItem(value: t.$2, child: Text(t.$1)),
+          for (final t in _templates)
+            PopupMenuItem(value: t.$2, child: Text(t.$1)),
         ],
         child: OutlinedButton.icon(
           onPressed: null,
@@ -256,48 +290,47 @@ class _PartiqlPageViewState extends State<PartiqlPageView>
   Widget _editorCard() {
     final t = AppTokens.of(context);
     return _card(
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          // v2.3: the editor takes the token palette (shared with Playground).
-          SizedBox(
-            height: 120,
-            child: CodeField(
-              controller: _stmt,
-              hintText:
-                  'SELECT * FROM "${widget.config.table}" — ${tr('pq.typeStatement')}',
-              onChanged: (_) => setState(() {}), // Run enable/disable
-            ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        // v2.3: the editor takes the token palette (shared with Playground).
+        SizedBox(
+          height: 120,
+          child: CodeField(
+            controller: _stmt,
+            hintText:
+                'SELECT * FROM "${widget.config.table}" — ${tr('pq.typeStatement')}',
+            onChanged: (_) => setState(() {}), // Run enable/disable
           ),
-          const SizedBox(height: 12),
-          Row(children: [
-            _runCta(t),
-            const SizedBox(width: 12),
-            OutlinedButton(
-              onPressed: () => setState(() {
-                _stmt.clear();
-              }),
-              child: Text(tr('pq.clear')),
-            ),
-            const Spacer(),
-            SegmentedButton<bool>(
-              segments: [
-                ButtonSegment(value: false, label: Text(tr('pq.tableView'))),
-                ButtonSegment(value: true, label: Text(tr('pq.jsonView'))),
-              ],
-              selected: {_jsonView},
-              onSelectionChanged: (s) => setState(() => _jsonView = s.first),
-              showSelectedIcon: false,
-            ),
-          ]),
+        ),
+        const SizedBox(height: 12),
+        Row(children: [
+          _runCta(t),
+          const SizedBox(width: 12),
+          OutlinedButton(
+            onPressed: () => setState(() {
+              _stmt.clear();
+            }),
+            child: Text(tr('pq.clear')),
+          ),
+          const Spacer(),
+          SegmentedButton<bool>(
+            segments: [
+              ButtonSegment(value: false, label: Text(tr('pq.tableView'))),
+              ButtonSegment(value: true, label: Text(tr('pq.jsonView'))),
+            ],
+            selected: {_jsonView},
+            onSelectionChanged: (s) => setState(() => _jsonView = s.first),
+            showSelectedIcon: false,
+          ),
         ]),
+      ]),
     );
   }
 
-  // v2.3 primary CTA grammar (dark = white fill + near-black text), same as
-  // the Playground Run button and the MidBar endGroup.
+  // Shared warm-accent CTA grammar, matching the Playground Run button and
+  // the MidBar end group.
   Widget _runCta(AppTokens t) {
-    final dark = Theme.of(context).brightness == Brightness.dark;
-    final bg = dark ? const Color(0xFFF5F7FB) : t.accent;
-    final fg = dark ? const Color(0xFF10142E) : t.onAccent;
+    final bg = t.accent;
+    final fg = t.onAccent;
     return SizedBox(
       height: Dim.ctlH,
       child: FilledButton(
@@ -310,7 +343,9 @@ class _PartiqlPageViewState extends State<PartiqlPageView>
         ),
         child: _running
             ? SizedBox(
-                width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: fg))
+                width: 14,
+                height: 14,
+                child: CircularProgressIndicator(strokeWidth: 2, color: fg))
             : Text(tr('pq.run'),
                 style: Ts.style(size: Ts.md, weight: FontWeight.w600)),
       ),
@@ -330,7 +365,8 @@ class _PartiqlPageViewState extends State<PartiqlPageView>
     final ms = failed ? null : _res?.timeMs;
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Row(children: [
-        Icon(failed ? Icons.cancel : Icons.check_circle, size: 18, color: color),
+        Icon(failed ? Icons.cancel : Icons.check_circle,
+            size: 18, color: color),
         const SizedBox(width: 6),
         Text(failed ? tr('pq.failed') : tr('pq.completed'),
             style: TextStyle(fontWeight: FontWeight.w600, color: color)),
@@ -338,7 +374,8 @@ class _PartiqlPageViewState extends State<PartiqlPageView>
       if (_startedAt != null)
         Padding(
           padding: const EdgeInsets.only(top: 4),
-          child: Text('${tr('pq.startedOn')} ${_fmtTs(_startedAt!)}'
+          child: Text(
+              '${tr('pq.startedOn')} ${_fmtTs(_startedAt!)}'
               '${ms != null ? '   ·   ${tr('pq.elapsedTime')} ${ms}ms' : ''}',
               style: Ts.style(size: Ts.md, color: t.text2, tabularNums: true)),
         ),
@@ -358,7 +395,8 @@ class _PartiqlPageViewState extends State<PartiqlPageView>
         Icon(Icons.error_outline, color: t.danger, size: 20),
         const SizedBox(width: 8),
         Expanded(
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          child:
+              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text(tr('pq.errorOccurred'),
                 style: const TextStyle(fontWeight: FontWeight.w600)),
             const SizedBox(height: 2),
@@ -376,12 +414,14 @@ class _PartiqlPageViewState extends State<PartiqlPageView>
     final f = _find.text.trim().toLowerCase();
     if (f.isNotEmpty) {
       rows = rows
-          .where((r) => r.cells.values.any((c) => c.repr.toLowerCase().contains(f)))
+          .where((r) =>
+              r.cells.values.any((c) => c.repr.toLowerCase().contains(f)))
           .toList();
     }
     if (_sortCol != null) {
       rows = [...rows]..sort((a, b) {
-          final cmp = (a.cells[_sortCol]?.repr ?? '').compareTo(b.cells[_sortCol]?.repr ?? '');
+          final cmp = (a.cells[_sortCol]?.repr ?? '')
+              .compareTo(b.cells[_sortCol]?.repr ?? '');
           return _sortAsc ? cmp : -cmp;
         });
     }
@@ -397,10 +437,11 @@ class _PartiqlPageViewState extends State<PartiqlPageView>
         Row(children: [
           Expanded(
             child: Text('${tr('pq.itemsReturned')} (${r.returned})',
-                style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600)),
+                style: const TextStyle(
+                    fontSize: 13.5, fontWeight: FontWeight.w600)),
           ),
-          IconButton(
-            tooltip: tr('pq.preferences'),
+          _semanticIconButton(
+            label: tr('pq.preferences'),
             onPressed: _openPreferences,
             icon: const Icon(Icons.settings, size: 18),
           ),
@@ -413,10 +454,12 @@ class _PartiqlPageViewState extends State<PartiqlPageView>
             prefixIcon: const Icon(Icons.search, size: 18),
             hintText: tr('pq.findItems'),
             border: const OutlineInputBorder(),
-            contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
             suffixIcon: _find.text.isEmpty
                 ? null
-                : IconButton(
+                : _semanticIconButton(
+                    label: tr('pq.clear'),
                     icon: const Icon(Icons.clear, size: 16),
                     onPressed: () => setState(() => _find.clear()),
                   ),
@@ -425,17 +468,21 @@ class _PartiqlPageViewState extends State<PartiqlPageView>
         ),
         const SizedBox(height: 4),
         Row(children: [
-          IconButton(
+          _semanticIconButton(
+            label: MaterialLocalizations.of(context).previousPageTooltip,
             onPressed: _pageIdx == 0 || _running ? null : _prevPage,
             icon: const Icon(Icons.chevron_left, size: 20),
           ),
           Text('${_pageIdx + 1}'),
-          IconButton(
+          _semanticIconButton(
+            label: MaterialLocalizations.of(context).nextPageTooltip,
             onPressed: r.hasNext && !_running ? _nextPage : null,
             icon: const Icon(Icons.chevron_right, size: 20),
           ),
           if (r.hasNext)
-            TextButton(onPressed: _running ? null : _nextPage, child: Text(tr('pq.nextPage'))),
+            TextButton(
+                onPressed: _running ? null : _nextPage,
+                child: Text(tr('pq.nextPage'))),
         ]),
         const SizedBox(height: 8),
         if (rows.isEmpty)
@@ -443,7 +490,8 @@ class _PartiqlPageViewState extends State<PartiqlPageView>
             padding: const EdgeInsets.symmetric(vertical: 40),
             child: Center(
               child: Column(children: [
-                Icon(Icons.inbox_outlined, size: 36, color: Theme.of(context).hintColor),
+                Icon(Icons.inbox_outlined,
+                    size: 36, color: Theme.of(context).hintColor),
                 const SizedBox(height: 8),
                 Text(tr('pq.noItems')),
                 const SizedBox(height: 4),
@@ -451,13 +499,13 @@ class _PartiqlPageViewState extends State<PartiqlPageView>
                     _find.text.isEmpty
                         ? tr('pq.noItemsFromStatement')
                         : tr('pq.noItemsMatchFilter'),
-                    style: TextStyle(fontSize: 12, color: Theme.of(context).hintColor)),
+                    style: TextStyle(
+                        fontSize: 12, color: Theme.of(context).hintColor)),
               ]),
             ),
           )
         else
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
+          CodexHorizontalScrollView(
             child: DataTable(
               columnSpacing: 16,
               headingRowHeight: 30,
@@ -467,9 +515,14 @@ class _PartiqlPageViewState extends State<PartiqlPageView>
                 for (final c in cols)
                   DataColumn(
                     label: Row(mainAxisSize: MainAxisSize.min, children: [
-                      Text(c, style: const TextStyle(fontWeight: FontWeight.w600)),
+                      Text(c,
+                          style: const TextStyle(fontWeight: FontWeight.w600)),
                       if (_sortCol == c)
-                        Icon(_sortAsc ? Icons.arrow_upward : Icons.arrow_downward, size: 12),
+                        Icon(
+                            _sortAsc
+                                ? Icons.arrow_upward
+                                : Icons.arrow_downward,
+                            size: 12),
                     ]),
                     onSort: (_, __) => setState(() {
                       if (_sortCol == c) {
@@ -488,7 +541,10 @@ class _PartiqlPageViewState extends State<PartiqlPageView>
                     color: WidgetStatePropertyAll(
                         i.isOdd ? AppTokens.of(context).panel2 : null),
                     onSelectChanged: (_) => _showItemJson(rows[i]),
-                    cells: [for (final c in cols) DataCell(_cellWidget(rows[i].cells[c]))],
+                    cells: [
+                      for (final c in cols)
+                        DataCell(_cellWidget(rows[i].cells[c]))
+                    ],
                   ),
               ],
             ),
@@ -523,10 +579,11 @@ class _PartiqlPageViewState extends State<PartiqlPageView>
         Row(children: [
           Expanded(
             child: Text('${tr('pq.itemsReturned')} (${_res!.returned})',
-                style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600)),
+                style: const TextStyle(
+                    fontSize: 13.5, fontWeight: FontWeight.w600)),
           ),
-          IconButton(
-            tooltip: tr('pq.copy'),
+          _semanticIconButton(
+            label: tr('pq.copy'),
             icon: const Icon(Icons.copy, size: 18),
             onPressed: () {
               Clipboard.setData(ClipboardData(text: pretty));
@@ -553,23 +610,33 @@ class _PartiqlPageViewState extends State<PartiqlPageView>
             title: Text(tr('pq.preferences')),
             content: SizedBox(
               width: 320,
-              child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Row(children: [
-                  TextButton(onPressed: () => setD(() => hidden.clear()), child: Text(tr('pq.selectAll'))),
-                  TextButton(onPressed: () => setD(() => hidden.addAll(cols)), child: Text(tr('pq.deselectAll'))),
-                ]),
-                for (final c in cols)
-                  SwitchListTile(
-                    value: !hidden.contains(c),
-                    onChanged: (v) => setD(() => v ? hidden.remove(c) : hidden.add(c)),
-                    title: Text(c, overflow: TextOverflow.ellipsis),
-                    dense: true,
-                    contentPadding: EdgeInsets.zero,
-                  ),
-              ]),
+              child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(children: [
+                      TextButton(
+                          onPressed: () => setD(() => hidden.clear()),
+                          child: Text(tr('pq.selectAll'))),
+                      TextButton(
+                          onPressed: () => setD(() => hidden.addAll(cols)),
+                          child: Text(tr('pq.deselectAll'))),
+                    ]),
+                    for (final c in cols)
+                      SwitchListTile(
+                        value: !hidden.contains(c),
+                        onChanged: (v) =>
+                            setD(() => v ? hidden.remove(c) : hidden.add(c)),
+                        title: Text(c, overflow: TextOverflow.ellipsis),
+                        dense: true,
+                        contentPadding: EdgeInsets.zero,
+                      ),
+                  ]),
             ),
             actions: [
-              TextButton(onPressed: () => Navigator.pop(ctx), child: Text(tr('pq.cancel'))),
+              TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: Text(tr('pq.cancel'))),
               FilledButton(
                 onPressed: () {
                   Navigator.pop(ctx);
@@ -591,7 +658,8 @@ class _PartiqlPageViewState extends State<PartiqlPageView>
   void _showItemJson(TableItem r) {
     String pretty;
     try {
-      pretty = const JsonEncoder.withIndent('  ').convert(jsonDecode(r.ddbJson));
+      pretty =
+          const JsonEncoder.withIndent('  ').convert(jsonDecode(r.ddbJson));
     } catch (_) {
       pretty = r.ddbJson;
     }
@@ -600,8 +668,8 @@ class _PartiqlPageViewState extends State<PartiqlPageView>
       builder: (ctx) => AlertDialog(
         title: Row(children: [
           Expanded(child: Text(tr('pq.itemDdbJson'))),
-          IconButton(
-            tooltip: tr('pq.copy'),
+          _semanticIconButton(
+            label: tr('pq.copy'),
             icon: const Icon(Icons.copy, size: 18),
             onPressed: () {
               Clipboard.setData(ClipboardData(text: pretty));
@@ -614,10 +682,14 @@ class _PartiqlPageViewState extends State<PartiqlPageView>
           width: 560,
           child: SingleChildScrollView(
             child: SelectableText(pretty,
-                style: const TextStyle(fontFamily: 'monospace', fontSize: 12.5)),
+                style:
+                    const TextStyle(fontFamily: 'monospace', fontSize: 12.5)),
           ),
         ),
-        actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: Text(tr('pq.close')))],
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx), child: Text(tr('pq.close')))
+        ],
       ),
     );
   }

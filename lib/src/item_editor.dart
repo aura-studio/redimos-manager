@@ -14,6 +14,10 @@ import 'package:flutter/material.dart';
 
 import 'i18n.dart';
 import 'models.dart';
+import 'ui_fields.dart';
+import 'ui_primitives.dart';
+import 'ui_surfaces.dart';
+import 'ui_tokens.dart';
 
 /// AWS console attribute types offered by "Add new attribute".
 const _attrTypes = [
@@ -188,7 +192,9 @@ class _ItemEditorPageState extends State<ItemEditorPage> {
       case 'BS':
         return inner;
       case 'NS':
-        return (inner as List).map((x) => num.tryParse(x.toString()) ?? x).toList();
+        return (inner as List)
+            .map((x) => num.tryParse(x.toString()) ?? x)
+            .toList();
       default:
         return v;
     }
@@ -200,7 +206,9 @@ class _ItemEditorPageState extends State<ItemEditorPage> {
     if (v is num) return {'N': '$v'};
     if (v is String) return {'S': v};
     if (v is List) return {'L': v.map(_simpleToAv).toList()};
-    if (v is Map) return {'M': v.map((k, x) => MapEntry(k.toString(), _simpleToAv(x)))};
+    if (v is Map) {
+      return {'M': v.map((k, x) => MapEntry(k.toString(), _simpleToAv(x)))};
+    }
     return {'S': '$v'};
   }
 
@@ -210,7 +218,9 @@ class _ItemEditorPageState extends State<ItemEditorPage> {
     try {
       if (fromForm) return _avFromAttrs();
       final decoded = jsonDecode(_json.text);
-      if (decoded is! Map) throw FormatException(tr('item.topLevelMustBeObject'));
+      if (decoded is! Map) {
+        throw FormatException(tr('item.topLevelMustBeObject'));
+      }
       final m = decoded.cast<String, dynamic>();
       if (_ddbJson) return m;
       return m.map((k, v) => MapEntry(k, _simpleToAv(v)));
@@ -221,9 +231,7 @@ class _ItemEditorPageState extends State<ItemEditorPage> {
   }
 
   void _setJsonText(Map<String, dynamic> av) {
-    final body = _ddbJson
-        ? av
-        : av.map((k, v) => MapEntry(k, _avToSimple(v)));
+    final body = _ddbJson ? av : av.map((k, v) => MapEntry(k, _avToSimple(v)));
     _json.text = const JsonEncoder.withIndent('  ').convert(body);
   }
 
@@ -259,7 +267,8 @@ class _ItemEditorPageState extends State<ItemEditorPage> {
       final entry = av[k.name];
       final val = entry is Map ? entry[k.type] : null;
       if (val == null || val.toString().isEmpty) {
-        _toast('Key attribute "${k.name}" must have a ${k.type} value', error: true);
+        _toast('Key attribute "${k.name}" must have a ${k.type} value',
+            error: true);
         return;
       }
     }
@@ -278,114 +287,216 @@ class _ItemEditorPageState extends State<ItemEditorPage> {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
+    final tokens = AppTokens.of(context);
+    final actionLabel =
+        widget.isNew ? tr('item.createItem') : tr('item.saveChanges');
     return Scaffold(
       body: SafeArea(
-        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 10, 16, 10),
-            child: Row(children: [
-              IconButton(
-                icon: const Icon(Icons.arrow_back),
-                onPressed: () => Navigator.of(context).pop(false),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            SizedBox(
+              key: const ValueKey('item-editor-header'),
+              height: 60,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(12, 8, 16, 8),
+                child: Row(
+                  children: [
+                    CodexIconButton(
+                      semanticLabel: tr('item.cancel'),
+                      tooltip: tr('item.cancel'),
+                      icon: const Icon(Icons.arrow_back, size: 17),
+                      onPressed: () => Navigator.of(context).pop(false),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            widget.isNew
+                                ? tr('item.createItem')
+                                : tr('item.editItem'),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: Ts.style(
+                              size: Ts.lg,
+                              weight: FontWeight.w700,
+                              color: tokens.text,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            widget.table,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: Ts.style(
+                              size: Ts.xs,
+                              color: tokens.text3,
+                              monoFont: true,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    if (!_formView) ...[
+                      Text(
+                        tr('item.viewDdbJson'),
+                        style: Ts.style(size: Ts.sm, color: tokens.text2),
+                      ),
+                      const SizedBox(width: 6),
+                      Switch(value: _ddbJson, onChanged: _switchDdbJson),
+                      const SizedBox(width: 16),
+                    ],
+                    SegmentedButton<bool>(
+                      segments: [
+                        ButtonSegment(
+                          value: true,
+                          label: Text(tr('item.formTab')),
+                        ),
+                        const ButtonSegment(value: false, label: Text('JSON')),
+                      ],
+                      selected: {_formView},
+                      onSelectionChanged: (selection) =>
+                          _switchView(selection.first),
+                    ),
+                  ],
+                ),
               ),
-              const SizedBox(width: 4),
-              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(widget.isNew ? tr('item.createItem') : tr('item.editItem'),
-                    style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
-                Text(widget.table,
-                    style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant)),
-              ]),
-              const Spacer(),
-              if (!_formView) ...[
-                Text(tr('item.viewDdbJson'), style: const TextStyle(fontSize: 12.5)),
-                const SizedBox(width: 6),
-                Switch(value: _ddbJson, onChanged: _switchDdbJson),
-                const SizedBox(width: 16),
-              ],
-              SegmentedButton<bool>(
-                segments: [
-                  ButtonSegment(value: true, label: Text(tr('item.formTab'))),
-                  const ButtonSegment(value: false, label: Text('JSON')),
-                ],
-                selected: {_formView},
-                onSelectionChanged: (s) => _switchView(s.first),
+            ),
+            const CodexDivider(),
+            Expanded(
+              key: const ValueKey('item-editor-body'),
+              child: _formView ? _formBody() : _jsonBody(),
+            ),
+            const CodexDivider(),
+            SizedBox(
+              key: const ValueKey('item-editor-footer'),
+              height: 52,
+              child: Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    CodexButton(
+                      semanticLabel: tr('item.cancel'),
+                      variant: CodexButtonVariant.ghost,
+                      onPressed: _saving
+                          ? null
+                          : () => Navigator.of(context).pop(false),
+                      label: Text(tr('item.cancel')),
+                    ),
+                    const SizedBox(width: 10),
+                    CodexButton(
+                      key: const ValueKey('item-editor-save'),
+                      semanticLabel: actionLabel,
+                      variant: CodexButtonVariant.primary,
+                      onPressed: _saving ? null : _save,
+                      label: _saving
+                          ? SizedBox.square(
+                              dimension: 16,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: tokens.onAccent,
+                              ),
+                            )
+                          : Text(actionLabel),
+                    ),
+                  ],
+                ),
               ),
-            ]),
-          ),
-          const Divider(height: 1),
-          Expanded(child: _formView ? _formBody() : _jsonBody()),
-          const Divider(height: 1),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
-            child: Row(mainAxisAlignment: MainAxisAlignment.end, children: [
-              TextButton(
-                onPressed: _saving ? null : () => Navigator.of(context).pop(false),
-                child: Text(tr('item.cancel')),
-              ),
-              const SizedBox(width: 10),
-              FilledButton(
-                onPressed: _saving ? null : _save,
-                child: _saving
-                    ? const SizedBox(
-                        width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-                    : Text(widget.isNew ? tr('item.createItem') : tr('item.saveChanges')),
-              ),
-            ]),
-          ),
-        ]),
+            ),
+          ],
+        ),
       ),
     );
   }
 
   Widget _jsonBody() => Padding(
         padding: const EdgeInsets.all(16),
-        child: TextField(
-          controller: _json,
-          maxLines: null,
-          expands: true,
-          textAlignVertical: TextAlignVertical.top,
-          style: const TextStyle(fontFamily: 'monospace', fontSize: 12.5),
-          decoration: const InputDecoration(border: OutlineInputBorder(), isDense: true),
+        child: LayoutBuilder(
+          builder: (context, constraints) => CodexTextField(
+            key: const ValueKey('item-editor-json-field'),
+            controller: _json,
+            maxLines: null,
+            minLines: null,
+            expands: true,
+            height: constraints.maxHeight,
+            textAlignVertical: TextAlignVertical.top,
+            style: Ts.style(
+              size: Ts.sm,
+              color: AppTokens.of(context).text,
+              monoFont: true,
+            ),
+          ),
         ),
       );
 
   Widget _formBody() {
-    final scheme = Theme.of(context).colorScheme;
+    final tokens = AppTokens.of(context);
     return ListView(
+      key: const ValueKey('item-editor-form-list'),
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
       children: [
-        Text(tr('item.attributes'), style: TextStyle(fontWeight: FontWeight.w700, color: scheme.primary)),
-        const SizedBox(height: 4),
-        Row(children: [
-          Expanded(flex: 3, child: Text(tr('item.attributeName'), style: const TextStyle(fontSize: 12))),
-          const SizedBox(width: 10),
-          Expanded(flex: 2, child: Text(tr('item.type'), style: const TextStyle(fontSize: 12))),
-          const SizedBox(width: 10),
-          Expanded(flex: 4, child: Text(tr('item.value'), style: const TextStyle(fontSize: 12))),
-          const SizedBox(width: 40),
-        ]),
+        CodexSectionHeader(label: tr('item.attributes')),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            Expanded(
+              flex: 3,
+              child: Text(
+                tr('item.attributeName'),
+                style: Ts.style(size: Ts.xs, color: tokens.text3),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              flex: 2,
+              child: Text(
+                tr('item.type'),
+                style: Ts.style(size: Ts.xs, color: tokens.text3),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              flex: 4,
+              child: Text(
+                tr('item.value'),
+                style: Ts.style(size: Ts.xs, color: tokens.text3),
+              ),
+            ),
+            const SizedBox(width: 40),
+          ],
+        ),
         const SizedBox(height: 6),
         for (var i = 0; i < _attrs.length; i++) _attrRow(i),
         const SizedBox(height: 10),
         Align(
           alignment: Alignment.centerLeft,
           child: MenuAnchor(
-            builder: (ctx, ctrl, _) => OutlinedButton.icon(
-              onPressed: () => ctrl.isOpen ? ctrl.close() : ctrl.open(),
+            builder: (context, controller, child) => CodexButton(
+              key: const ValueKey('item-editor-add-attribute'),
+              semanticLabel: tr('item.addNewAttribute'),
+              variant: CodexButtonVariant.secondary,
+              onPressed: () =>
+                  controller.isOpen ? controller.close() : controller.open(),
               icon: const Icon(Icons.add, size: 16),
               label: Text(tr('item.addNewAttribute')),
             ),
             menuChildren: [
-              for (final t in _attrTypes)
+              for (final type in _attrTypes)
                 MenuItemButton(
                   onPressed: () => setState(() {
-                    final a = _Attr('', t.$1, '');
-                    if (t.$1 == 'M') a.value.text = '{}';
-                    if (t.$1 == 'L' || t.$1 == 'SS' || t.$1 == 'NS') a.value.text = '[]';
-                    _attrs.add(a);
+                    final attr = _Attr('', type.$1, '');
+                    if (type.$1 == 'M') attr.value.text = '{}';
+                    if (type.$1 == 'L' || type.$1 == 'SS' || type.$1 == 'NS') {
+                      attr.value.text = '[]';
+                    }
+                    _attrs.add(attr);
                   }),
-                  child: Text(t.$2),
+                  child: Text(type.$2),
                 ),
             ],
           ),
@@ -394,106 +505,148 @@ class _ItemEditorPageState extends State<ItemEditorPage> {
     );
   }
 
-  Widget _attrRow(int i) {
-    final a = _attrs[i];
-    final scheme = Theme.of(context).colorScheme;
-    final keyLocked = a.isKey && !widget.isNew; // AWS: keys immutable on edit
+  Widget _attrRow(int index) {
+    final attr = _attrs[index];
+    final tokens = AppTokens.of(context);
+    final keyLocked =
+        attr.isKey && !widget.isNew; // AWS: keys immutable on edit
     return Padding(
+      key: ValueKey('item-editor-attr-$index'),
       padding: const EdgeInsets.only(bottom: 8),
-      child: Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
-        Expanded(
-          flex: 3,
-          child: TextField(
-            controller: a.name,
-            enabled: !a.isKey, // key names come from the schema
-            decoration: _dec(
-              hint: tr('item.attributeName'),
-              suffix: a.isKey
-                  ? Tooltip(
-                      message: a == _attrs.first ? tr('item.partitionKey') : tr('item.sortKey'),
-                      child: Icon(Icons.key, size: 14, color: scheme.primary))
-                  : null,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Expanded(
+            flex: 3,
+            child: CodexTextField(
+              key: ValueKey('item-editor-attr-name-$index'),
+              controller: attr.name,
+              enabled: !attr.isKey, // key names come from the schema
+              decoration: InputDecoration(
+                hintText: tr('item.attributeName'),
+                suffixIcon: attr.isKey
+                    ? Tooltip(
+                        message: attr == _attrs.first
+                            ? tr('item.partitionKey')
+                            : tr('item.sortKey'),
+                        child: Icon(Icons.key, size: 14, color: tokens.accent),
+                      )
+                    : null,
+              ),
             ),
           ),
-        ),
-        const SizedBox(width: 10),
-        Expanded(
-          flex: 2,
-          child: DropdownButtonFormField<String>(
-            initialValue: a.type,
-            isDense: true,
-            decoration: _dec(),
-            items: [
-              for (final t in _attrTypes)
-                DropdownMenuItem(value: t.$1, child: Text(t.$2)),
-            ],
-            onChanged: a.isKey ? null : (v) => setState(() => a.type = v ?? 'S'),
+          const SizedBox(width: 10),
+          Expanded(
+            flex: 2,
+            child: CodexSelectField<String>(
+              key: ObjectKey(attr),
+              value: attr.type,
+              items: [
+                for (final type in _attrTypes)
+                  DropdownMenuItem(value: type.$1, child: Text(type.$2)),
+              ],
+              onChanged: attr.isKey
+                  ? null
+                  : (value) => setState(() => attr.type = value ?? 'S'),
+            ),
           ),
-        ),
-        const SizedBox(width: 10),
-        Expanded(flex: 4, child: _valueField(a, keyLocked)),
-        SizedBox(
-          width: 40,
-          child: a.isKey
-              ? const SizedBox.shrink()
-              : IconButton(
-                  tooltip: tr('item.remove'),
-                  icon: const Icon(Icons.close, size: 16),
-                  onPressed: () => setState(() => _attrs.removeAt(i).dispose()),
-                ),
-        ),
-      ]),
+          const SizedBox(width: 10),
+          Expanded(flex: 4, child: _valueField(attr, keyLocked, index)),
+          SizedBox(
+            width: 40,
+            child: attr.isKey
+                ? const SizedBox.shrink()
+                : Align(
+                    alignment: Alignment.centerRight,
+                    child: CodexIconButton(
+                      semanticLabel: tr('item.remove'),
+                      tooltip: tr('item.remove'),
+                      variant: CodexButtonVariant.ghost,
+                      icon: const Icon(Icons.close, size: 16),
+                      onPressed: () => setState(
+                        () => _attrs.removeAt(index).dispose(),
+                      ),
+                    ),
+                  ),
+          ),
+        ],
+      ),
     );
   }
 
-  Widget _valueField(_Attr a, bool locked) {
-    switch (a.type) {
+  Widget _valueField(_Attr attr, bool locked, int index) {
+    switch (attr.type) {
       case 'BOOL':
-        return Row(children: [
-          Checkbox(
-            value: a.boolVal,
-            onChanged: locked ? null : (v) => setState(() => a.boolVal = v ?? false),
-            visualDensity: VisualDensity.compact,
+        return SizedBox(
+          height: Dim.ctlH,
+          child: Row(
+            children: [
+              Checkbox(
+                value: attr.boolVal,
+                onChanged: locked
+                    ? null
+                    : (value) => setState(() => attr.boolVal = value ?? false),
+                visualDensity: VisualDensity.compact,
+              ),
+              Text(
+                '${attr.boolVal}',
+                style: Ts.style(
+                  size: Ts.md,
+                  color: AppTokens.of(context).text2,
+                  monoFont: true,
+                ),
+              ),
+            ],
           ),
-          Text('${a.boolVal}'),
-        ]);
+        );
       case 'NULL':
-        return TextField(enabled: false, decoration: _dec(hint: 'null'));
+        return const CodexTextField(
+          enabled: false,
+          decoration: InputDecoration(hintText: 'null'),
+        );
       default:
-        return TextField(
-          controller: a.value,
+        final mono = attr.type == 'N' ||
+            attr.type == 'B' ||
+            attr.type == 'M' ||
+            attr.type == 'L' ||
+            attr.type == 'SS' ||
+            attr.type == 'NS';
+        return CodexTextField(
+          key: ValueKey('item-editor-attr-value-$index'),
+          controller: attr.value,
           enabled: !locked,
-          style: a.type == 'M' || a.type == 'L' || a.type == 'SS' || a.type == 'NS'
-              ? const TextStyle(fontFamily: 'monospace', fontSize: 12.5)
+          style: mono
+              ? Ts.style(
+                  size: Ts.sm,
+                  color: AppTokens.of(context).text,
+                  monoFont: true,
+                  tabularNums: attr.type == 'N',
+                )
               : null,
-          decoration: _dec(
-              hint: switch (a.type) {
-            'N' => 'Number',
-            'B' => 'base64',
-            'M' => '{"attr": {"S": "value"}}',
-            'L' => '[{"S": "value"}]',
-            'SS' => '["a", "b"]',
-            'NS' => '["1", "2"]',
-            _ => tr('item.value'),
-          }),
+          decoration: InputDecoration(
+            hintText: switch (attr.type) {
+              'N' => 'Number',
+              'B' => 'base64',
+              'M' => '{"attr": {"S": "value"}}',
+              'L' => '[{"S": "value"}]',
+              'SS' => '["a", "b"]',
+              'NS' => '["1", "2"]',
+              _ => tr('item.value'),
+            },
+          ),
         );
     }
   }
 
-  InputDecoration _dec({String? hint, Widget? suffix}) => InputDecoration(
-        isDense: true,
-        hintText: hint,
-        suffixIcon: suffix,
-        border: const OutlineInputBorder(),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
-      );
-
   void _toast(String msg, {bool error = false}) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(msg),
-      backgroundColor: error ? Colors.red.shade800 : null,
-      duration: const Duration(seconds: 3),
-    ));
+    final tokens = AppTokens.of(context);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(msg),
+        backgroundColor: error ? tokens.danger : null,
+        duration: const Duration(seconds: 3),
+      ),
+    );
   }
 }

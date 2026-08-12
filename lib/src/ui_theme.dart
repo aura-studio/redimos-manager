@@ -1,14 +1,46 @@
 import 'package:flutter/material.dart';
 
-/// Shared accent palette for the v1.2 restyle (matches the design mockups).
-/// Deliberately theme-neutral hues that read on both light and dark surfaces.
-class Accents {
-  static const teal = Color(0xFF17B6A6); // endpoints · brand · JS active · LOCAL
-  static const indigo = Color(0xFF6366F1); // primary action · selection · Run
-  static const amber = Color(0xFFD9982E); // instances · AWS badge · degraded backend
-  // Success/affordance green: the start icon and the playground's success chip
-  // and done footer. NOT process status — that goes through goGreen(), which is
-  // brightness-adaptive (greenAccent reads on dark, too pale on light) where
-  // this is a fixed hue.
-  static const green = Color(0xFF3FBF6B);
+import 'ui_tokens.dart';
+
+/// The app-wide desktop scrolling contract. Material's behavior preserves
+/// native mouse-wheel and trackpad routing, adds transient vertical scrollbars
+/// on desktop, and deliberately leaves horizontal bars to bounded data views.
+const ScrollBehavior appScrollBehavior = MaterialScrollBehavior();
+
+/// The single complete theme factory used by the app, goldens, and captures.
+///
+/// [fontFamily] lets deterministic tests inject their registered UI face while
+/// production defaults to the bundled Inter family. Both paths retain the same
+/// platform/CJK fallback chain and Material component typography.
+ThemeData appTheme(
+  Brightness brightness, {
+  String? fontFamily,
+}) {
+  final tokens = AppTokens.forBrightness(brightness);
+  final base = ThemeData(
+    useMaterial3: true,
+    brightness: brightness,
+    scaffoldBackgroundColor: tokens.bg,
+    dividerColor: tokens.hairline,
+    fontFamily: fontFamily ?? Ts.uiFamily,
+    // colorSchemeSeed would re-derive every role from the accent instead of
+    // preserving the deliberately tuned token surfaces.
+    colorScheme: brightness == Brightness.dark
+        ? const ColorScheme.dark()
+            .copyWith(primary: tokens.accent, surface: tokens.panel)
+        : const ColorScheme.light()
+            .copyWith(primary: tokens.accent, surface: tokens.panel),
+    extensions: [tokens],
+    fontFamilyFallback: Ts.sansFallback,
+    dividerTheme: DividerThemeData(
+      thickness: 1,
+      space: 1,
+      color: tokens.hairline,
+    ),
+  );
+
+  return MatSuppress.apply(
+    base.copyWith(textTheme: Ts.withCssLeading(base.textTheme)),
+    tokens,
+  );
 }

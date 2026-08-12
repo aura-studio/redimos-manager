@@ -20,6 +20,9 @@ import 'package:flutter/material.dart';
 
 import 'i18n.dart';
 import 'models.dart';
+import 'ui_fields.dart';
+import 'ui_primitives.dart';
+import 'ui_surfaces.dart';
 import 'ui_tokens.dart';
 
 class ConfigEditor extends StatefulWidget {
@@ -27,14 +30,18 @@ class ConfigEditor extends StatefulWidget {
   final Future<void> Function(RedimosConfig) onSave;
   final Future<void> Function(RedimosConfig) onDelete;
   const ConfigEditor(
-      {super.key, required this.config, required this.onSave, required this.onDelete});
+      {super.key,
+      required this.config,
+      required this.onSave,
+      required this.onDelete});
   @override
   State<ConfigEditor> createState() => ConfigEditorState();
 }
 
 // Public state type: main.dart holds a GlobalKey<ConfigEditorState> for the
 // dirty-check / save / applyTableName bridges.
-class ConfigEditorState extends State<ConfigEditor> {
+class ConfigEditorState extends State<ConfigEditor>
+    with AutomaticKeepAliveClientMixin {
   late final TextEditingController _name;
   late final TextEditingController _port;
   late final TextEditingController _table;
@@ -63,11 +70,12 @@ class ConfigEditorState extends State<ConfigEditor> {
   late String _ddbMode;
   final _tableFocus = FocusNode();
 
-  static String _ddbModeOf(RedimosConfig c) =>
-      c.endpoint.trim().isEmpty &&
-              (c.accessKeyId.isNotEmpty || c.secretKey.isNotEmpty || c.region.isNotEmpty)
-          ? 'aws'
-          : 'endpoint';
+  static String _ddbModeOf(RedimosConfig c) => c.endpoint.trim().isEmpty &&
+          (c.accessKeyId.isNotEmpty ||
+              c.secretKey.isNotEmpty ||
+              c.region.isNotEmpty)
+      ? 'aws'
+      : 'endpoint';
 
   // Applied by the table-mismatch dialog (from the parent). Both leave the form
   // dirty so the user reviews and Saves before starting.
@@ -89,6 +97,9 @@ class ConfigEditorState extends State<ConfigEditor> {
   late bool _autoCreate;
   late bool _autoRestart;
   late String _runMode;
+
+  @override
+  bool get wantKeepAlive => true;
 
   @override
   void initState() {
@@ -121,8 +132,21 @@ class ConfigEditorState extends State<ConfigEditor> {
   @override
   void dispose() {
     for (final ctl in [
-      _name, _port, _table, _endpoint, _partitionID, _region, _ak, _sk,
-      _sessionToken, _pass, _group, _host, _database, _cacheTtl, _flagsText,
+      _name,
+      _port,
+      _table,
+      _endpoint,
+      _partitionID,
+      _region,
+      _ak,
+      _sk,
+      _sessionToken,
+      _pass,
+      _group,
+      _host,
+      _database,
+      _cacheTtl,
+      _flagsText,
     ]) {
       ctl.dispose();
     }
@@ -233,60 +257,76 @@ class ConfigEditorState extends State<ConfigEditor> {
 
   @override
   Widget build(BuildContext context) {
+    super.build(context); // AutomaticKeepAliveClientMixin
     final t = AppTokens.of(context);
-    final brightness = Theme.of(context).brightness;
     return Column(children: [
       // Scrollable field area — the pinned action bar below never moves.
       // Mockup .config-scroll: 18px/22px padding, 16px section gap.
       Expanded(
         child: SingleChildScrollView(
+          key: const ValueKey('configure-scroll'),
           padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 18),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          child:
+              Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
             // ── 1 · NAME (实例标识) ───────────────────────────
-            _section(t, brightness, '1', 'Name', '实例标识', [
+            _section(t, '1', 'Name', '实例标识', [
               _field(t, _name, 'Instance name'),
               _field(t, _group, 'Group', placeholder: 'production'),
             ]),
 
             // ── 2 · REDIS (上游连接) ──────────────────────────
-            _section(t, brightness, '2', 'Redis', '上游连接', [
+            _section(t, '2', 'Redis', '上游连接', [
               _field(t, _host, 'Host', placeholder: '127.0.0.1'),
               _field(t, _port, 'Port', number: true),
               _field(t, _pass, 'Password', obscure: true),
               _field(t, _database, 'Database', number: true, placeholder: '0'),
               _switchField(t, 'TLS', _tls, '启用 TLS', '不启用明文连接',
                   (v) => setState(() => _tls = v)),
-              _switchField(t, 'Read-only replica', _readOnlyReplica, '只读副本', '可写',
-                  (v) => setState(() => _readOnlyReplica = v)),
+              _switchField(t, 'Read-only replica', _readOnlyReplica, '只读副本',
+                  '可写', (v) => setState(() => _readOnlyReplica = v)),
             ]),
 
             // ── 3 · REDIMOS (代理引擎) ───────────────────────
             // NOTE: mockup's "Proxy port" is the same persisted listen port as
             // section 2's Port, so it is NOT duplicated here (a second field on
             // the same controller would mirror the value and break clearing).
-            _section(t, brightness, '3', 'Redimos', '代理引擎', [
-              _selectField<String>(t, 'Engine mode', _runMode, const [
-                ('native', 'redimos-core'),
-                ('docker', 'Docker image'),
-              ], (v) => setState(() => _runMode = v ?? 'native')),
-              _field(t, _cacheTtl, 'Cache TTL (s)', number: true, placeholder: '300'),
+            _section(t, '3', 'Redimos', '代理引擎', [
+              _selectField<String>(
+                  t,
+                  'Engine mode',
+                  _runMode,
+                  const [
+                    ('native', 'redimos-core'),
+                    ('docker', 'Docker image'),
+                  ],
+                  (v) => setState(() => _runMode = v ?? 'native')),
+              _field(t, _cacheTtl, 'Cache TTL (s)',
+                  number: true, placeholder: '300'),
               _switchField(t, 'Write-through', _writeThrough, '写入同步回源', '直写后端',
                   (v) => setState(() => _writeThrough = v)),
             ]),
 
             // ── 4 · DYNAMODB (持久化后端) ────────────────────
-            _section(t, brightness, '4', 'DynamoDB', '持久化后端', [
+            _section(t, '4', 'DynamoDB', '持久化后端', [
               _field(t, _region, 'Region', placeholder: 'us-east-1'),
-              _field(t, _table, 'Table', focusNode: _tableFocus, placeholder: 'redimos-prod'),
-              _field(t, _endpoint, 'Endpoint override', placeholder: '留空使用 AWS 默认',
+              _field(t, _table, 'Table',
+                  focusNode: _tableFocus, placeholder: 'redimos-prod'),
+              _field(t, _endpoint, 'Endpoint override',
+                  placeholder: '留空使用 AWS 默认',
                   onChanged: (_) => setState(() {
                         // Keep the backend-mode inference live: an empty
                         // endpoint means the AWS default resolver, a filled one
                         // a local/custom DynamoDB URL.
-                        _ddbMode = _endpoint.text.trim().isEmpty ? 'aws' : 'endpoint';
+                        _ddbMode =
+                            _endpoint.text.trim().isEmpty ? 'aws' : 'endpoint';
                         _localDdb = _ddbMode == 'endpoint';
                       })),
-              _switchField(t, 'Local DDB', _localDdb, '使用本地', '使用远端',
+              _switchField(
+                  t,
+                  'Local DDB',
+                  _localDdb,
+                  '使用本地',
+                  '使用远端',
                   (v) => setState(() {
                         _localDdb = v;
                         _ddbMode = v ? 'endpoint' : 'aws';
@@ -296,21 +336,33 @@ class ConfigEditorState extends State<ConfigEditor> {
               _field(t, _ak, tr('home.accessKeyId')),
               _field(t, _sk, tr('home.secretAccessKey'), obscure: true),
               _field(t, _sessionToken, tr('home.sessionToken'), obscure: true),
-              _selectField<String>(t, tr('home.version'), _version, const [
-                ('v1', 'v1'),
-                ('v2', 'v2'),
-              ], (v) => setState(() => _version = v ?? 'v2')),
-              _switchField(t, tr('home.autoCreate'), _autoCreate, '自动建表', '手动建表',
-                  (v) => setState(() => _autoCreate = v)),
+              _selectField<String>(
+                  t,
+                  tr('home.version'),
+                  _version,
+                  const [
+                    ('v1', 'v1'),
+                    ('v2', 'v2'),
+                  ],
+                  (v) => setState(() => _version = v ?? 'v2')),
+              _switchField(t, tr('home.autoCreate'), _autoCreate, '自动建表',
+                  '手动建表', (v) => setState(() => _autoCreate = v)),
               _switchField(t, tr('home.multiDb'), _multiDb, '多 DB', '单 DB',
                   (v) => setState(() => _multiDb = v)),
             ]),
 
             // ── 5 · EXTRA FLAGS (透传参数) — one-column textarea ──
-            _section(t, brightness, '5', 'Extra flags', '透传参数', [
-              _field(t, _flagsText, 'Arguments', textarea: true,
-                  placeholder: '--max-clients 256\n--latency-trace off'),
-            ], onecol: true),
+            _section(
+                t,
+                '5',
+                'Extra flags',
+                '透传参数',
+                [
+                  _field(t, _flagsText, 'Arguments',
+                      textarea: true,
+                      placeholder: '--max-clients 256\n--latency-trace off'),
+                ],
+                onecol: true),
 
             const SizedBox(height: 16),
           ]),
@@ -322,91 +374,81 @@ class ConfigEditorState extends State<ConfigEditor> {
 
   // ---- section card (mockup .cfg-section) ----
 
-  Widget _section(AppTokens t, Brightness brightness, String n, String title,
-      String hint, List<Widget> fields,
+  Widget _section(
+      AppTokens t, String n, String title, String hint, List<Widget> fields,
       {bool onecol = false}) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 16),
-      child: Stack(children: [
-        Container(
-          decoration: BoxDecoration(
-            color: t.panel,
-            borderRadius: BorderRadius.circular(Dim.radiusM),
-            border: Border.all(color: t.border),
-            boxShadow: Depth.elev2(brightness),
-          ),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(Dim.radiusM - 1),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-              // .cfg-head band: panel-2 + hairline bottom border + soft highlight.
-              Container(
-                decoration: BoxDecoration(
-                  color: t.panel2,
-                  border: Border(bottom: BorderSide(color: t.hairline)),
-                ),
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      child: CodexSurface(
+        key: ValueKey('configure-section-$n'),
+        variant: CodexSurfaceVariant.elevated,
+        padding: EdgeInsets.zero,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            ColoredBox(
+              color: t.panel2,
+              child: Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                 child: Row(children: [
-                  // .cfg-num: 20px solid accent chip, white 11px mono numeral
-                  // (dark theme flips to white fill + near-black text).
                   Container(
                     width: 20,
                     height: 20,
                     alignment: Alignment.center,
                     decoration: BoxDecoration(
-                      color: brightness == Brightness.dark
-                          ? const Color(0xFFF5F7FB)
-                          : t.accent,
-                      borderRadius: BorderRadius.circular(6),
+                      color: t.accent,
+                      borderRadius: BorderRadius.circular(Dim.radiusS),
                     ),
-                    child: Text(n,
-                        style: Ts.style(
-                            size: 11,
-                            color: brightness == Brightness.dark
-                                ? const Color(0xFF10142E)
-                                : t.onAccent,
-                            weight: FontWeight.w700,
-                            monoFont: true)),
+                    child: Text(
+                      n,
+                      style: Ts.style(
+                        size: Ts.xs,
+                        color: t.onAccent,
+                        weight: FontWeight.w700,
+                        monoFont: true,
+                        tabularNums: true,
+                      ),
+                    ),
                   ),
                   const SizedBox(width: 10),
-                  // .cfg-title: 12px/700, .9px tracking.
-                  Text(title.toUpperCase(),
-                      style: Ts.style(
-                          size: Ts.md, letterSpacing: 0.9, weight: FontWeight.w700, color: t.text)),
+                  Text(
+                    title.toUpperCase(),
+                    style: Ts.style(
+                      size: Ts.md,
+                      letterSpacing: 0.9,
+                      weight: FontWeight.w700,
+                      color: t.text,
+                    ),
+                  ),
                   const Spacer(),
-                  // .cfg-hint: right-aligned 11px caption.
-                  Text(hint, style: Ts.style(size: Ts.xs, color: t.text3)),
+                  Text(
+                    hint,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Ts.style(size: Ts.xs, color: t.text3),
+                  ),
                 ]),
               ),
-              // .cfg-body: 2-col grid, 12px row / 16px col gap, 14px padding.
-              Padding(
-                padding: const EdgeInsets.all(14),
-                child: onecol
-                    ? Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            ),
+            const CodexDivider(),
+            Padding(
+              padding: const EdgeInsets.all(14),
+              child: onecol
+                  ? Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
                         for (var i = 0; i < fields.length; i++) ...[
                           fields[i],
                           if (i < fields.length - 1) const SizedBox(height: 12),
                         ],
-                      ])
-                    : _grid(t, fields),
-              ),
-            ]),
-          ),
-        ),
-        // 1px top inner highlight.
-        Positioned(
-          left: 1, right: 1, top: 0,
-          child: IgnorePointer(
-            child: Container(
-              height: 1,
-              decoration: BoxDecoration(
-                color: t.highlight,
-                borderRadius:
-                    const BorderRadius.vertical(top: Radius.circular(Dim.radiusM - 1)),
-              ),
+                      ],
+                    )
+                  : _grid(t, fields),
             ),
-          ),
+          ],
         ),
-      ]),
+      ),
     );
   }
 
@@ -424,7 +466,8 @@ class ConfigEditorState extends State<ConfigEditor> {
       ]));
       if (i + 2 < fields.length) rows.add(const SizedBox(height: 12));
     }
-    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: rows);
+    return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch, children: rows);
   }
 
   // ---- field primitives (mockup .field / .f-label / .f-input) ----
@@ -438,53 +481,38 @@ class ConfigEditorState extends State<ConfigEditor> {
       ValueChanged<String>? onChanged}) {
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       _fLabel(t, label),
-      const SizedBox(height: 5), // mockup .field gap
-      SizedBox(
-        height: textarea ? 64 : Dim.ctlH, // ctl-h = 30
-        child: TextField(
-          controller: c,
-          focusNode: focusNode,
-          obscureText: obscure,
-          keyboardType: textarea
-              ? TextInputType.multiline
-              : (number ? TextInputType.number : null),
-          maxLines: textarea ? null : 1,
-          expands: textarea,
-          textAlignVertical: textarea ? TextAlignVertical.top : null,
-          // mockup .f-input: mono 12px everywhere.
-          style: Ts.style(size: Ts.md, color: t.text, monoFont: true, height: textarea ? 1.5 : null),
-          decoration: _inputDeco(t, placeholder: placeholder, textarea: textarea),
-          onChanged: onChanged ?? (_) => setState(() {}), // refresh dirty live
+      const SizedBox(height: 5),
+      CodexTextField(
+        controller: c,
+        focusNode: focusNode,
+        obscureText: obscure,
+        keyboardType: textarea
+            ? TextInputType.multiline
+            : (number ? TextInputType.number : null),
+        maxLines: textarea ? null : 1,
+        expands: textarea,
+        textAlignVertical: textarea ? TextAlignVertical.top : null,
+        height: textarea ? 64 : Dim.ctlH,
+        style: Ts.style(
+          size: Ts.md,
+          color: t.text,
+          monoFont: true,
+          height: textarea ? 1.5 : null,
         ),
+        decoration: InputDecoration(
+          hintText: placeholder,
+          hintStyle: Ts.style(
+            size: Ts.md,
+            color: t.text3,
+            monoFont: true,
+          ),
+          contentPadding: textarea
+              ? const EdgeInsets.symmetric(horizontal: 10, vertical: 8)
+              : const EdgeInsets.symmetric(horizontal: 10),
+        ),
+        onChanged: onChanged ?? (_) => setState(() {}),
       ),
     ]);
-  }
-
-  InputDecoration _inputDeco(AppTokens t, {String? placeholder, bool textarea = false}) {
-    OutlineInputBorder border(Color c) => OutlineInputBorder(
-          borderRadius: BorderRadius.circular(Dim.radiusS),
-          borderSide: BorderSide(color: c),
-        );
-    return InputDecoration(
-      isDense: true,
-      hintText: placeholder,
-      hintStyle: Ts.style(size: Ts.md, color: t.text3, monoFont: true),
-      filled: true,
-      fillColor: t.panel,
-      border: border(t.border),
-      enabledBorder: border(t.border),
-      // mockup .f-input:focus: accent ring + soft glow.
-      focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(Dim.radiusS),
-        borderSide: BorderSide(color: t.focus, width: 1.5),
-      ),
-      contentPadding: textarea
-          ? const EdgeInsets.symmetric(horizontal: 10, vertical: 8)
-          // vertical 6: the outline container sizes to text+padding (isDense),
-          // so 18px text + 6+6 fills the 30px ctl-h box — the mockup's
-          // .f-input is a full-height 30px box.
-          : const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-    );
   }
 
   Widget _fLabel(AppTokens t, String label) => Text(label.toUpperCase(),
@@ -498,32 +526,27 @@ class ConfigEditorState extends State<ConfigEditor> {
           // the input row 2px low against the mockup (CP 9.x inst-config).
           height: 14 / 11));
 
-  // f-select: a boxed dropdown styled like a field input (mono 12px).
   Widget _selectField<T>(AppTokens t, String label, T? value,
       List<(T, String)> items, ValueChanged<T?> onChanged) {
+    final style = Ts.style(size: Ts.md, color: t.text, monoFont: true);
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       _fLabel(t, label),
       const SizedBox(height: 5),
-      SizedBox(
-        height: Dim.ctlH,
-        child: DropdownButtonFormField<T>(
-          initialValue: value,
-          isDense: true,
-          style: Ts.style(size: Ts.md, color: t.text, monoFont: true),
-          decoration: _inputDeco(t),
-          // Explicit style on the item text: the inherited chain renders the
-          // blocky fallback face in widget tests (same disease as the R3
-          // styleFrom buttons — convergence-plan R3).
-          items: [
-            for (final (v, l) in items)
-              DropdownMenuItem(
-                  value: v,
-                  child: Text(l,
-                      overflow: TextOverflow.ellipsis,
-                      style: Ts.style(size: Ts.md, color: t.text, monoFont: true)))
-          ],
-          onChanged: onChanged,
-        ),
+      CodexSelectField<T>(
+        value: value,
+        style: style,
+        items: [
+          for (final (itemValue, itemLabel) in items)
+            DropdownMenuItem<T>(
+              value: itemValue,
+              child: Text(
+                itemLabel,
+                overflow: TextOverflow.ellipsis,
+                style: style,
+              ),
+            ),
+        ],
+        onChanged: onChanged,
       ),
     ]);
   }
@@ -540,7 +563,7 @@ class ConfigEditorState extends State<ConfigEditor> {
       SizedBox(
         height: 19,
         child: Row(children: [
-          _switch(t, value, onChanged),
+          _switch(label, value, onChanged),
           const SizedBox(width: 8),
           Flexible(
             child: Text(value ? captionOn : captionOff,
@@ -552,45 +575,25 @@ class ConfigEditorState extends State<ConfigEditor> {
     ]);
   }
 
-  // mockup .switch: 34×19 pill, white knob, inset track shadow; off = border
-  // grey with the knob on the left, on = accent with the knob on the right.
-  Widget _switch(AppTokens t, bool value, ValueChanged<bool> onChanged) {
-    final brightness = Theme.of(context).brightness;
-    return GestureDetector(
-      onTap: () => onChanged(!value),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 120),
-        width: 34,
-        height: 19,
-        padding: const EdgeInsets.all(2),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(999),
-          color: value ? t.accent : t.border,
-          boxShadow: [
-            BoxShadow(
-              color: (brightness == Brightness.dark ? Colors.black : const Color(0xFF173369))
-                  .withValues(alpha: 0.25),
-              offset: const Offset(0, 1),
-              blurRadius: 2,
-            ),
-          ],
-        ),
-        child: Align(
-          alignment: value ? Alignment.centerRight : Alignment.centerLeft,
-          child: Container(
-            width: 15,
-            height: 15,
-            decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle),
-          ),
-        ),
-      ),
-    );
-  }
+  // Fixed 34×19 footprint: the transition changes paint/alignment only and
+  // never moves neighbouring labels or fields.
+  Widget _switch(
+    String label,
+    bool value,
+    ValueChanged<bool> onChanged,
+  ) =>
+      _ConfigureSwitch(
+        key: ValueKey('configure-switch-${label.toLowerCase()}'),
+        label: label,
+        value: value,
+        onChanged: onChanged,
+      );
 
   // ---- pinned action bar (mockup .config-actions) ----
 
   Widget _actionBar(AppTokens t) {
     return Container(
+      key: const ValueKey('configure-action-bar'),
       height: 52,
       decoration: BoxDecoration(
         color: t.panel,
@@ -599,120 +602,165 @@ class ConfigEditorState extends State<ConfigEditor> {
       padding: const EdgeInsets.symmetric(horizontal: 22),
       child: Row(children: [
         if (isDirty) ...[
-          // .dirty-dot: 6px warning dot + note.
-          Container(
-            width: 6,
-            height: 6,
-            decoration: BoxDecoration(color: t.warning, shape: BoxShape.circle),
+          Semantics(
+            label: tr('home.unsavedChanges'),
+            child: Container(
+              width: 6,
+              height: 6,
+              decoration:
+                  BoxDecoration(color: t.warning, shape: BoxShape.circle),
+            ),
           ),
           const SizedBox(width: 7),
-          Text(tr('home.unsavedChanges'),
-              style: Ts.style(size: Ts.md, color: t.warning, weight: FontWeight.w600)),
+          Text(
+            tr('home.unsavedChanges'),
+            style: Ts.style(
+              size: Ts.md,
+              color: t.warning,
+              weight: FontWeight.w600,
+            ),
+          ),
         ],
         const Spacer(),
-        // .abtn Revert (neutral, text-only, 26px).
-        _abtn(t, label: tr('home.revert'), onTap: () {
-          final wasDirty = isDirty;
-          _resetControllers();
-          if (wasDirty && mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text(tr('home.revertedChanges'))),
-            );
-          }
-        }),
+        CodexButton(
+          variant: CodexButtonVariant.secondary,
+          semanticLabel: tr('home.revert'),
+          onPressed: () {
+            final wasDirty = isDirty;
+            _resetControllers();
+            if (wasDirty && mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text(tr('home.revertedChanges'))),
+              );
+            }
+          },
+          label: Text(tr('home.revert')),
+        ),
         const SizedBox(width: 8),
-        // .abtn.danger: ⌫ Delete instance.
-        _abtn(t,
-            label: '⌫ ${tr('home.delete')}',
-            danger: true,
-            onTap: _confirmDelete),
+        CodexButton(
+          variant: CodexButtonVariant.danger,
+          semanticLabel: tr('home.delete'),
+          onPressed: _confirmDelete,
+          icon: const Icon(Icons.delete_outline, size: 15),
+          label: Text(tr('home.delete')),
+        ),
         const SizedBox(width: 8),
-        _saveButton(t),
+        CodexButton(
+          variant: CodexButtonVariant.primary,
+          semanticLabel: tr('home.save'),
+          onPressed: () => widget.onSave(_collect()),
+          icon: const Icon(Icons.save_outlined, size: 15),
+          label: Text(tr('home.save')),
+        ),
       ]),
-    );
-  }
-
-  // mockup .abtn: a small 26px text button; .danger = danger text + 35% border.
-  Widget _abtn(AppTokens t,
-      {required String label, required VoidCallback onTap, bool danger = false}) {
-    final color = danger ? t.danger : t.text2;
-    return InkWell(
-      borderRadius: BorderRadius.circular(Dim.radiusS),
-      onTap: onTap,
-      child: Container(
-        height: 26,
-        padding: const EdgeInsets.symmetric(horizontal: 10),
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(Dim.radiusS),
-          border: Border.all(
-              color: danger ? t.danger.withValues(alpha: 0.35) : t.border),
-        ),
-        child: Text(label,
-            style: Ts.style(size: Ts.md, weight: FontWeight.w600, color: color)),
-      ),
-    );
-  }
-
-  // v2.3 primary CTA (.pbtn): 32px, accent fill + white text, inset highlight
-  // + drop shadow; dark theme flips to a white fill + near-black text.
-  Widget _saveButton(AppTokens t) {
-    final dark = Theme.of(context).brightness == Brightness.dark;
-    final bg = dark ? const Color(0xFFF5F7FB) : t.accent;
-    final fg = dark ? const Color(0xFF10142E) : t.onAccent;
-    return Container(
-      height: 32,
-      decoration: BoxDecoration(
-        color: bg,
-        borderRadius: BorderRadius.circular(Dim.radiusS),
-        boxShadow: [
-          BoxShadow(
-            color: const Color(0xFF173369).withValues(alpha: dark ? 0.5 : 0.22),
-            offset: const Offset(0, 1),
-            blurRadius: 2,
-          ),
-        ],
-      ),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(Dim.radiusS),
-          onTap: () => widget.onSave(_collect()),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 14),
-            child: Row(mainAxisSize: MainAxisSize.min, children: [
-              Icon(Icons.save, size: 15, color: fg),
-              const SizedBox(width: 6),
-              Text(tr('home.save'),
-                  style: Ts.style(size: Ts.md, weight: FontWeight.w600, color: fg)),
-            ]),
-          ),
-        ),
-      ),
     );
   }
 
   // Delete needs an explicit confirmation — it permanently removes the config.
   Future<void> _confirmDelete() async {
-    final name = widget.config.name.isEmpty ? tr('home.unnamedParen') : widget.config.name;
+    final name = widget.config.name.isEmpty
+        ? tr('home.unnamedParen')
+        : widget.config.name;
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text(tr('home.deleteConfigTitle')),
-        content: Text('${tr('home.permanentlyRemove')} "$name"? ${tr('home.cannotBeUndone')}'),
+        content: Text(
+            '${tr('home.permanentlyRemove')} "$name"? ${tr('home.cannotBeUndone')}'),
         actions: [
-          TextButton(
+          CodexButton(
+            variant: CodexButtonVariant.secondary,
+            semanticLabel: tr('home.cancel'),
             onPressed: () => Navigator.pop(ctx, false),
-            child: Text(tr('home.cancel')),
+            label: Text(tr('home.cancel')),
           ),
-          FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: Colors.redAccent),
+          CodexButton(
+            variant: CodexButtonVariant.danger,
+            semanticLabel: tr('home.delete'),
             onPressed: () => Navigator.pop(ctx, true),
-            child: Text(tr('home.delete')),
+            label: Text(tr('home.delete')),
           ),
         ],
       ),
     );
     if (ok == true) widget.onDelete(widget.config);
+  }
+}
+
+class _ConfigureSwitch extends StatefulWidget {
+  const _ConfigureSwitch({
+    super.key,
+    required this.label,
+    required this.value,
+    required this.onChanged,
+  });
+
+  final String label;
+  final bool value;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  State<_ConfigureSwitch> createState() => _ConfigureSwitchState();
+}
+
+class _ConfigureSwitchState extends State<_ConfigureSwitch> {
+  bool _focused = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = AppTokens.of(context);
+    final keyName = widget.label.toLowerCase();
+    return Semantics(
+      label: widget.label,
+      toggled: widget.value,
+      button: true,
+      onTap: () => widget.onChanged(!widget.value),
+      excludeSemantics: true,
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(999),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(999),
+          onTap: () => widget.onChanged(!widget.value),
+          onFocusChange: (next) {
+            if (_focused == next) return;
+            setState(() => _focused = next);
+          },
+          splashFactory: NoSplash.splashFactory,
+          splashColor: Colors.transparent,
+          highlightColor: Colors.transparent,
+          hoverColor: t.hover,
+          focusColor: Colors.transparent,
+          child: AnimatedContainer(
+            key: ValueKey('configure-switch-$keyName-focus-target'),
+            duration: const Duration(milliseconds: 120),
+            width: 34,
+            height: 19,
+            padding: const EdgeInsets.all(2),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(999),
+              color: widget.value ? t.accent : t.border,
+              border: Border.all(
+                color: _focused ? t.focus : Colors.transparent,
+                width: Dim.borderW,
+              ),
+            ),
+            child: Align(
+              alignment:
+                  widget.value ? Alignment.centerRight : Alignment.centerLeft,
+              child: Container(
+                width: 15,
+                height: 15,
+                decoration: BoxDecoration(
+                  color: widget.value ? t.onAccent : t.panel,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: t.hairline),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }

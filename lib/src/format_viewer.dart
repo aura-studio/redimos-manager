@@ -18,6 +18,10 @@ import 'package:flutter/services.dart';
 import 'i18n.dart';
 import 'models.dart';
 import 'native.dart';
+import 'ui_fields.dart';
+import 'ui_primitives.dart';
+import 'ui_surfaces.dart';
+import 'ui_tokens.dart';
 
 /// The built-in formats, in dropdown order (matches ARDM's list).
 const List<String> kBuiltinFormats = [
@@ -99,7 +103,8 @@ class _FormatViewerState extends State<FormatViewer> {
   // user switched format (or the bytes changed) is ignored.
   int _reqSeq = 0;
 
-  bool get _editableText => widget.onSave != null && _format == 'Text' && _nativeEditable;
+  bool get _editableText =>
+      widget.onSave != null && _format == 'Text' && _nativeEditable;
 
   @override
   void initState() {
@@ -146,14 +151,16 @@ class _FormatViewerState extends State<FormatViewer> {
   bool _isCustom(String name) => _formatters.any((f) => f.name == name);
 
   Future<void> _autoDetectAndDecode() async {
-    _editSeeded = false; // a fresh value → allow the edit buffer to reseed from it
+    _editSeeded =
+        false; // a fresh value → allow the edit buffer to reseed from it
     if (_oversize) {
       _showOversizeLocally();
       return;
     }
     final seq = ++_reqSeq;
     setState(() => _loading = true);
-    final r = await widget.core.formatValue(format: 'Auto', valueB64: base64.encode(widget.bytes));
+    final r = await widget.core
+        .formatValue(format: 'Auto', valueB64: base64.encode(widget.bytes));
     if (!mounted || seq != _reqSeq) return;
     final detected = (r['detected'] as String?) ?? 'Text';
     setState(() {
@@ -189,7 +196,8 @@ class _FormatViewerState extends State<FormatViewer> {
         member: widget.member,
       );
     } else {
-      r = await widget.core.formatValue(format: format, valueB64: base64.encode(widget.bytes));
+      r = await widget.core
+          .formatValue(format: format, valueB64: base64.encode(widget.bytes));
     }
     if (!mounted || seq != _reqSeq) return;
     setState(() {
@@ -277,40 +285,45 @@ class _FormatViewerState extends State<FormatViewer> {
     await Clipboard.setData(ClipboardData(text: text));
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(tr('fmt.copied')), duration: const Duration(milliseconds: 900)));
+          content: Text(tr('fmt.copied')),
+          duration: const Duration(milliseconds: 900)));
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
+    final tokens = AppTokens.of(context);
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      _bar(scheme),
+      _bar(tokens),
       const SizedBox(height: 8),
-      Expanded(child: _body(scheme)),
+      Expanded(child: _body(tokens)),
       if (widget.onSave != null) ...[
         const SizedBox(height: 8),
         Align(
           alignment: Alignment.centerRight,
-          child: FilledButton(
+          child: CodexButton(
+            variant: CodexButtonVariant.primary,
+            semanticLabel: tr('fmt.save'),
             // Only Text edits are saved (other formats are read-only decoded views).
             onPressed: _editableText ? () => widget.onSave!(_edit.text) : null,
-            child: Text(tr('fmt.save')),
+            label: Text(tr('fmt.save')),
           ),
         ),
       ],
     ]);
   }
 
-  Widget _bar(ColorScheme scheme) {
+  Widget _bar(AppTokens tokens) {
     // Dedupe by value: a custom formatter whose name collides with a built-in
     // (or another custom) would otherwise create two items sharing one value and
     // trip DropdownButton's single-match assertion. Built-ins always win.
     final seen = <String>{...kBuiltinFormats};
     final items = <DropdownMenuItem<String>>[
-      for (final f in kBuiltinFormats) DropdownMenuItem(value: f, child: Text(f)),
+      for (final f in kBuiltinFormats)
+        DropdownMenuItem(value: f, child: Text(f)),
       for (final f in _formatters)
-        if (seen.add(f.name)) DropdownMenuItem(value: f.name, child: Text(f.name)),
+        if (seen.add(f.name))
+          DropdownMenuItem(value: f.name, child: Text(f.name)),
       DropdownMenuItem(
         value: _kCustomizeSentinel,
         child: Row(mainAxisSize: MainAxisSize.min, children: [
@@ -323,87 +336,119 @@ class _FormatViewerState extends State<FormatViewer> {
     // The selected value must exist in items (a since-deleted custom name won't).
     final value = items.any((i) => i.value == _format) ? _format : 'Text';
 
-    return Row(children: [
-      const Icon(Icons.account_tree_outlined, size: 15),
-      const SizedBox(width: 6),
-      DropdownButton<String>(
-        value: value,
-        isDense: true,
-        underline: const SizedBox.shrink(),
-        style: TextStyle(fontSize: 13, color: scheme.onSurface),
-        items: items,
-        // ARDM disables the selector for oversize values (we show a preview).
-        onChanged: _oversize ? null : _onSelect,
-      ),
-      const SizedBox(width: 10),
-      if (!_printable)
-        Padding(
-          padding: const EdgeInsets.only(right: 8),
-          child: _tag('[Hex]', scheme),
+    return SizedBox(
+      height: Dim.ctlH,
+      child: Row(children: [
+        SizedBox(
+          width: 190,
+          child: CodexSelectField<String>(
+            value: value,
+            items: items,
+            enabled: !_oversize,
+            // ARDM disables the selector for oversize values (we show a preview).
+            onChanged: _oversize ? null : _onSelect,
+            decoration: const InputDecoration(
+              prefixIcon: Icon(Icons.account_tree_outlined, size: 15),
+            ),
+          ),
         ),
-      _tag('${tr('fmt.size')}: $_sizeHuman', scheme),
-      const SizedBox(width: 8),
-      TextButton.icon(
-        onPressed: _copy,
-        icon: const Icon(Icons.copy, size: 14),
-        label: Text(tr('fmt.copy')),
-        style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
-      ),
-      if (_loading) ...[
+        const SizedBox(width: 10),
+        if (!_printable) ...[
+          _tag('[Hex]', tokens),
+          const SizedBox(width: 8),
+        ],
+        _tag('${tr('fmt.size')}: $_sizeHuman', tokens),
         const SizedBox(width: 8),
-        const SizedBox(width: 13, height: 13, child: CircularProgressIndicator(strokeWidth: 2)),
-      ],
-    ]);
+        CodexButton(
+          variant: CodexButtonVariant.ghost,
+          semanticLabel: tr('fmt.copy'),
+          onPressed: _copy,
+          icon: const Icon(Icons.copy_outlined, size: 14),
+          label: Text(tr('fmt.copy')),
+        ),
+        if (_loading) ...[
+          const SizedBox(width: 8),
+          SizedBox.square(
+            dimension: 13,
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              color: tokens.accent,
+            ),
+          ),
+        ],
+      ]),
+    );
   }
 
-  Widget _tag(String text, ColorScheme scheme) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+  Widget _tag(String text, AppTokens tokens) => Container(
+        constraints: const BoxConstraints(minHeight: 20),
+        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
         decoration: BoxDecoration(
-          color: scheme.surfaceContainerHighest,
-          borderRadius: BorderRadius.circular(4),
+          color: tokens.panel2,
+          border: Border.all(color: tokens.border, width: Dim.borderW),
+          borderRadius: BorderRadius.circular(Dim.radiusS),
         ),
-        child: Text(text, style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant)),
+        child: Text(
+          text,
+          style: Ts.style(
+            size: Ts.xs,
+            color: tokens.text2,
+            monoFont: true,
+            tabularNums: true,
+          ),
+        ),
       );
 
-  Widget _body(ColorScheme scheme) {
-    final border = BoxDecoration(
-      border: Border.all(color: Theme.of(context).dividerColor),
-      borderRadius: BorderRadius.circular(6),
+  Widget _body(AppTokens tokens) {
+    final monoStyle = Ts.style(
+      size: Ts.lg,
+      color: tokens.text,
+      monoFont: true,
     );
     if (_editableText) {
-      return TextField(
-        controller: _edit,
-        expands: true,
-        minLines: null,
-        maxLines: null,
-        textAlignVertical: TextAlignVertical.top,
-        style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
-        decoration: const InputDecoration(
-          border: OutlineInputBorder(),
-          contentPadding: EdgeInsets.all(12),
+      return LayoutBuilder(
+        builder: (context, constraints) => CodexTextField(
+          controller: _edit,
+          expands: true,
+          minLines: null,
+          maxLines: null,
+          height: constraints.maxHeight,
+          style: monoStyle,
+          decoration: const InputDecoration(
+            contentPadding: EdgeInsets.all(12),
+          ),
         ),
       );
     }
     final Widget content;
     if (_error.isNotEmpty && _decoded.isEmpty) {
-      content = Text(_error,
-          style: const TextStyle(color: Colors.orange, fontFamily: 'monospace', fontSize: 13));
+      content = SelectableText(
+        _error,
+        style: monoStyle.copyWith(color: tokens.warning),
+      );
     } else {
       content = Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         if (_error.isNotEmpty)
           Padding(
-            padding: const EdgeInsets.only(bottom: 6),
-            child: Text(_error, style: const TextStyle(color: Colors.orange, fontSize: 12)),
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Text(
+              _error,
+              style: Ts.style(
+                size: Ts.md,
+                color: tokens.warning,
+                monoFont: true,
+              ),
+            ),
           ),
-        SelectableText(_decoded,
-            style: const TextStyle(fontFamily: 'monospace', fontSize: 13)),
+        SelectableText(_decoded, style: monoStyle),
       ]);
     }
-    return Container(
-      width: double.infinity,
+    return CodexSurface(
+      variant: CodexSurfaceVariant.sunken,
       padding: const EdgeInsets.all(12),
-      decoration: border,
-      child: SingleChildScrollView(child: Align(alignment: Alignment.topLeft, child: content)),
+      child: SingleChildScrollView(
+        child: Align(alignment: Alignment.topLeft, child: content),
+      ),
     );
   }
 }
@@ -428,7 +473,8 @@ class _CustomFormatterManager extends StatefulWidget {
   const _CustomFormatterManager({required this.core});
 
   @override
-  State<_CustomFormatterManager> createState() => _CustomFormatterManagerState();
+  State<_CustomFormatterManager> createState() =>
+      _CustomFormatterManagerState();
 }
 
 class _CustomFormatterManagerState extends State<_CustomFormatterManager> {
@@ -447,7 +493,8 @@ class _CustomFormatterManagerState extends State<_CustomFormatterManager> {
       _dirty = true;
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${tr('fmt.saveFailed')}: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('${tr('fmt.saveFailed')}: $e')));
       }
     }
   }
@@ -462,7 +509,8 @@ class _CustomFormatterManagerState extends State<_CustomFormatterManager> {
     };
     final result = await showDialog<CustomFormatter>(
       context: context,
-      builder: (ctx) => _FormatterEditDialog(existing: existing, reserved: reserved),
+      builder: (ctx) =>
+          _FormatterEditDialog(existing: existing, reserved: reserved),
     );
     if (result == null) return;
     setState(() {
@@ -482,75 +530,121 @@ class _CustomFormatterManagerState extends State<_CustomFormatterManager> {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
+    final tokens = AppTokens.of(context);
+    final headerStyle = Ts.style(
+      size: Ts.sm,
+      weight: FontWeight.w700,
+      color: tokens.text3,
+      letterSpacing: 0.6,
+    );
     return AlertDialog(
       title: Text(tr('fmt.customFormatter')),
       content: SizedBox(
         width: 640,
-        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Align(
-            alignment: Alignment.centerLeft,
-            child: OutlinedButton.icon(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            CodexButton(
               onPressed: () => _editOrNew(),
               icon: const Icon(Icons.add, size: 16),
               label: Text(tr('fmt.new')),
             ),
-          ),
-          const SizedBox(height: 12),
-          Row(children: [
-            SizedBox(width: 140, child: Text(tr('fmt.name'), style: const TextStyle(fontWeight: FontWeight.w600))),
-            Expanded(child: Text(tr('fmt.formatter'), style: const TextStyle(fontWeight: FontWeight.w600))),
-            SizedBox(width: 90, child: Text(tr('fmt.operation'), style: const TextStyle(fontWeight: FontWeight.w600))),
-          ]),
-          const Divider(),
-          if (_list.isEmpty)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 24),
-              child: Center(child: Text(tr('fmt.noData'), style: const TextStyle(color: Colors.grey))),
-            )
-          else
-            ConstrainedBox(
-              constraints: const BoxConstraints(maxHeight: 320),
-              child: ListView.separated(
-                shrinkWrap: true,
-                itemCount: _list.length,
-                separatorBuilder: (_, __) => const Divider(height: 1),
-                itemBuilder: (ctx, i) {
-                  final f = _list[i];
-                  return Row(children: [
-                    SizedBox(width: 140, child: Text(f.name, overflow: TextOverflow.ellipsis)),
-                    Expanded(
-                      child: Text('${f.command} ${f.params}',
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(fontSize: 12.5, color: scheme.onSurfaceVariant, fontFamily: 'monospace')),
-                    ),
-                    SizedBox(
-                      width: 90,
-                      child: Row(children: [
-                        IconButton(
-                          tooltip: tr('fmt.edit'),
-                          visualDensity: VisualDensity.compact,
-                          icon: const Icon(Icons.edit, size: 16),
-                          onPressed: () => _editOrNew(existing: f, index: i),
-                        ),
-                        IconButton(
-                          tooltip: tr('fmt.delete'),
-                          visualDensity: VisualDensity.compact,
-                          icon: Icon(Icons.delete_outline, size: 16, color: scheme.error),
-                          onPressed: () => _delete(i),
-                        ),
-                      ]),
-                    ),
-                  ]);
-                },
+            const SizedBox(height: 12),
+            Row(children: [
+              SizedBox(
+                width: 140,
+                child: Text(tr('fmt.name'), style: headerStyle),
               ),
+              Expanded(
+                child: Text(tr('fmt.formatter'), style: headerStyle),
+              ),
+              SizedBox(
+                width: 90,
+                child: Text(tr('fmt.operation'), style: headerStyle),
+              ),
+            ]),
+            const SizedBox(height: 6),
+            const CodexDivider(),
+            const SizedBox(height: 6),
+            CodexSurface(
+              variant: CodexSurfaceVariant.sunken,
+              padding: EdgeInsets.zero,
+              child: _list.isEmpty
+                  ? Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 24),
+                      child: Center(
+                        child: Text(
+                          tr('fmt.noData'),
+                          style: Ts.style(size: Ts.md, color: tokens.text3),
+                        ),
+                      ),
+                    )
+                  : ConstrainedBox(
+                      constraints: const BoxConstraints(maxHeight: 320),
+                      child: ListView.separated(
+                        shrinkWrap: true,
+                        itemCount: _list.length,
+                        separatorBuilder: (_, __) => const CodexDivider(),
+                        itemBuilder: (ctx, i) {
+                          final f = _list[i];
+                          return Padding(
+                            padding: const EdgeInsets.fromLTRB(10, 4, 6, 4),
+                            child: Row(children: [
+                              SizedBox(
+                                width: 140,
+                                child: Text(
+                                  f.name,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: Ts.style(
+                                    size: Ts.md,
+                                    color: tokens.text,
+                                  ),
+                                ),
+                              ),
+                              Expanded(
+                                child: Text(
+                                  '${f.command} ${f.params}',
+                                  overflow: TextOverflow.ellipsis,
+                                  style: Ts.style(
+                                    size: 12.5,
+                                    color: tokens.text2,
+                                    monoFont: true,
+                                  ),
+                                ),
+                              ),
+                              SizedBox(
+                                width: 68,
+                                child: Row(children: [
+                                  CodexIconButton(
+                                    icon: const Icon(Icons.edit, size: 16),
+                                    semanticLabel: tr('fmt.edit'),
+                                    onPressed: () =>
+                                        _editOrNew(existing: f, index: i),
+                                  ),
+                                  CodexIconButton(
+                                    icon: const Icon(Icons.delete_outline,
+                                        size: 16),
+                                    semanticLabel: tr('fmt.delete'),
+                                    variant: CodexButtonVariant.danger,
+                                    onPressed: () => _delete(i),
+                                  ),
+                                ]),
+                              ),
+                            ]),
+                          );
+                        },
+                      ),
+                    ),
             ),
-        ]),
+          ],
+        ),
       ),
       actions: [
-        FilledButton(
+        CodexButton(
+          variant: CodexButtonVariant.primary,
           onPressed: () => Navigator.pop(context, _dirty ? _list : null),
-          child: Text(tr('fmt.close')),
+          label: Text(tr('fmt.close')),
         ),
       ],
     );
@@ -559,6 +653,7 @@ class _CustomFormatterManagerState extends State<_CustomFormatterManager> {
 
 class _FormatterEditDialog extends StatefulWidget {
   final CustomFormatter? existing;
+
   /// Names that are already taken (built-ins + other customs) and must be rejected.
   final Set<String> reserved;
   const _FormatterEditDialog({this.existing, this.reserved = const {}});
@@ -595,62 +690,87 @@ class _FormatterEditDialogState extends State<_FormatterEditDialog> {
       setState(() => _err = tr('fmt.nameCollides'));
       return;
     }
-    Navigator.pop(context, CustomFormatter(name: name, command: command, params: _params.text));
+    Navigator.pop(context,
+        CustomFormatter(name: name, command: command, params: _params.text));
   }
 
   @override
   Widget build(BuildContext context) {
+    final tokens = AppTokens.of(context);
+    final labelStyle = Ts.style(
+      size: Ts.sm,
+      weight: FontWeight.w600,
+      color: tokens.text2,
+    );
+    final monoStyle = Ts.style(
+      size: Ts.md,
+      color: tokens.text,
+      monoFont: true,
+    );
     return AlertDialog(
       title: Text(widget.existing == null ? tr('fmt.new') : tr('fmt.edit')),
       content: SizedBox(
         width: 520,
-        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(tr('fmt.nameLabel'), style: const TextStyle(fontWeight: FontWeight.w600)),
-          const SizedBox(height: 4),
-          TextField(
-            controller: _name,
-            // Renaming is safe: the manager replaces by index and persists the
-            // whole list (nothing is keyed by name in storage).
-            decoration: const InputDecoration(isDense: true, border: OutlineInputBorder()),
-          ),
-          const SizedBox(height: 14),
-          Text(tr('fmt.commandLabel'), style: const TextStyle(fontWeight: FontWeight.w600)),
-          const SizedBox(height: 4),
-          TextField(
-            controller: _command,
-            decoration: const InputDecoration(
-              isDense: true,
-              border: OutlineInputBorder(),
-              hintText: '/bin/bash',
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(tr('fmt.nameLabel'), style: labelStyle),
+            const SizedBox(height: 5),
+            CodexTextField(
+              controller: _name,
+              hasError: _err != null,
+              // Renaming is safe: the manager replaces by index and persists the
+              // whole list (nothing is keyed by name in storage).
+              decoration: const InputDecoration(),
             ),
-          ),
-          const SizedBox(height: 14),
-          Text(tr('fmt.params'), style: const TextStyle(fontWeight: FontWeight.w600)),
-          const SizedBox(height: 4),
-          TextField(
-            controller: _params,
-            decoration: const InputDecoration(
-              isDense: true,
-              border: OutlineInputBorder(),
-              hintText: '--value "{VALUE}"',
+            const SizedBox(height: 14),
+            Text(tr('fmt.commandLabel'), style: labelStyle),
+            const SizedBox(height: 5),
+            CodexTextField(
+              controller: _command,
+              hasError: _err != null,
+              style: monoStyle,
+              decoration: const InputDecoration(hintText: '/bin/bash'),
             ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Templates: {VALUE} raw value · {HEX} lowercase hex · {HEX_FILE} temp file of hex '
-            '(large values) · {KEY} · {FIELD} · {SCORE} · {MEMBER}. Params are split into argv '
-            'tokens and passed to the command directly (no shell).',
-            style: TextStyle(fontSize: 11, color: Theme.of(context).hintColor),
-          ),
-          if (_err != null) ...[
-            const SizedBox(height: 8),
-            Text(_err!, style: const TextStyle(color: Colors.red, fontSize: 12)),
+            const SizedBox(height: 14),
+            Text(tr('fmt.params'), style: labelStyle),
+            const SizedBox(height: 5),
+            CodexTextField(
+              controller: _params,
+              style: monoStyle,
+              decoration: const InputDecoration(
+                hintText: '--value "{VALUE}"',
+              ),
+            ),
+            const SizedBox(height: 9),
+            Text(
+              'Templates: {VALUE} raw value · {HEX} lowercase hex · {HEX_FILE} temp file of hex '
+              '(large values) · {KEY} · {FIELD} · {SCORE} · {MEMBER}. Params are split into argv '
+              'tokens and passed to the command directly (no shell).',
+              style: Ts.style(size: Ts.xs, color: tokens.text3),
+            ),
+            if (_err != null) ...[
+              const SizedBox(height: 8),
+              Text(
+                _err!,
+                style: Ts.style(size: Ts.md, color: tokens.danger),
+              ),
+            ],
           ],
-        ]),
+        ),
       ),
       actions: [
-        TextButton(onPressed: () => Navigator.pop(context), child: Text(tr('fmt.cancel'))),
-        FilledButton(onPressed: _submit, child: Text(tr('fmt.ok'))),
+        CodexButton(
+          variant: CodexButtonVariant.ghost,
+          onPressed: () => Navigator.pop(context),
+          label: Text(tr('fmt.cancel')),
+        ),
+        CodexButton(
+          variant: CodexButtonVariant.primary,
+          onPressed: _submit,
+          label: Text(tr('fmt.ok')),
+        ),
       ],
     );
   }

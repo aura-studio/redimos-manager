@@ -17,6 +17,10 @@ import 'i18n.dart';
 import 'models.dart';
 import 'native.dart';
 import 'playground_samples.dart';
+import 'ui_primitives.dart';
+import 'ui_states.dart';
+import 'ui_status.dart';
+import 'ui_surfaces.dart';
 import 'ui_tokens.dart';
 
 class PlaygroundView extends StatefulWidget {
@@ -44,7 +48,8 @@ class PlaygroundView extends StatefulWidget {
 
 class _PlaygroundViewState extends State<PlaygroundView>
     with AutomaticKeepAliveClientMixin {
-  late final CodeHighlightController _script = CodeHighlightController(lang: 'js');
+  late final CodeHighlightController _script =
+      CodeHighlightController(lang: 'js');
   final _editorFocus = FocusNode();
   String _lang = 'js'; // 'js' | 'go'
   int? _sampleIdx;
@@ -56,9 +61,37 @@ class _PlaygroundViewState extends State<PlaygroundView>
   String? _error;
   int? _elapsedMs;
   DateTime? _lastRunAt; // for the toolbar's last-run summary
+  int _runGeneration = 0;
 
   @override
   bool get wantKeepAlive => true;
+
+  @override
+  void didUpdateWidget(PlaygroundView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final entityChanged = oldWidget.config.id != widget.config.id ||
+        oldWidget.kind != widget.kind;
+    final executionContextChanged = entityChanged ||
+        oldWidget.config.port != widget.config.port ||
+        oldWidget.config.requirepass != widget.config.requirepass;
+    if (!executionContextChanged) return;
+
+    _runGeneration++;
+    _busy = false;
+    if (entityChanged) {
+      _lang = 'js';
+      _script
+        ..lang = 'js'
+        ..clear();
+      _sampleIdx = null;
+      _logs = const [];
+      _result = null;
+      _hasRun = false;
+      _error = null;
+      _elapsedMs = null;
+      _lastRunAt = null;
+    }
+  }
 
   // MidBar endGroup bridge: the screen's primary action must be reachable from
   // the global MidBar CTA (v2.3), same as the toolbar Run button.
@@ -99,6 +132,9 @@ class _PlaygroundViewState extends State<PlaygroundView>
   Future<void> _run() async {
     final script = _script.text.trim();
     if (script.isEmpty || _busy) return;
+    final runGeneration = ++_runGeneration;
+    final configId = widget.config.id;
+    final kind = widget.kind;
     setState(() {
       _busy = true;
       _hasRun = true;
@@ -109,7 +145,7 @@ class _PlaygroundViewState extends State<PlaygroundView>
     });
     final c = widget.config;
     final res = await widget.core.playgroundRun(
-      kind: widget.kind,
+      kind: kind,
       lang: _lang,
       script: script,
       port: c.port,
@@ -117,12 +153,18 @@ class _PlaygroundViewState extends State<PlaygroundView>
       config: c,
       timeoutMs: 8000,
     );
-    if (!mounted) return;
+    if (!mounted ||
+        runGeneration != _runGeneration ||
+        widget.config.id != configId ||
+        widget.kind != kind) {
+      return;
+    }
     setState(() {
       _busy = false;
       _lastRunAt = DateTime.now();
-      _logs =
-          ((res['logs'] as List?) ?? const []).map((e) => e.toString()).toList();
+      _logs = ((res['logs'] as List?) ?? const [])
+          .map((e) => e.toString())
+          .toList();
       _elapsedMs = (res['elapsedMs'] as num?)?.toInt();
       if (res['ok'] == true) {
         _result = res['result'];
@@ -138,21 +180,31 @@ class _PlaygroundViewState extends State<PlaygroundView>
   @override
   Widget build(BuildContext context) {
     super.build(context);
-    if (widget.kind == 'redis' && !widget.running) {
-      return _center(Icons.play_circle_outline, tr('pg.instanceNotRunning'),
-          tr('pg.instanceNotRunningSub'));
-    }
     final t = AppTokens.of(context);
-    return Column(children: [
-      _toolbar(t),
-      Divider(height: 1, color: t.hairline),
+    final stopped = widget.kind == 'redis' && !widget.running;
+    return CodexStateShell(
+      key: const ValueKey('playground-state'),
+      state: stopped ? CodexContentState.empty : CodexContentState.content,
+      toolbar:
+          Column(key: const ValueKey('playground-toolbar-anchor'), children: [
+        _toolbar(t),
+        const CodexDivider(),
+      ]),
+      headerGap: 0,
+      message: stopped ? tr('pg.instanceNotRunning') : null,
+      detail: stopped ? tr('pg.instanceNotRunningSub') : null,
+      icon: stopped ? const Icon(Icons.play_circle_outline, size: 22) : null,
+      bodyPadding: const EdgeInsets.symmetric(horizontal: 32, vertical: 24),
       // Mockup .play-wrap: a VERTICAL split — editor (flex 55) over output
       // (flex 45) with a 1px border between, not a side-by-side Row.
-      Expanded(
-        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      content: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
           Expanded(
             flex: 55,
             child: CodeField(
+              key: ValueKey(
+                  'playground-editor-${widget.kind}-${widget.config.id}'),
               controller: _script,
               focusNode: _editorFocus,
               onChanged: (_) => setState(() {}),
@@ -161,11 +213,11 @@ class _PlaygroundViewState extends State<PlaygroundView>
                   : '// ${widget.kind == 'redis' ? 'redis.scan' : 'ddb.scanAll'}(...) · console.log(...)',
             ),
           ),
-          Container(height: 1, color: t.border),
+          const CodexDivider(),
           Expanded(flex: 45, child: _outputPanel(t)),
-        ]),
+        ],
       ),
-    ]);
+    );
   }
 
   // ---- toolbar ----
@@ -206,17 +258,22 @@ class _PlaygroundViewState extends State<PlaygroundView>
       if (r is Map) parts.add('${r.length} ${tr('pg.rowsUnit')}');
     }
     if (_elapsedMs != null) parts.add('${_elapsedMs}ms');
-    final color = failed ? t.danger : t.text3;
+    final status = failed ? CodexStatus.error : CodexStatus.success;
     return Row(mainAxisSize: MainAxisSize.min, children: [
-      Container(
-        width: 7,
-        height: 7,
-        decoration: BoxDecoration(color: failed ? t.danger : t.success, shape: BoxShape.circle),
+      CodexStatusDot(
+        status: status,
+        semanticLabel: failed ? tr('pg.errored') : tr('pg.ran'),
       ),
       const SizedBox(width: 6),
-      Text('上次运行 ${parts.join(' · ')}',
-          style: Ts.style(
-              size: Ts.sm, color: color, monoFont: true, tabularNums: true)),
+      Text(
+        '上次运行 ${parts.join(' · ')}',
+        style: Ts.style(
+          size: Ts.sm,
+          color: failed ? t.danger : t.text3,
+          monoFont: true,
+          tabularNums: true,
+        ),
+      ),
     ]);
   }
 
@@ -272,7 +329,10 @@ class _PlaygroundViewState extends State<PlaygroundView>
           height: 30,
           child: Text(tr(catKey),
               style: Ts.style(
-                  size: Ts.xs, letterSpacing: 1.2, weight: FontWeight.w700, color: t.text3)),
+                  size: Ts.xs,
+                  letterSpacing: 1.2,
+                  weight: FontWeight.w700,
+                  color: t.text3)),
         ),
         for (var i = 0; i < _samples.length; i++)
           PopupMenuItem<int>(
@@ -282,16 +342,22 @@ class _PlaygroundViewState extends State<PlaygroundView>
                 margin: const EdgeInsets.only(top: 5, right: 10),
                 width: 7,
                 height: 7,
-                decoration: BoxDecoration(color: t.accent, shape: BoxShape.circle),
+                decoration:
+                    BoxDecoration(color: t.accent, shape: BoxShape.circle),
               ),
               Expanded(
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text(tr(_samples[i].titleKey),
-                      style: Ts.style(size: Ts.xl, weight: FontWeight.w600, color: t.text)),
-                  const SizedBox(height: 2),
-                  Text(tr(_samples[i].descKey),
-                      style: Ts.style(size: Ts.xs, color: t.text3)),
-                ]),
+                child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(tr(_samples[i].titleKey),
+                          style: Ts.style(
+                              size: Ts.xl,
+                              weight: FontWeight.w600,
+                              color: t.text)),
+                      const SizedBox(height: 2),
+                      Text(tr(_samples[i].descKey),
+                          style: Ts.style(size: Ts.xs, color: t.text3)),
+                    ]),
               ),
             ]),
           ),
@@ -304,7 +370,8 @@ class _PlaygroundViewState extends State<PlaygroundView>
           border: Border.all(color: t.border),
         ),
         child: Row(mainAxisSize: MainAxisSize.min, children: [
-          Text(tr('pg.samplesMenu'), style: Ts.style(size: Ts.lg, color: t.text2)),
+          Text(tr('pg.samplesMenu'),
+              style: Ts.style(size: Ts.lg, color: t.text2)),
           const SizedBox(width: 6),
           Icon(Icons.expand_more, size: 16, color: t.text3),
         ]),
@@ -312,101 +379,109 @@ class _PlaygroundViewState extends State<PlaygroundView>
     );
   }
 
-  // v2.3 primary CTA: dark theme flips to a white fill + near-black text (same
-  // grammar as the MidBar endGroup CTA in main.dart).
-  Widget _runButton(AppTokens t) {
-    final dark = Theme.of(context).brightness == Brightness.dark;
-    final bg = dark ? const Color(0xFFF5F7FB) : t.accent;
-    final fg = dark ? const Color(0xFF10142E) : t.onAccent;
-    return SizedBox(
-      // Mockup .pbtn: 32px tall, radius-sm 6, 14px horizontal padding.
-      height: 32,
-      child: FilledButton.icon(
-        onPressed: _script.text.trim().isEmpty || _busy ? null : _run,
-        icon: _busy
-            ? SizedBox(
-                width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: fg))
-            : Icon(Icons.play_arrow, size: 16, color: fg),
-        label: Text(tr('pg.run'),
-            style: Ts.style(size: Ts.md, weight: FontWeight.w600)),
-        style: FilledButton.styleFrom(
-          backgroundColor: bg,
-          foregroundColor: fg,
-          minimumSize: const Size(0, 32),
-          padding: const EdgeInsets.symmetric(horizontal: 14),
-          shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(Dim.radiusS)),
+  Widget _runButton(AppTokens t) => SizedBox(
+        height: 32,
+        child: CodexButton(
+          variant: CodexButtonVariant.primary,
+          semanticLabel: tr('pg.run'),
+          onPressed: _script.text.trim().isEmpty || _busy ? null : _run,
+          icon: _busy
+              ? SizedBox.square(
+                  dimension: 14,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: t.onAccent,
+                  ),
+                )
+              : const Icon(Icons.play_arrow, size: 16),
+          label: Text(tr('pg.run')),
         ),
-      ),
-    );
-  }
+      );
 
   // ---- output panel ----
 
   // Mockup .output: panel bg with a two-tone .output-head band (panel-2 +
   // hairline bottom border) carrying an eyebrow title + a done-chip status.
   Widget _outputPanel(AppTokens t) {
-    return Container(
-      color: t.panel,
+    return CodexSurface(
+      variant: CodexSurfaceVariant.sunken,
+      padding: EdgeInsets.zero,
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        Container(
-          decoration: BoxDecoration(
-            color: t.panel2,
-            border: Border(bottom: BorderSide(color: t.hairline)),
-          ),
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-          child: Row(children: [
-            // Mockup .op-title: 11px/600 uppercase, .8px tracking, text-3.
-            Text(tr('pg.output').toUpperCase(),
-                style: Ts.style(
-                    size: Ts.xs, letterSpacing: 0.8, weight: FontWeight.w600, color: t.text3)),
-            const SizedBox(width: 10),
-            if (_hasRun && !_busy) _statusChip(t),
-            const Spacer(),
-            if (_hasRun && !_busy)
-              _outputIcon(t, Icons.copy_outlined, tr('br.copy'), _copyOutput),
+        ColoredBox(
+          color: t.panel2,
+          child: Column(children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              child: Row(children: [
+                // Mockup .op-title: 11px/600 uppercase, .8px tracking, text-3.
+                Text(
+                  tr('pg.output').toUpperCase(),
+                  style: Ts.style(
+                    size: Ts.xs,
+                    letterSpacing: 0.8,
+                    weight: FontWeight.w600,
+                    color: t.text3,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                if (_hasRun && !_busy) _statusChip(),
+                const Spacer(),
+                if (_hasRun && !_busy)
+                  _outputIcon(Icons.copy_outlined, tr('br.copy'), _copyOutput),
+              ]),
+            ),
+            const CodexDivider(),
           ]),
         ),
         Expanded(
           child: !_hasRun
-              ? _center(Icons.play_circle_outline, '', tr('pg.emptyOutput'))
+              ? _center(t, Icons.play_circle_outline, '', tr('pg.emptyOutput'))
               // Mockup .output-body: mono 12px log-rows.
               : SingleChildScrollView(
+                  key: ValueKey(
+                      'playground-output-${widget.kind}-${widget.config.id}'),
                   padding: const EdgeInsets.fromLTRB(14, 12, 14, 16),
-                  child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                    for (var i = 0; i < _logs.length; i++) _logRow(i, _logs[i], t),
-                    if (_error != null) _errorBox(t),
-                    if (_error == null && _result != null) ...[
-                      if (_logs.isNotEmpty) const SizedBox(height: 10),
-                      _resultWidget(_result, t),
-                      const SizedBox(height: 10),
-                      _doneFooter(t),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      for (var i = 0; i < _logs.length; i++)
+                        _logRow(i, _logs[i], t),
+                      if (_error != null) _errorBox(t),
+                      if (_error == null && _result != null) ...[
+                        if (_logs.isNotEmpty) const SizedBox(height: 10),
+                        _resultWidget(_result, t),
+                        const SizedBox(height: 10),
+                        _doneFooter(t),
+                      ],
+                      // _run clears logs/result/error before awaiting, so without
+                      // this the empty-output branch below would paint "✓ done"
+                      // for the whole 8s timeout window, while the run is still in
+                      // flight. The header chip already gates on !_busy.
+                      if (_busy)
+                        _runningRow(t)
+                      else if (_error == null &&
+                          _result == null &&
+                          _logs.isEmpty)
+                        _doneFooter(t),
                     ],
-                    // _run clears logs/result/error before awaiting, so without
-                    // this the empty-output branch below would paint "✓ done"
-                    // for the whole 8s timeout window, while the run is still in
-                    // flight. The header chip already gates on !_busy.
-                    if (_busy)
-                      _runningRow(t)
-                    else if (_error == null && _result == null && _logs.isEmpty)
-                      _doneFooter(t),
-                  ]),
+                  ),
                 ),
         ),
       ]),
     );
   }
 
-  Widget _outputIcon(AppTokens t, IconData icon, String tooltip, VoidCallback onTap) {
-    return IconButton(
-      tooltip: tooltip,
-      visualDensity: VisualDensity.compact,
-      padding: EdgeInsets.zero,
-      constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
-      icon: Icon(icon, size: 15, color: t.text3),
-      onPressed: onTap,
-    );
-  }
+  Widget _outputIcon(
+    IconData icon,
+    String tooltip,
+    VoidCallback onTap,
+  ) =>
+      CodexIconButton(
+        icon: Icon(icon, size: 15),
+        semanticLabel: tooltip,
+        tooltip: tooltip,
+        onPressed: onTap,
+      );
 
   void _copyOutput() {
     final sb = StringBuffer();
@@ -425,9 +500,8 @@ class _PlaygroundViewState extends State<PlaygroundView>
     Clipboard.setData(ClipboardData(text: sb.toString().trimRight()));
   }
 
-  Widget _statusChip(AppTokens t) {
+  Widget _statusChip() {
     final failed = _error != null;
-    final color = failed ? t.danger : t.success;
     final parts = <String>[failed ? tr('pg.errored') : tr('pg.ran')];
     if (!failed) {
       // Count what was RETURNED, in container-neutral units. "keys"/"items" would
@@ -441,21 +515,9 @@ class _PlaygroundViewState extends State<PlaygroundView>
       }
     }
     if (_elapsedMs != null) parts.add('${_elapsedMs}ms');
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.10),
-        borderRadius: BorderRadius.circular(99),
-        border: Border.all(color: color.withValues(alpha: 0.6)),
-      ),
-      child: Row(mainAxisSize: MainAxisSize.min, children: [
-        Container(
-            width: 6, height: 6, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
-        const SizedBox(width: 6),
-        Text(parts.join('  ·  '),
-            style: Ts.style(
-                size: Ts.xs, weight: FontWeight.w700, color: color, monoFont: true, tabularNums: true)),
-      ]),
+    return CodexStatusBadge(
+      status: failed ? CodexStatus.error : CodexStatus.success,
+      label: parts.join('  ·  '),
     );
   }
 
@@ -470,7 +532,8 @@ class _PlaygroundViewState extends State<PlaygroundView>
           width: 20,
           child: Text('${i + 1}',
               textAlign: TextAlign.right,
-              style: Ts.style(size: Ts.md, color: t.text3, monoFont: true, height: 1.4)),
+              style: Ts.style(
+                  size: Ts.md, color: t.text3, monoFont: true, height: 1.4)),
         ),
         const SizedBox(width: 10),
         Expanded(
@@ -505,7 +568,8 @@ class _PlaygroundViewState extends State<PlaygroundView>
         ? '✓ ${tr('pg.doneRows')} · $rows ${tr('pg.rowsUnit')}'
         : '✓ ${tr('pg.doneRows')}';
     return Text(txt,
-        style: Ts.style(size: Ts.md, monoFont: true, color: t.success, tabularNums: true));
+        style: Ts.style(
+            size: Ts.md, monoFont: true, color: t.success, tabularNums: true));
   }
 
   Widget _errorBox(AppTokens t) {
@@ -562,12 +626,20 @@ class _PlaygroundViewState extends State<PlaygroundView>
               width: 20,
               child: Text('${i + 1}',
                   textAlign: TextAlign.right,
-                  style: Ts.style(size: Ts.md, color: t.text3, monoFont: true, height: 1.4)),
+                  style: Ts.style(
+                      size: Ts.md,
+                      color: t.text3,
+                      monoFont: true,
+                      height: 1.4)),
             ),
             const SizedBox(width: 10),
             Expanded(
               child: SelectableText(lines[i],
-                  style: Ts.style(size: Ts.md, height: 1.4, monoFont: true, color: t.text2)),
+                  style: Ts.style(
+                      size: Ts.md,
+                      height: 1.4,
+                      monoFont: true,
+                      color: t.text2)),
             ),
           ]),
         ),
@@ -587,19 +659,34 @@ class _PlaygroundViewState extends State<PlaygroundView>
     }
   }
 
-  Widget _center(IconData icon, String title, String subtitle) => Center(
+  Widget _center(
+    AppTokens t,
+    IconData icon,
+    String title,
+    String subtitle,
+  ) =>
+      Center(
         child: Padding(
           padding: const EdgeInsets.all(24),
           child: Column(mainAxisSize: MainAxisSize.min, children: [
-            Icon(icon, size: 36, color: Colors.grey),
+            Icon(icon, size: 36, color: t.text3),
             if (title.isNotEmpty) ...[
               const SizedBox(height: 12),
-              Text(title, style: const TextStyle(fontSize: 14)),
+              Text(
+                title,
+                style: Ts.style(
+                  size: Ts.lg,
+                  weight: FontWeight.w600,
+                  color: t.text2,
+                ),
+              ),
             ],
             const SizedBox(height: 6),
-            Text(subtitle,
-                textAlign: TextAlign.center,
-                style: const TextStyle(fontSize: 12, color: Colors.grey)),
+            Text(
+              subtitle,
+              textAlign: TextAlign.center,
+              style: Ts.style(size: Ts.md, color: t.text3),
+            ),
           ]),
         ),
       );

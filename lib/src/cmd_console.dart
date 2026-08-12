@@ -14,7 +14,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'i18n.dart';
-import 'ui_theme.dart';
+import 'ui_fields.dart';
+import 'ui_primitives.dart';
+import 'ui_states.dart';
+import 'ui_surfaces.dart';
 import 'ui_tokens.dart';
 
 // The redimos proxy's reply for ANY storage-layer error — deliberately generic
@@ -42,7 +45,9 @@ const _kBackendErrorLatch = Duration(seconds: 15);
 String backendDegradedTooltip(String? backendError) {
   final generic = tr('cmd.backendDegraded');
   if (backendError == null || backendError.isEmpty) return generic;
-  return '$generic\n\n${trp('cmd.backendDegradedCause', {'err': backendError})}';
+  return '$generic\n\n${trp('cmd.backendDegradedCause', {
+        'err': backendError
+      })}';
 }
 
 // ---------------------------------------------------------------------------
@@ -106,7 +111,9 @@ class RespParser {
         return e < 0 ? null : _Parsed(RespError(_decode(i + 1, e)), e + 2);
       case 0x3A: // ':'
         final e = _crlf(i + 1);
-        return e < 0 ? null : _Parsed(int.tryParse(_decode(i + 1, e)) ?? 0, e + 2);
+        return e < 0
+            ? null
+            : _Parsed(int.tryParse(_decode(i + 1, e)) ?? 0, e + 2);
       case 0x24: // '$' bulk string
         final e = _crlf(i + 1);
         if (e < 0) return null;
@@ -155,8 +162,8 @@ class RedisConsoleClient {
   RedisConsoleClient(this.host, this.port, {this.auth});
 
   Future<void> connect() async {
-    _sock = await Socket.connect(host, port,
-        timeout: const Duration(seconds: 5));
+    _sock =
+        await Socket.connect(host, port, timeout: const Duration(seconds: 5));
     connected = true;
     _sock!.listen(_onData,
         onError: (Object e) => _fail(e),
@@ -346,10 +353,32 @@ class _OutLine {
 // Command completion vocabulary for the suggestion chips. A curated common
 // subset (matching the _welcome examples), not the full Redis command set.
 const _kConsoleCommands = [
-  'PING', 'SET', 'GET', 'DEL', 'EXISTS', 'EXPIRE', 'TTL', 'TYPE',
-  'KEYS', 'SCAN', 'HSET', 'HGET', 'HGETALL', 'LPUSH', 'RPUSH', 'LRANGE',
-  'SADD', 'SMEMBERS', 'ZADD', 'ZRANGE', 'INCR', 'DECR', 'SELECT', 'DBSIZE',
-  'INFO', 'FLUSHDB',
+  'PING',
+  'SET',
+  'GET',
+  'DEL',
+  'EXISTS',
+  'EXPIRE',
+  'TTL',
+  'TYPE',
+  'KEYS',
+  'SCAN',
+  'HSET',
+  'HGET',
+  'HGETALL',
+  'LPUSH',
+  'RPUSH',
+  'LRANGE',
+  'SADD',
+  'SMEMBERS',
+  'ZADD',
+  'ZRANGE',
+  'INCR',
+  'DECR',
+  'SELECT',
+  'DBSIZE',
+  'INFO',
+  'FLUSHDB',
 ];
 
 class CmdConsole extends StatefulWidget {
@@ -372,13 +401,16 @@ class CmdConsole extends StatefulWidget {
   // older redimos publishes no cause at all. So this refines the tooltip when
   // present and the generic wording must stand on its own when absent.
   final String? backendError;
+
   /// The instance's display name for the toolbar identity chip (mockup
   /// .inst-crumb shows "<b>prod-redis-01</b> · db3", not host:port). Null
   /// keeps the legacy host:port chip.
   final String? instanceName;
+
   /// Seeded connection-age label for the toolbar note ("RESP3 · 已连接 2h 14m"
   /// in the mockup). Null hides the note.
   final String? connectedLabel;
+
   /// The DB index the chip starts on (mockup shows "· db3"). Real sessions
   /// always open on db0; the capture seeds the mockup's value.
   final int initialDb;
@@ -410,7 +442,8 @@ class _CmdConsoleState extends State<CmdConsole>
   final List<String> _history = [];
   int _histIdx = -1;
   bool _connecting = false;
-  bool _everConnected = false; // distinguishes "Connecting…" from "Reconnecting…"
+  bool _everConnected =
+      false; // distinguishes "Connecting…" from "Reconnecting…"
   int _db = 0;
   Timer? _reconnectTimer; // auto-reconnect while the instance is meant to be up
   // Completion tray: visible before the first command (or via the History
@@ -444,7 +477,9 @@ class _CmdConsoleState extends State<CmdConsole>
       _sawBackendErrorAt = null;
     }
     // Reconnect when the target endpoint changes, or when the instance comes up.
-    if (old.port != widget.port || old.host != widget.host || old.auth != widget.auth) {
+    if (old.port != widget.port ||
+        old.host != widget.host ||
+        old.auth != widget.auth) {
       _disconnect(silent: true);
       _out.clear();
       _db = 0;
@@ -546,7 +581,6 @@ class _CmdConsoleState extends State<CmdConsole>
 
   String get _prompt =>
       '${widget.host}:${widget.port}${_db > 0 ? '[$_db]' : ''}> ';
-
 
   void _refocus() {
     // Keep typing after a command: return focus to the input on the next frame.
@@ -697,52 +731,29 @@ class _CmdConsoleState extends State<CmdConsole>
   @override
   Widget build(BuildContext context) {
     super.build(context); // AutomaticKeepAliveClientMixin
-    if (!widget.running) {
-      final reason = widget.statusReason;
-      if (reason != null && reason.isNotEmpty) {
-        // The proxy is restarting/failed with a known cause — show it instead of
-        // the generic "not running" hint, so the real problem is in front of you.
-        return _placeholder(
-          icon: Icons.error_outline,
-          title: tr('cmd.instanceFailedToStart'),
-          subtitle: reason,
-          tint: Colors.redAccent,
-        );
-      }
-      return _placeholder(
-        icon: Icons.play_circle_outline,
-        title: tr('cmd.instanceNotRunning'),
-        subtitle: tr('cmd.startConfigHint'),
-      );
-    }
-
-    final connected = _client?.connected ?? false;
-    final dark = Theme.of(context).brightness == Brightness.dark;
     final t = AppTokens.of(context);
-    // Terminal palette, theme-aware (v2.3 tokens). Dark keeps the classic
-    // near-black console; light uses the panel-2 well.
-    final termBg = dark ? const Color(0xFF0B0E13) : t.panel2;
-
-    // Not connected yet (initial connect or an in-progress reconnect): a centered
-    // spinner, and the console is not operable until it's back.
-    if (!connected) {
-      return Container(color: termBg, child: _loadingView());
-    }
+    final connected = _client?.connected ?? false;
+    final reason = widget.statusReason;
+    final failed = !widget.running && reason != null && reason.isNotEmpty;
+    final state = failed
+        ? CodexContentState.error
+        : !widget.running
+            ? CodexContentState.empty
+            : connected
+                ? CodexContentState.content
+                : CodexContentState.loading;
     final promptColor = connected ? t.accent : t.text3;
+
     // Fold _out into render items ONCE: a stamped prompt line absorbs its
     // output lines (up to the next prompt) into one command-block card.
-    // Mutating the builder's own index (the old `i = j` skip) has no effect —
-    // ListView.builder owns the index, so every output line rendered twice
-    // (pixel-fidelity-v23 CP 9.x).
     final streamItems = <Widget>[];
     for (var i = 0; i < _out.length;) {
       final l = _out[i];
       if (l.kind == _Kind.prompt && l.elapsedMs != null) {
         final j = _blockEnd(i);
-        // Mockup .console-stream gap:12px between block cards.
         streamItems.add(Padding(
           padding: const EdgeInsets.only(bottom: 12),
-          child: _commandBlock(i, j, dark, t),
+          child: _commandBlock(i, j, t),
         ));
         i = j + 1;
       } else {
@@ -750,38 +761,85 @@ class _CmdConsoleState extends State<CmdConsole>
           padding: const EdgeInsets.symmetric(vertical: 1),
           child: SelectableText(
             l.text.isEmpty ? ' ' : l.text,
-            style: Ts.style(size: Ts.lg, color: _color(l.kind, t), monoFont: true, height: 1.35),
+            style: Ts.style(
+              size: Ts.lg,
+              color: _color(l.kind, t),
+              monoFont: true,
+              height: 1.35,
+            ),
           ),
         ));
         i++;
       }
     }
-    return Container(
-      color: termBg,
+
+    return ColoredBox(
+      color: t.bg,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // Top toolbar (v2.3): RESP connection state + History / Clear.
+          // These anchors remain mounted while the bounded viewport changes state.
           _toolbar(t, connected),
-          Divider(height: 1, color: t.hairline),
-          // scrollback — or a terminal-style welcome banner before any command
+          const CodexDivider(),
           Expanded(
-            child: _out.isEmpty
-                ? _welcome(dark)
-                : Scrollbar(
-                    controller: _scroll,
-                    child: ListView(
-                      controller: _scroll,
-                      padding: const EdgeInsets.fromLTRB(18, 14, 18, 14),
-                      children: streamItems,
-                    ),
-                  ),
+            child: CodexStateShell(
+              key: const ValueKey('cmd-console-state'),
+              state: state,
+              content: CodexSurface(
+                variant: CodexSurfaceVariant.sunken,
+                padding: EdgeInsets.zero,
+                child: _out.isEmpty
+                    ? _welcome(t)
+                    : ListView(
+                        controller: _scroll,
+                        padding: const EdgeInsets.fromLTRB(18, 14, 18, 14),
+                        children: streamItems,
+                      ),
+              ),
+              message: failed
+                  ? tr('cmd.instanceFailedToStart')
+                  : !widget.running
+                      ? tr('cmd.instanceNotRunning')
+                      : _everConnected
+                          ? tr('cmd.reconnecting')
+                          : tr('cmd.connecting'),
+              detail: failed
+                  ? reason
+                  : !widget.running
+                      ? tr('cmd.startConfigHint')
+                      : '${widget.host}:${widget.port}',
+              icon: !widget.running && !failed
+                  ? const Icon(Icons.play_circle_outline, size: 22)
+                  : null,
+              bodyPadding:
+                  const EdgeInsets.symmetric(horizontal: 32, vertical: 24),
+            ),
           ),
-          // Completion tray (v2.3): command suggestions above the input.
-          if (_showChips) _chipTray(t),
-          Divider(height: 1, color: t.hairline),
-          // input row
+          // The completion/history slot keeps its footprint when dismissed, so
+          // command submission and Escape never move the viewport or input anchor.
+          SizedBox(
+            height: 32,
+            child: ColoredBox(
+              color: t.panel,
+              child: Visibility(
+                visible: _showChips,
+                maintainState: true,
+                maintainAnimation: true,
+                maintainSize: true,
+                child: ExcludeFocus(
+                  key: const ValueKey('cmd-console-helper-focus'),
+                  excluding: !_showChips || !connected,
+                  child: IgnorePointer(
+                    ignoring: !connected,
+                    child: _chipTray(t),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          const CodexDivider(),
           Container(
+            key: const ValueKey('cmd-console-input-anchor'),
             color: t.panel,
             padding: const EdgeInsets.fromLTRB(12, 6, 12, 8),
             child: Row(
@@ -794,19 +852,27 @@ class _CmdConsoleState extends State<CmdConsole>
                     child: Container(
                       width: 8,
                       height: 8,
-                      decoration: const BoxDecoration(
-                          color: Accents.amber, shape: BoxShape.circle),
+                      decoration: BoxDecoration(
+                        color: t.warning,
+                        shape: BoxShape.circle,
+                      ),
                     ),
                   ),
                   const SizedBox(width: 8),
                 ],
                 Text(
                   _connecting ? '${tr('cmd.connectingPrompt')} ' : _prompt,
-                  style: Ts.style(size: Ts.lg, color: promptColor, monoFont: true),
+                  style: Ts.style(
+                    size: Ts.lg,
+                    color: promptColor,
+                    monoFont: true,
+                  ),
                 ),
+                const SizedBox(width: 8),
                 Expanded(
                   child: Focus(
                     onKeyEvent: (node, event) {
+                      if (!connected) return KeyEventResult.ignored;
                       if (event is KeyDownEvent) {
                         if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
                           _recall(-1);
@@ -823,38 +889,41 @@ class _CmdConsoleState extends State<CmdConsole>
                       }
                       return KeyEventResult.ignored;
                     },
-                    child: TextField(
+                    child: CodexTextField(
                       controller: _input,
                       focusNode: _focus,
-                      autofocus: true,
+                      autofocus: connected,
                       enabled: connected,
                       onChanged: (_) => setState(() {}),
-                      // Mockup .console-input input: the typed command is
-                      // key info — 600 (v2.4 emphasis).
-                      style: Ts.style(size: Ts.lg, weight: FontWeight.w600,
-                          color: t.text, monoFont: true),
-                      cursorColor: t.accent,
+                      style: Ts.style(
+                        size: Ts.lg,
+                        weight: FontWeight.w600,
+                        color: t.text,
+                        monoFont: true,
+                      ),
                       decoration: InputDecoration(
-                        isDense: true,
-                        // Shield from the theme-level .f-input contentPadding
-                        // (CP 7.6): console rows align to the stream above;
-                        // the borderless input adds no padding of its own.
-                        contentPadding: EdgeInsets.zero,
-                        border: InputBorder.none,
                         hintText: connected
                             ? tr('cmd.typeCommandHint')
                             : tr('cmd.notConnected'),
-                        hintStyle: Ts.style(size: Ts.lg, color: t.text3, monoFont: true),
+                        hintStyle: Ts.style(
+                          size: Ts.lg,
+                          color: t.text3,
+                          monoFont: true,
+                        ),
                       ),
                       onSubmitted: _submit,
                     ),
                   ),
                 ),
-                if (!connected && !_connecting)
-                  TextButton(
+                if (widget.running && !connected && !_connecting) ...[
+                  const SizedBox(width: 8),
+                  CodexButton(
+                    semanticLabel: tr('cmd.reconnect'),
                     onPressed: _connect,
-                    child: Text(tr('cmd.reconnect')),
+                    icon: const Icon(Icons.refresh, size: 15),
+                    label: Text(tr('cmd.reconnect')),
                   ),
+                ],
               ],
             ),
           ),
@@ -867,6 +936,7 @@ class _CmdConsoleState extends State<CmdConsole>
   // Clear on the right. (The screen breadcrumb lives in the global TopBar.)
   Widget _toolbar(AppTokens t, bool connected) {
     return Container(
+      key: const ValueKey('cmd-console-toolbar-anchor'),
       height: 42, // mockup .console-toolbar 42h (logs_page precedent)
       color: t.panel,
       padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -887,24 +957,35 @@ class _CmdConsoleState extends State<CmdConsole>
           ),
           child: Row(mainAxisSize: MainAxisSize.min, children: [
             Container(
-                width: 7, height: 7, // mockup .dot
+                width: 7,
+                height: 7, // mockup .dot
                 decoration: BoxDecoration(
-                    color: connected ? t.success : Colors.grey,
+                    color: connected ? t.success : t.text3,
                     shape: BoxShape.circle)),
             if (widget.instanceName != null) ...[
               const SizedBox(width: 8), // mockup .inst-crumb gap:8
               Text(widget.instanceName!,
-                  style: Ts.style(size: 12.5, weight: FontWeight.w600, color: t.text)),
+                  style: Ts.style(
+                      size: 12.5, weight: FontWeight.w600, color: t.text)),
               const SizedBox(width: 8),
               Text('· db$_db',
-                  style: Ts.style(size: 12.5, weight: FontWeight.w600, color: t.text)),
+                  style: Ts.style(
+                      size: 12.5, weight: FontWeight.w600, color: t.text)),
             ] else ...[
               const SizedBox(width: 7),
               Text('>_',
-                  style: Ts.style(size: Ts.md, weight: FontWeight.w700, color: t.accent, monoFont: true)),
+                  style: Ts.style(
+                      size: Ts.md,
+                      weight: FontWeight.w700,
+                      color: t.accent,
+                      monoFont: true)),
               const SizedBox(width: 6),
               Text('${widget.host}:${widget.port}${_db > 0 ? ' · db$_db' : ''}',
-                  style: Ts.style(size: Ts.sm, color: t.text2, monoFont: true, tabularNums: true)),
+                  style: Ts.style(
+                      size: Ts.sm,
+                      color: t.text2,
+                      monoFont: true,
+                      tabularNums: true)),
               const SizedBox(width: 8),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
@@ -914,7 +995,9 @@ class _CmdConsoleState extends State<CmdConsole>
                   border: Border.all(color: connected ? t.success : t.border),
                 ),
                 child: Text('RESP',
-                    style: Ts.style(size: Ts.xs, weight: FontWeight.w700,
+                    style: Ts.style(
+                        size: Ts.xs,
+                        weight: FontWeight.w700,
                         color: connected ? t.success : t.text3)),
               ),
             ],
@@ -925,45 +1008,28 @@ class _CmdConsoleState extends State<CmdConsole>
           const SizedBox(width: 8),
           Text('RESP3 · 已连接 ', style: Ts.style(size: Ts.md, color: t.text3)),
           Text(widget.connectedLabel!,
-              style: Ts.style(size: Ts.md, weight: FontWeight.w600, color: t.text2)),
+              style: Ts.style(
+                  size: Ts.md, weight: FontWeight.w600, color: t.text2)),
         ],
         const Spacer(),
-        // Mockup right cluster: two .abtn (26h, pad 0 11, border, radius-sm,
-        // icon + 12/500 text-2 label).
-        _abtn(t,
-            icon: Icons.history,
-            label: 'History', // no i18n key exists; plain label, not a tr() miss
-            iconColor: _showChips ? t.accent : t.text2,
-            onPressed: () => setState(() => _showChips = !_showChips)),
-        const SizedBox(width: 8),
-        _abtn(t, icon: Icons.clear_all, label: tr('cmd.clear'), onPressed: _clearOut),
-      ]),
-    );
-  }
-
-  // Mockup .abtn: 26px bordered neutral button, icon + 12px/500 text-2 label.
-  Widget _abtn(AppTokens t,
-      {required IconData icon,
-      required String label,
-      required VoidCallback onPressed,
-      Color? iconColor}) {
-    return InkWell(
-      borderRadius: BorderRadius.circular(Dim.radiusS),
-      onTap: onPressed,
-      child: Container(
-        height: 26,
-        padding: const EdgeInsets.symmetric(horizontal: 11),
-        decoration: BoxDecoration(
-          color: t.panel,
-          borderRadius: BorderRadius.circular(Dim.radiusS),
-          border: Border.all(color: t.border),
+        CodexButton(
+          semanticLabel: 'History',
+          onPressed: () => setState(() => _showChips = !_showChips),
+          icon: Icon(
+            Icons.history,
+            size: 14,
+            color: _showChips ? t.accent : t.text2,
+          ),
+          label: const Text('History'),
         ),
-        child: Row(mainAxisSize: MainAxisSize.min, children: [
-          Icon(icon, size: 13, color: iconColor ?? t.text2),
-          const SizedBox(width: 5),
-          Text(label, style: Ts.style(size: 12, weight: FontWeight.w500, color: t.text2)),
-        ]),
-      ),
+        const SizedBox(width: 8),
+        CodexButton(
+          semanticLabel: tr('cmd.clear'),
+          onPressed: _clearOut,
+          icon: const Icon(Icons.clear_all, size: 14),
+          label: Text(tr('cmd.clear')),
+        ),
+      ]),
     );
   }
 
@@ -1040,38 +1106,43 @@ class _CmdConsoleState extends State<CmdConsole>
   // head band (prompt + command left, elapsed badge right, >200ms warning) over
   // the command's output lines. Blocks are spaced 12px apart (the stream's
   // padding/gap come from the ListView, not here).
-  Widget _commandBlock(int start, int end, bool dark, AppTokens t) {
+  Widget _commandBlock(int start, int end, AppTokens t) {
     final head = _out[start];
     final slow = head.elapsedMs! > 200;
-    return Container(
-      decoration: BoxDecoration(
-        color: t.panel,
-        borderRadius: BorderRadius.circular(Dim.radiusM),
-        border: Border.all(color: t.hairline),
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(Dim.radiusM - 1),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          // Head band (mockup .cmd-block-head): panel-2 + hairline bottom border.
+    return CodexSurface(
+      padding: EdgeInsets.zero,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
           Container(
             decoration: BoxDecoration(
               color: t.panel2,
               border: Border(bottom: BorderSide(color: t.hairline)),
             ),
             padding: const EdgeInsets.fromLTRB(12, 7, 12, 7),
-            // Plain Text/SelectableText runs instead of SelectableText.rich:
-            // the rich variant rasterises as solid glyph boxes in the capture
-            // channel (pixel-fidelity-v23 CP 9.x inst-console diagnosis).
             child: Row(children: [
               Expanded(
                 child: Row(children: [
                   if (head.promptPrefix.isNotEmpty)
-                    Text(head.promptPrefix,
-                        style: Ts.style(size: Ts.md, color: t.accent, monoFont: true, height: 1.35)),
+                    Text(
+                      head.promptPrefix,
+                      style: Ts.style(
+                        size: Ts.md,
+                        color: t.accent,
+                        monoFont: true,
+                        height: 1.35,
+                      ),
+                    ),
                   Flexible(
                     child: SelectableText(
                       head.text.isEmpty ? ' ' : head.text,
-                      style: Ts.style(size: Ts.lg, weight: FontWeight.w600, color: t.text, monoFont: true, height: 1.35),
+                      style: Ts.style(
+                        size: Ts.lg,
+                        weight: FontWeight.w600,
+                        color: t.text,
+                        monoFont: true,
+                        height: 1.35,
+                      ),
                     ),
                   ),
                 ]),
@@ -1080,40 +1151,49 @@ class _CmdConsoleState extends State<CmdConsole>
                 Icon(Icons.warning_amber_rounded, size: 13, color: t.warning),
                 const SizedBox(width: 4),
               ],
-              // Mockup .elapsed: right-aligned, 600, tabular-nums.
-              Text('${head.elapsedMs} ms',
-                  style: Ts.style(size: Ts.sm, weight: FontWeight.w600,
-                      color: slow ? t.warning : t.text2, monoFont: true, tabularNums: true)),
+              Text(
+                '${head.elapsedMs} ms',
+                style: Ts.style(
+                  size: Ts.sm,
+                  weight: FontWeight.w600,
+                  color: slow ? t.warning : t.text2,
+                  monoFont: true,
+                  tabularNums: true,
+                ),
+              ),
             ]),
           ),
-          // Output body (mockup .cmd-out).
           if (end > start)
             Padding(
               padding: const EdgeInsets.fromLTRB(12, 9, 12, 9),
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                for (var k = start + 1; k <= end; k++)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 3),
-                    child: SelectableText(
-                      _out[k].text.isEmpty ? ' ' : _out[k].text,
-                      style: Ts.style(size: Ts.md, color: _color(_out[k].kind, t),
-                          weight: _weight(_out[k].kind), monoFont: true, height: 1.4),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  for (var k = start + 1; k <= end; k++)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 3),
+                      child: SelectableText(
+                        _out[k].text.isEmpty ? ' ' : _out[k].text,
+                        style: Ts.style(
+                          size: Ts.md,
+                          color: _color(_out[k].kind, t),
+                          weight: _weight(_out[k].kind),
+                          monoFont: true,
+                          height: 1.4,
+                        ),
+                      ),
                     ),
-                  ),
-              ]),
+                ],
+              ),
             ),
-        ]),
+        ],
       ),
     );
   }
 
-  // Empty-console welcome: a small redis-cli-style banner + clickable example
-  // commands, so a connected-but-idle console isn't just a blank board.
-  Widget _welcome(bool dark) {
-    final ink = dark ? const Color(0xFFC7D0DC) : const Color(0xFF3A424D);
-    final muted = dark ? const Color(0xFF6B7686) : const Color(0xFF8A93A0);
-    final accent = dark ? const Color(0xFF7FB2E6) : const Color(0xFF2F6FB3);
-    final mono = TextStyle(fontFamily: 'monospace', fontSize: 12.5, height: 1.55, color: muted);
+  // Empty-console welcome: a compact redis-cli banner and shared action
+  // primitives, painted entirely from the active Codex token set.
+  Widget _welcome(AppTokens t) {
     const examples = [
       'PING',
       'SET greeting "hello"',
@@ -1122,102 +1202,68 @@ class _CmdConsoleState extends State<CmdConsole>
       'TYPE greeting',
       'INFO server',
     ];
+    final mono = Ts.style(
+      size: 12.5,
+      height: 1.55,
+      color: t.text3,
+      monoFont: true,
+    );
     return SingleChildScrollView(
       padding: const EdgeInsets.fromLTRB(16, 18, 16, 12),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(children: [
-          Icon(Icons.terminal, size: 18, color: accent),
-          const SizedBox(width: 8),
-          Text('redimos-cli',
-              style: TextStyle(
-                  fontFamily: 'monospace', fontSize: 13, fontWeight: FontWeight.w700, color: ink)),
-        ]),
-        const SizedBox(height: 10),
-        Text('${tr('cmd.connectedTo')} ${widget.host}:${widget.port} ${tr('cmd.redisCompatible')}', style: mono),
-        Text(tr('cmd.scanTip'), style: mono),
-        const SizedBox(height: 16),
-        Text(tr('cmd.tryCommand'),
-            style: mono.copyWith(color: ink)),
-        const SizedBox(height: 10),
-        Wrap(spacing: 8, runSpacing: 8, children: [
-          for (final c in examples) _cmdChip(c, dark),
-        ]),
-        const SizedBox(height: 18),
-        Text(tr('cmd.historyHint'),
-            style: mono.copyWith(fontSize: 11.5)),
-      ]),
-    );
-  }
-
-  // A clickable example-command chip: inserts the command into the input.
-  Widget _cmdChip(String cmd, bool dark) {
-    final bg = dark ? const Color(0xFF161B22) : Colors.white;
-    final border = dark ? const Color(0xFF283040) : const Color(0xFFDCE0E6);
-    final fg = dark ? const Color(0xFF9DB8DE) : const Color(0xFF2F6FB3);
-    return InkWell(
-      borderRadius: BorderRadius.circular(6),
-      onTap: () {
-        _input.text = cmd;
-        _input.selection = TextSelection.collapsed(offset: cmd.length);
-        _focus.requestFocus();
-      },
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-        decoration: BoxDecoration(
-          color: bg,
-          borderRadius: BorderRadius.circular(6),
-          border: Border.all(color: border),
-        ),
-        child: Text(cmd, style: TextStyle(fontFamily: 'monospace', fontSize: 12, color: fg)),
-      ),
-    );
-  }
-
-  // Centered loading view shown while (re)connecting — mirrors _placeholder's
-  // layout but with a spinner. The console stays non-interactive until connected.
-  Widget _loadingView() {
-    return Center(
       child: Column(
-        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const SizedBox(
-            width: 34,
-            height: 34,
-            child: CircularProgressIndicator(strokeWidth: 3),
+          Row(children: [
+            Icon(Icons.terminal, size: 18, color: t.accent),
+            const SizedBox(width: 8),
+            Text(
+              'redimos-cli',
+              style: Ts.style(
+                size: Ts.lg,
+                weight: FontWeight.w700,
+                color: t.text,
+                monoFont: true,
+              ),
+            ),
+          ]),
+          const SizedBox(height: 10),
+          Text(
+            '${tr('cmd.connectedTo')} ${widget.host}:${widget.port} ${tr('cmd.redisCompatible')}',
+            style: mono,
+          ),
+          Text(tr('cmd.scanTip'), style: mono),
+          const SizedBox(height: 16),
+          Text(tr('cmd.tryCommand'), style: mono.copyWith(color: t.text)),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [for (final command in examples) _cmdChip(command, t)],
           ),
           const SizedBox(height: 18),
-          Text(_everConnected ? tr('cmd.reconnecting') : tr('cmd.connecting'),
-              style: const TextStyle(fontSize: 14)),
-          const SizedBox(height: 6),
-          Text('${widget.host}:${widget.port}',
-              style: const TextStyle(fontSize: 12, color: Colors.grey)),
+          Text(
+            tr('cmd.historyHint'),
+            style: mono.copyWith(fontSize: Ts.md),
+          ),
         ],
       ),
     );
   }
 
-  Widget _placeholder(
-      {required IconData icon,
-      required String title,
-      required String subtitle,
-      Color? tint}) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 32),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 40, color: tint ?? Colors.grey),
-            const SizedBox(height: 12),
-            Text(title, style: const TextStyle(fontSize: 14)),
-            const SizedBox(height: 6),
-            SelectableText(subtitle,
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                    fontSize: 12, color: Colors.grey, height: 1.4)),
-          ],
+  Widget _cmdChip(String command, AppTokens t) => CodexButton(
+        semanticLabel: command,
+        onPressed: () {
+          _input.text = command;
+          _input.selection = TextSelection.collapsed(offset: command.length);
+          _focus.requestFocus();
+        },
+        label: Text(
+          command,
+          style: Ts.style(
+            size: Ts.sm,
+            color: t.text2,
+            monoFont: true,
+          ),
         ),
-      ),
-    );
-  }
+      );
 }

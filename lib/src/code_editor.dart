@@ -5,6 +5,7 @@
 
 import 'package:flutter/material.dart';
 
+import 'ui_surfaces.dart';
 import 'ui_tokens.dart';
 
 const double kCodeFontSize = 12.5;
@@ -14,43 +15,107 @@ const double kCodeFontSize = 12.5;
 const double kCodeLineHeight = 21 / 12.5;
 
 const _jsKeywords = <String>{
-  'const', 'let', 'var', 'function', 'return', 'if', 'else', 'for', 'while',
-  'do', 'of', 'in', 'new', 'class', 'extends', 'typeof', 'instanceof', 'try',
-  'catch', 'finally', 'throw', 'switch', 'case', 'break', 'continue', 'default',
-  'true', 'false', 'null', 'undefined', 'void', 'this', 'async', 'await',
-  'yield', 'delete',
+  'const',
+  'let',
+  'var',
+  'function',
+  'return',
+  'if',
+  'else',
+  'for',
+  'while',
+  'do',
+  'of',
+  'in',
+  'new',
+  'class',
+  'extends',
+  'typeof',
+  'instanceof',
+  'try',
+  'catch',
+  'finally',
+  'throw',
+  'switch',
+  'case',
+  'break',
+  'continue',
+  'default',
+  'true',
+  'false',
+  'null',
+  'undefined',
+  'void',
+  'this',
+  'async',
+  'await',
+  'yield',
+  'delete',
 };
 
 const _goKeywords = <String>{
-  'package', 'import', 'func', 'return', 'if', 'else', 'for', 'range', 'map',
-  'struct', 'interface', 'type', 'var', 'const', 'chan', 'go', 'defer',
-  'select', 'switch', 'case', 'break', 'continue', 'default', 'fallthrough',
-  'true', 'false', 'nil', 'make', 'len', 'append', 'cap', 'new', 'panic',
-  'recover', 'string', 'int', 'int64', 'bool', 'byte', 'error', 'float64',
-  'rune', 'uint', 'interface{}',
+  'package',
+  'import',
+  'func',
+  'return',
+  'if',
+  'else',
+  'for',
+  'range',
+  'map',
+  'struct',
+  'interface',
+  'type',
+  'var',
+  'const',
+  'chan',
+  'go',
+  'defer',
+  'select',
+  'switch',
+  'case',
+  'break',
+  'continue',
+  'default',
+  'fallthrough',
+  'true',
+  'false',
+  'nil',
+  'make',
+  'len',
+  'append',
+  'cap',
+  'new',
+  'panic',
+  'recover',
+  'string',
+  'int',
+  'int64',
+  'bool',
+  'byte',
+  'error',
+  'float64',
+  'rune',
+  'uint',
+  'interface{}',
 };
 
 class _Palette {
   final Color plain, comment, str, number, keyword, fn;
-  const _Palette(this.plain, this.comment, this.str, this.number, this.keyword, this.fn);
+  const _Palette(
+      this.plain, this.comment, this.str, this.number, this.keyword, this.fn);
 }
 
-// v2.3: the highlight palette derives from the live AppTokens so the editor
-// tracks the active theme's accent/semantic colours instead of fixed
-// VS-Code/GitHub hexes. Comment/string/number hues keep their classic roles.
-// Mockup .code: kw=accent(600) / str=success / num=warning / cm=text-3 /
-// fn=light #7c3aed · dark #b794f6 (a purple distinct from the accent).
-_Palette _paletteFor(AppTokens t, Brightness b) {
-  final dark = b == Brightness.dark;
-  return _Palette(
-    t.text, // plain
-    t.text3, // comment (mockup .code .cm = text-3)
-    t.success, // string (mockup .code .str = success)
-    t.warning, // number
-    t.accent, // keyword
-    dark ? const Color(0xFFB794F6) : const Color(0xFF7C3AED), // fn (mockup)
-  );
-}
+// Syntax roles derive entirely from the active semantic palette. Function names
+// use the focus role so highlighting does not introduce a second brand accent.
+_Palette _paletteFor(AppTokens t) => _Palette(
+      t.text,
+      t.text3,
+      t.success,
+      t.warning,
+      t.accent,
+      t.focus,
+    );
 
 class CodeHighlightController extends TextEditingController {
   String lang; // 'js' | 'go'
@@ -58,10 +123,11 @@ class CodeHighlightController extends TextEditingController {
 
   @override
   TextSpan buildTextSpan(
-      {required BuildContext context, TextStyle? style, required bool withComposing}) {
+      {required BuildContext context,
+      TextStyle? style,
+      required bool withComposing}) {
     final base = (style ?? const TextStyle());
-    final b = Theme.of(context).brightness;
-    final pal = _paletteFor(AppTokens.of(context), b);
+    final pal = _paletteFor(AppTokens.of(context));
     return TextSpan(style: base, children: _highlight(text, lang, base, pal));
   }
 }
@@ -69,18 +135,23 @@ class CodeHighlightController extends TextEditingController {
 bool _isDigit(String c) => c.codeUnitAt(0) >= 0x30 && c.codeUnitAt(0) <= 0x39;
 bool _isIdentStart(String c) {
   final u = c.codeUnitAt(0);
-  return (u >= 0x41 && u <= 0x5A) || (u >= 0x61 && u <= 0x7A) || c == '_' || c == r'$';
+  return (u >= 0x41 && u <= 0x5A) ||
+      (u >= 0x61 && u <= 0x7A) ||
+      c == '_' ||
+      c == r'$';
 }
 
 bool _isIdentPart(String c) => _isIdentStart(c) || _isDigit(c);
 
-List<TextSpan> _highlight(String src, String lang, TextStyle base, _Palette pal) {
+List<TextSpan> _highlight(
+    String src, String lang, TextStyle base, _Palette pal) {
   final kw = lang == 'go' ? _goKeywords : _jsKeywords;
   final spans = <TextSpan>[];
   final buf = StringBuffer();
   void flush() {
     if (buf.isNotEmpty) {
-      spans.add(TextSpan(text: buf.toString(), style: base.copyWith(color: pal.plain)));
+      spans.add(TextSpan(
+          text: buf.toString(), style: base.copyWith(color: pal.plain)));
       buf.clear();
     }
   }
@@ -98,7 +169,8 @@ List<TextSpan> _highlight(String src, String lang, TextStyle base, _Palette pal)
       }
       spans.add(TextSpan(
           text: src.substring(i, j),
-          style: base.copyWith(color: pal.comment, fontStyle: FontStyle.italic)));
+          style:
+              base.copyWith(color: pal.comment, fontStyle: FontStyle.italic)));
       i = j;
       continue;
     }
@@ -112,7 +184,8 @@ List<TextSpan> _highlight(String src, String lang, TextStyle base, _Palette pal)
       j = (j + 1 < n) ? j + 2 : n;
       spans.add(TextSpan(
           text: src.substring(i, j),
-          style: base.copyWith(color: pal.comment, fontStyle: FontStyle.italic)));
+          style:
+              base.copyWith(color: pal.comment, fontStyle: FontStyle.italic)));
       i = j;
       continue;
     }
@@ -130,11 +203,14 @@ List<TextSpan> _highlight(String src, String lang, TextStyle base, _Palette pal)
           j++;
           break;
         }
-        if (src[j] == '\n' && q != '`') break; // unterminated single-line string
+        if (src[j] == '\n' && q != '`') {
+          break; // unterminated single-line string
+        }
         j++;
       }
       if (j > n) j = n;
-      spans.add(TextSpan(text: src.substring(i, j), style: base.copyWith(color: pal.str)));
+      spans.add(TextSpan(
+          text: src.substring(i, j), style: base.copyWith(color: pal.str)));
       i = j;
       continue;
     }
@@ -151,7 +227,8 @@ List<TextSpan> _highlight(String src, String lang, TextStyle base, _Palette pal)
                   src[j].toLowerCase().codeUnitAt(0) <= 0x66))) {
         j++;
       }
-      spans.add(TextSpan(text: src.substring(i, j), style: base.copyWith(color: pal.number)));
+      spans.add(TextSpan(
+          text: src.substring(i, j), style: base.copyWith(color: pal.number)));
       i = j;
       continue;
     }
@@ -167,7 +244,8 @@ List<TextSpan> _highlight(String src, String lang, TextStyle base, _Palette pal)
         // Mockup .code .kw{font-weight:600}.
         spans.add(TextSpan(
             text: word,
-            style: base.copyWith(color: pal.keyword, fontWeight: FontWeight.w600)));
+            style: base.copyWith(
+                color: pal.keyword, fontWeight: FontWeight.w600)));
       } else {
         // Mockup .code .fn: an identifier immediately called (`name(`) is a
         // function name, highlighted purple. Skip whitespace, then check '('.
@@ -229,7 +307,11 @@ class CodeField extends StatefulWidget {
   final ValueChanged<String>? onChanged;
   final String? hintText;
   const CodeField(
-      {super.key, required this.controller, this.focusNode, this.onChanged, this.hintText});
+      {super.key,
+      required this.controller,
+      this.focusNode,
+      this.onChanged,
+      this.hintText});
 
   @override
   State<CodeField> createState() => _CodeFieldState();
@@ -259,25 +341,27 @@ class _CodeFieldState extends State<CodeField> {
   @override
   Widget build(BuildContext context) {
     final t = AppTokens.of(context);
-    const codeStyle = TextStyle(
-        fontFamily: 'monospace',
-        fontSize: kCodeFontSize,
-        height: kCodeLineHeight,
-        // CSS half-leading inside the 21px line box (CP 5.5), matching the
-        // mockup's line-height rendering; Ts.cssLeading for the semantics.
-        leadingDistribution: Ts.cssLeading);
+    final codeStyle = Ts.style(
+      size: kCodeFontSize,
+      color: t.text,
+      monoFont: true,
+      height: kCodeLineHeight,
+    );
     final numberStyle = codeStyle.copyWith(color: t.text3);
     final lines = widget.controller.text.split('\n');
     final gutterTextW = _measure('${lines.length}', numberStyle);
     final gutterW = gutterTextW + _kGutterPad.horizontal;
-    return Container(
-      color: t.panel,
+    return CodexSurface(
+      variant: CodexSurfaceVariant.sunken,
+      padding: EdgeInsets.zero,
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: _focus.requestFocus,
         child: LayoutBuilder(builder: (context, constraints) {
-          final textW =
-              constraints.maxWidth - gutterW - _kFieldPad.horizontal - _kCaretMargin;
+          final textW = constraints.maxWidth -
+              gutterW -
+              _kFieldPad.horizontal -
+              _kCaretMargin;
           return Stack(children: [
             // The stripe is a background, not part of the scrolling content: it
             // must fill the pane's height even for a two-line script.
@@ -289,19 +373,24 @@ class _CodeFieldState extends State<CodeField> {
               child: Container(color: t.panel2),
             ),
             SingleChildScrollView(
-              child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              child:
+                  Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 SizedBox(
                   width: gutterW,
                   child: Padding(
                     padding: _kGutterPad,
-                    child: Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-                      for (var i = 0; i < lines.length; i++)
-                        SizedBox(
-                          height: _visualRows(lines[i], codeStyle, textW) * _kLineBox,
-                          child: Text('${i + 1}',
-                              textAlign: TextAlign.right, style: numberStyle),
-                        ),
-                    ]),
+                    child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          for (var i = 0; i < lines.length; i++)
+                            SizedBox(
+                              height: _visualRows(lines[i], codeStyle, textW) *
+                                  _kLineBox,
+                              child: Text('${i + 1}',
+                                  textAlign: TextAlign.right,
+                                  style: numberStyle),
+                            ),
+                        ]),
                   ),
                 ),
                 Expanded(

@@ -65,21 +65,48 @@ Future<Uint8List> _boundaryPng(WidgetTester t, GlobalKey key) async {
   return bytes!;
 }
 
-void _writePng(String name, Uint8List bytes) {
-  final dir = Directory('tool/pixel-diff/out/flutter');
-  dir.createSync(recursive: true);
-  File('${dir.path}/$name.png').writeAsBytesSync(bytes);
+Directory _captureDirectory() {
+  final configured = Platform.environment['REDIMOS_CAPTURE_DIR'];
+  if (configured == null || configured.trim().isEmpty) {
+    throw StateError(
+      'REDIMOS_CAPTURE_DIR is required; use tool/pixel-diff/capture-flutter.sh',
+    );
+  }
+  final dir = Directory(configured).absolute;
+  final segments = dir.path.split(Platform.pathSeparator);
+  if (segments.contains('references') || segments.contains('v2.3-archive')) {
+    throw StateError(
+        'Capture output must not target references or v2.3-archive');
+  }
+  if (!dir.existsSync()) {
+    throw StateError('Capture run directory does not exist: ${dir.path}');
+  }
+  return dir;
+}
+
+void _writePng(String name, bool dark, Uint8List bytes) {
+  final theme = dark ? 'dark' : 'light';
+  final file = File('${_captureDirectory().path}/$name-$theme.png');
+  if (file.existsSync()) {
+    throw StateError('Refusing to overwrite capture: ${file.path}');
+  }
+  file.writeAsBytesSync(bytes, flush: true);
 }
 
 /// Pump one screen through [pump], grab the RepaintBoundary identified by
-/// [shotKey] and write `tool/pixel-diff/out/flutter/<name>.png` at 2560×1600
-/// (pixelRatio 2 over the 1280×800 logical view — same as the goldens).
-Future<void> _capture(WidgetTester t, String name, ScreenPump pump,
-    {Widget Function(Widget)? chrome,
-    Future<void> Function(WidgetTester)? after}) async {
+/// [shotKey], and write `<screen>-<theme>.png` at 2560×1600 into the explicit
+/// run directory created by capture-flutter.sh.
+Future<void> _capture(
+  WidgetTester t,
+  String name,
+  bool dark,
+  ScreenPump pump, {
+  Widget Function(Widget)? chrome,
+  Future<void> Function(WidgetTester)? after,
+}) async {
   final key = GlobalKey();
-  await pump(t, dark: false, shotKey: key, chrome: chrome);
-  _writePng(name, await _boundaryPng(t, key));
+  await pump(t, dark: dark, shotKey: key, chrome: chrome);
+  _writePng(name, dark, await _boundaryPng(t, key));
   if (after != null) await after(t);
 }
 
@@ -88,14 +115,25 @@ Future<void> _capture(WidgetTester t, String name, ScreenPump pump,
 /// closes the client sockets) and only then close the server — closing the
 /// server while the widgets live would fire onClosed and schedule a
 /// reconnect Timer inside the FakeAsync zone, failing the test.
-Future<void> _captureLoaded(WidgetTester t, String name, LoadedScreenPump pump,
-    {Widget Function(Widget)? chrome}) async {
+Future<void> _captureLoaded(
+  WidgetTester t,
+  String name,
+  bool dark,
+  LoadedScreenPump pump, {
+  Widget Function(Widget)? chrome,
+}) async {
   final server = FakeRespServer();
   await t.runAsync(server.start);
   final key = GlobalKey();
   try {
-    await pump(t, dark: false, shotKey: key, server: server, chrome: chrome);
-    _writePng(name, await _boundaryPng(t, key));
+    await pump(
+      t,
+      dark: dark,
+      shotKey: key,
+      server: server,
+      chrome: chrome,
+    );
+    _writePng(name, dark, await _boundaryPng(t, key));
   } finally {
     await t.pumpWidget(const SizedBox());
     await t.runAsync(server.close);
@@ -114,12 +152,18 @@ final _captureConfig2 =
     RedimosConfig(id: 'c2', name: 'dev-redis-02', port: 6380, endpoint: '');
 
 /// Extra endpoint cards (mockup sidebar rows 2–4).
-const _captureEpStaging =
-    DdbEndpoint(id: 'e2', name: 'staging-aws', kind: 'aws', region: 'us-east-1');
+const _captureEpStaging = DdbEndpoint(
+    id: 'e2', name: 'staging-aws', kind: 'aws', region: 'us-east-1');
 const _captureEpAnalytics = DdbEndpoint(
-    id: 'e3', name: 'analytics-cache', kind: 'url', endpoint: 'redis://10.0.4.21:6380');
+    id: 'e3',
+    name: 'analytics-cache',
+    kind: 'url',
+    endpoint: 'redis://10.0.4.21:6380');
 const _captureEpLegacy = DdbEndpoint(
-    id: 'e4', name: 'legacy-cluster', kind: 'url', endpoint: 'redis://10.0.1.7:6379');
+    id: 'e4',
+    name: 'legacy-cluster',
+    kind: 'url',
+    endpoint: 'redis://10.0.1.7:6379');
 
 // No-op callbacks: the capture channel never taps the chrome.
 void _noopEntityKind(EntityKind k) {}
@@ -169,6 +213,7 @@ List<String> get _epTabLabels => [
 /// instance card (c1) + its MidBar index. Endpoint screens: the selected
 /// endpoint (e1) + its screen index.
 Widget Function(Widget) _captureChrome({
+  required bool dark,
   required EntityKind kind,
   required List<String> tabLabels,
   required int tabIndex,
@@ -195,7 +240,7 @@ Widget Function(Widget) _captureChrome({
           tabIndex: tabIndex,
           stopAllSnapshot: const [],
           ddb: null, // collapsed dock row (mockups predate this feature)
-          themeMode: ThemeMode.light,
+          themeMode: dark ? ThemeMode.dark : ThemeMode.light,
           lang: AppLang.en,
         ),
         cb: _captureCb,
@@ -211,64 +256,143 @@ Widget _cta(IconData icon, String label) =>
     Builder(builder: (context) => chromeCta(context, icon, label, () {}));
 
 void main() {
-  testWidgets('capture inst-browse',
-      (t) => _captureLoaded(t, 'inst-browse', fx.pumpInstBrowseLoaded,
-          chrome: _captureChrome(
-              kind: EntityKind.instance,
-              tabLabels: _instTabLabels,
-              tabIndex: 0,
-              midBarCta: _cta(Icons.add, tr('br.newKey')))));
+  for (final dark in [false, true]) {
+    final theme = dark ? 'dark' : 'light';
 
-  testWidgets('capture inst-console',
-      (t) => _captureLoaded(t, 'inst-console', fx.pumpInstConsoleLoaded,
-          chrome: _captureChrome(
-              kind: EntityKind.instance,
-              tabLabels: _instTabLabels,
-              tabIndex: 1)));
+    testWidgets(
+      'capture inst-browse $theme',
+      (t) => _captureLoaded(
+        t,
+        'inst-browse',
+        dark,
+        fx.pumpInstBrowseLoaded,
+        chrome: _captureChrome(
+          dark: dark,
+          kind: EntityKind.instance,
+          tabLabels: _instTabLabels,
+          tabIndex: 0,
+          midBarCta: _cta(Icons.add, tr('br.newKey')),
+        ),
+      ),
+    );
 
-  testWidgets('capture inst-monitor',
-      (t) => _capture(t, 'inst-monitor', fx.pumpInstMonitor,
-          chrome: _captureChrome(
-              kind: EntityKind.instance,
-              tabLabels: _instTabLabels,
-              tabIndex: 2)));
+    testWidgets(
+      'capture inst-console $theme',
+      (t) => _captureLoaded(
+        t,
+        'inst-console',
+        dark,
+        fx.pumpInstConsoleLoaded,
+        chrome: _captureChrome(
+          dark: dark,
+          kind: EntityKind.instance,
+          tabLabels: _instTabLabels,
+          tabIndex: 1,
+        ),
+      ),
+    );
 
-  testWidgets('capture inst-logs', (t) => _capture(t, 'inst-logs', fx.pumpInstLogs,
-      chrome: _captureChrome(
-          kind: EntityKind.instance, tabLabels: _instTabLabels, tabIndex: 3),
-      // Drop LogsPage's periodic timer once the PNG is written.
-      after: (t) => t.pumpWidget(const SizedBox())));
+    testWidgets(
+      'capture inst-monitor $theme',
+      (t) => _capture(
+        t,
+        'inst-monitor',
+        dark,
+        fx.pumpInstMonitor,
+        chrome: _captureChrome(
+          dark: dark,
+          kind: EntityKind.instance,
+          tabLabels: _instTabLabels,
+          tabIndex: 2,
+        ),
+      ),
+    );
 
-  testWidgets('capture inst-playground',
-      (t) => _capture(t, 'inst-playground', fx.pumpInstPlayground,
-          chrome: _captureChrome(
-              kind: EntityKind.instance,
-              tabLabels: _instTabLabels,
-              tabIndex: 4)));
+    testWidgets(
+      'capture inst-logs $theme',
+      (t) => _capture(
+        t,
+        'inst-logs',
+        dark,
+        fx.pumpInstLogs,
+        chrome: _captureChrome(
+          dark: dark,
+          kind: EntityKind.instance,
+          tabLabels: _instTabLabels,
+          tabIndex: 3,
+        ),
+        // Drop LogsPage's periodic timer once the PNG is written.
+        after: (t) => t.pumpWidget(const SizedBox()),
+      ),
+    );
 
-  testWidgets('capture inst-config',
-      (t) => _capture(t, 'inst-config', fx.pumpInstConfig,
-          chrome: _captureChrome(
-              kind: EntityKind.instance,
-              tabLabels: _instTabLabels,
-              tabIndex: 5)));
+    testWidgets(
+      'capture inst-playground $theme',
+      (t) => _capture(
+        t,
+        'inst-playground',
+        dark,
+        fx.pumpInstPlayground,
+        chrome: _captureChrome(
+          dark: dark,
+          kind: EntityKind.instance,
+          tabLabels: _instTabLabels,
+          tabIndex: 4,
+        ),
+      ),
+    );
 
-  testWidgets('capture ep-overview',
-      (t) => _capture(t, 'ep-overview', fx.pumpEpOverview,
-          chrome: _captureChrome(
-              kind: EntityKind.endpoint,
-              tabLabels: _epTabLabels,
-              tabIndex: 0,
-              selectedConfigId: null,
-              selectedEndpointId: 'e1')));
+    testWidgets(
+      'capture inst-config $theme',
+      (t) => _capture(
+        t,
+        'inst-config',
+        dark,
+        fx.pumpInstConfig,
+        chrome: _captureChrome(
+          dark: dark,
+          kind: EntityKind.instance,
+          tabLabels: _instTabLabels,
+          tabIndex: 5,
+        ),
+      ),
+    );
 
-  testWidgets('capture ep-browser',
-      (t) => _capture(t, 'ep-browser', fx.pumpEpBrowser,
-          chrome: _captureChrome(
-              kind: EntityKind.endpoint,
-              tabLabels: _epTabLabels,
-              tabIndex: 1,
-              selectedConfigId: null,
-              selectedEndpointId: 'e1',
-              midBarCta: _cta(Icons.add, 'Item'))));
+    testWidgets(
+      'capture ep-overview $theme',
+      (t) => _capture(
+        t,
+        'ep-overview',
+        dark,
+        fx.pumpEpOverview,
+        chrome: _captureChrome(
+          dark: dark,
+          kind: EntityKind.endpoint,
+          tabLabels: _epTabLabels,
+          tabIndex: 0,
+          selectedConfigId: null,
+          selectedEndpointId: 'e1',
+        ),
+      ),
+    );
+
+    testWidgets(
+      'capture ep-browser $theme',
+      (t) => _capture(
+        t,
+        'ep-browser',
+        dark,
+        fx.pumpEpBrowser,
+        chrome: _captureChrome(
+          dark: dark,
+          kind: EntityKind.endpoint,
+          tabLabels: _epTabLabels,
+          tabIndex: 1,
+          selectedConfigId: null,
+          selectedEndpointId: 'e1',
+          midBarCta: _cta(Icons.add, 'Item'),
+        ),
+      ),
+    );
+  }
 }

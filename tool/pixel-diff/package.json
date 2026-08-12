@@ -2,12 +2,21 @@
   "name": "redimos-pixel-diff",
   "private": true,
   "version": "0.0.1",
-  "description": "Region-based pixel diff pipeline: mockup (Puppeteer) vs Flutter (flutter test capture) for the 8 v2.3 screens (pixel-fidelity-v23).",
+  "description": "Isolated v2.3 archive tooling and manifest-driven Codex active visual comparison for Redimos Manager.",
   "scripts": {
     "capture:mockup": "node capture-mockup.js",
     "capture:flutter": "bash capture-flutter.sh",
     "diff": "node diff.js",
-    "validate": "node -e \"require('./config').validateSources()\""
+    "validate": "node -e \"require('./config').validateSources()\"",
+    "validate:manifest": "node reference-manifest.js",
+    "init:references": "node init-codex-references.js",
+    "diff:active": "node active-diff.js",
+    "measure:noise": "node noise-floor.js",
+    "test:active": "node --test active-diff.test.js",
+    "test:noise": "node --test noise-floor.test.js",
+    "test:archive": "node --test archive-v23.test.js",
+    "test:manifest": "node --test reference-manifest.test.js init-codex-references.test.js finalize-capture-run.test.js",
+    "test:tools": "node --test archive-v23.test.js reference-manifest.test.js init-codex-references.test.js finalize-capture-run.test.js active-diff.test.js noise-floor.test.js"
   },
   "dependencies": {
     "pixelmatch": "5.3.0",

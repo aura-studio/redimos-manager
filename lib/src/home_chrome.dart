@@ -10,12 +10,15 @@
 // into the pixel-diff PNGs (they were content-only before, requirements 3.7).
 
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 
 import 'i18n.dart';
 import 'local_ddb_panel.dart';
 import 'models.dart';
 import 'native.dart';
-import 'ui_theme.dart';
+import 'ui_fields.dart';
+import 'ui_primitives.dart';
+import 'ui_status.dart';
 import 'ui_tokens.dart';
 
 /// v2.3 rail entity kind — which group the entity sidebar lists.
@@ -49,8 +52,10 @@ class ChromeState {
   final String? selectedEndpointId;
   final String? hoveredCardId;
   final String entityQuery;
+
   /// MidBar labels for the CURRENT mode (instance tabs or endpoint screens).
   final List<String> tabLabels;
+
   /// Active MidBar index within [tabLabels].
   final int tabIndex;
   final List<String> stopAllSnapshot;
@@ -137,7 +142,8 @@ class HomeChrome extends StatelessWidget {
         _rail(),
         SizedBox(width: Dim.sidebarW, child: _entitySidebar()),
         Expanded(
-          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          child:
+              Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
             _topBar(),
             _midBar(),
             Expanded(child: child),
@@ -148,35 +154,48 @@ class HomeChrome extends StatelessWidget {
     );
   }
 
-  // ---------------------------------------------------------------- v2.3 ---
-  // Top bar (48px): entity breadcrumb + screen name + spacer + the three
-  // global buttons (stop-all / theme / language). No wordmark, no live metric
-  // strip — those move to the rail logo and the status bar respectively.
-
+  // Top bar (48px): invariant entity context first, variable screen name last,
+  // followed by a fixed action group. Tab changes only replace the final text
+  // run, so the entity and sub-entity keep their logical X coordinates.
   Widget _topBar() {
     return Builder(builder: (context) {
       final t = AppTokens.of(context);
       final brightness = Theme.of(context).brightness;
       return Container(
+        key: const ValueKey('home-topbar'),
         height: Dim.topBarH,
         decoration: BoxDecoration(
           color: t.panel,
-          border: Border(
-            bottom: BorderSide(color: t.hairline),
-            // mockup .topbar: inset top white highlight (v2.3).
-            top: BorderSide(color: t.highlight),
-          ),
+          border: Border(bottom: BorderSide(color: t.hairline)),
           boxShadow: Depth.elev1(brightness),
         ),
         padding: const EdgeInsets.symmetric(horizontal: 14),
         child: Row(children: [
           _topBarCrumb(t),
           const Spacer(),
-          _stopAllButton(t),
-          const SizedBox(width: 8),
-          _themeMenu(),
-          const SizedBox(width: 8),
-          _langMenu(),
+          Row(
+            key: const ValueKey('home-topbar-actions'),
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SizedBox.square(
+                key: const ValueKey('home-topbar-stop-slot'),
+                dimension: Dim.ctlH,
+                child: _stopAllButton(t),
+              ),
+              const SizedBox(width: 8),
+              SizedBox.square(
+                key: const ValueKey('home-topbar-theme-slot'),
+                dimension: Dim.ctlH,
+                child: _themeMenu(),
+              ),
+              const SizedBox(width: 8),
+              SizedBox.square(
+                key: const ValueKey('home-topbar-lang-slot'),
+                dimension: Dim.ctlH,
+                child: _langMenu(),
+              ),
+            ],
+          ),
         ]),
       );
     });
@@ -201,32 +220,51 @@ class HomeChrome extends StatelessWidget {
         final c = state.selectedConfig;
         if (c != null) {
           entity = c.name.isEmpty ? tr('config.unnamed') : c.name;
-          sub = ':${c.port} · ${_endpointFor(c)?.name ?? (c.endpoint.isEmpty ? 'AWS' : _hostOf(c.endpoint))}';
+          sub =
+              ':${c.port} · ${_endpointFor(c)?.name ?? (c.endpoint.isEmpty ? 'AWS' : _hostOf(c.endpoint))}';
         }
       }
       final screenName =
           state.tabLabels[state.tabIndex.clamp(0, state.tabLabels.length - 1)];
-      // Mockup pages2 topbar markup: <.screen-name> <.screen-sub mono> with
-      // b.crumb-ent (--text w600) followed by the rest in text-3 — no chip,
-      // no caret, no '/' separator (pixel-fidelity-v23 CP 9.x).
-      // Plain Text runs instead of Text.rich: rich spans rasterise blocky in
-      // the capture channel while identical plain Text renders correctly.
-      return Row(mainAxisSize: MainAxisSize.min, children: [
-        Text(screenName,
-            style: Ts.style(size: 13.5, weight: FontWeight.w600, color: t.text)),
-        const SizedBox(width: 10),
-        if (entity.isNotEmpty)
-          Text(entity,
-              style: Ts.style(size: 11.5, weight: FontWeight.w600, color: t.text, monoFont: true)),
-        if (entity.isNotEmpty && sub.isNotEmpty)
-          Text(' · $sub', style: Ts.style(size: 11.5, color: t.text3, monoFont: true)),
-      ]);
+      return Row(
+        key: const ValueKey('home-topbar-crumb'),
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (entity.isNotEmpty)
+            Text(
+              entity,
+              key: const ValueKey('home-topbar-entity'),
+              style: Ts.style(
+                size: 11.5,
+                weight: FontWeight.w600,
+                color: t.text,
+                monoFont: true,
+              ),
+            ),
+          if (entity.isNotEmpty && sub.isNotEmpty)
+            Text(
+              ' · $sub',
+              key: const ValueKey('home-topbar-sub-entity'),
+              style: Ts.style(size: 11.5, color: t.text3, monoFont: true),
+            ),
+          if (entity.isNotEmpty) const SizedBox(width: 10),
+          Text(
+            screenName,
+            key: const ValueKey('home-topbar-screen-name'),
+            style: Ts.style(
+              size: 13.5,
+              weight: FontWeight.w600,
+              color: t.text,
+            ),
+          ),
+        ],
+      );
     });
   }
 
-  // ---------------------------------------------------------------- v2.3 ---
-  // Mid bar (44px): centred underline tabs + a context CTA in the end group.
-
+  // Mid bar (44px): compact underline tabs centred between equal start/end
+  // regions. Four- and six-tab endpoint sets therefore keep the detail pane at
+  // the same origin while only the bounded tab strip changes width.
   Widget _midBar() {
     return Builder(builder: (context) {
       final t = AppTokens.of(context);
@@ -234,32 +272,41 @@ class HomeChrome extends StatelessWidget {
       final labels = state.tabLabels;
       final index = state.tabIndex;
       return Container(
+        key: const ValueKey('home-midbar'),
         height: Dim.midBarH,
         decoration: BoxDecoration(
           color: t.panel,
-          // Mockup .midbar border-bottom is --border (193,203,217), a shade
-          // darker than --hairline (pixel-fidelity-v23 CP 9.x round 2).
           border: Border(bottom: BorderSide(color: t.border)),
           boxShadow: Depth.elev1(brightness),
         ),
-        // Mockup .midbar: padding 0 16, .mstart/.mend both flex:1 — the tab
-        // row is centred across the FULL bar width, the CTA right-aligned
-        // inside the end half (pixel-fidelity-v23 CP 9.x).
         padding: const EdgeInsets.symmetric(horizontal: 16),
         child: Row(children: [
-          const Expanded(child: SizedBox.shrink()), // .mstart
+          const Expanded(
+            child: SizedBox.shrink(key: ValueKey('home-midbar-start')),
+          ),
           SingleChildScrollView(
+            key: const ValueKey('home-midbar-tabs'),
             scrollDirection: Axis.horizontal,
-            child: Row(mainAxisSize: MainAxisSize.min, children: [
-              for (var i = 0; i < labels.length; i++) ...[
-                if (i > 0) const SizedBox(width: 4), // mockup .mtabs gap:4
-                _midTab(t, labels[i], i == index, () => cb.onMidTab(i)),
+            child: Row(
+              key: const ValueKey('home-midbar-tab-row'),
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                for (var i = 0; i < labels.length; i++) ...[
+                  if (i > 0) const SizedBox(width: 4),
+                  _midTab(
+                    t,
+                    i,
+                    labels[i],
+                    i == index,
+                    () => cb.onMidTab(i),
+                  ),
+                ],
               ],
-            ]),
+            ),
           ),
           Expanded(
-            // .mend: flex:1 + justify-content:flex-end.
             child: Align(
+              key: const ValueKey('home-midbar-cta-slot'),
               alignment: Alignment.centerRight,
               child: midBarCta ?? const SizedBox.shrink(),
             ),
@@ -269,31 +316,52 @@ class HomeChrome extends StatelessWidget {
     });
   }
 
-  // Mockup .mtab: active tab keeps --text colour (v2.4 bumps weight to 700)
-  // with ONLY the 2px underline accented; inactive = text-3.
-  Widget _midTab(AppTokens t, String label, bool active, VoidCallback onTap) {
+  // The active state changes only text and the warm 2px indicator. Hover/focus
+  // use bounded paint feedback; Material splash and press highlights stay off.
+  Widget _midTab(
+    AppTokens t,
+    int tabIndex,
+    String label,
+    bool active,
+    VoidCallback onTap,
+  ) {
     return InkWell(
+      key: ValueKey('home-midbar-tab-$tabIndex-action'),
       onTap: onTap,
+      splashFactory: NoSplash.splashFactory,
+      splashColor: Colors.transparent,
+      highlightColor: Colors.transparent,
+      hoverColor: t.hover,
+      focusColor: t.focus.withValues(alpha: 0.12),
       child: Container(
+        key: ValueKey('home-midbar-tab-$tabIndex'),
         height: Dim.midBarH,
-        padding: const EdgeInsets.symmetric(horizontal: 14),
+        padding: const EdgeInsets.symmetric(horizontal: 12),
         decoration: BoxDecoration(
-          border: Border(bottom: BorderSide(color: active ? t.accent : Colors.transparent, width: 2)),
+          border: Border(
+            bottom: BorderSide(
+              color: active ? t.accent : Colors.transparent,
+              width: 2,
+            ),
+          ),
         ),
         alignment: Alignment.center,
-        child: Text(label,
-            style: Ts.style(
-                size: Ts.md,
-                weight: active ? FontWeight.w700 : FontWeight.normal,
-                color: active ? t.text : t.text3)),
+        child: Text(
+          label,
+          key: ValueKey('home-midbar-tab-$tabIndex-label'),
+          style: Ts.style(
+            size: Ts.sm,
+            weight: FontWeight.w600,
+            color: active ? t.text : t.text3,
+          ),
+        ),
       ),
     );
   }
 
-  // ---------------------------------------------------------------- v2.3 ---
-  // Status bar (24px): the single source of truth for connection state.
-  // Left: dot + host:port + db + backend. Right: SCAN% + keys + latency (mono).
-
+  // Status bar (24px): a low-emphasis shell around the existing connection
+  // summary. Operational paint comes from the shared status roles, never from
+  // the brand accent; state changes leave the shell and edge anchors fixed.
   Widget _statusBar() {
     return Builder(builder: (context) {
       final t = AppTokens.of(context);
@@ -304,16 +372,29 @@ class HomeChrome extends StatelessWidget {
         final sub = e == null
             ? ''
             : switch (e.kind) {
-                'aws' => e.region.isEmpty ? 'dynamodb · aws' : 'dynamodb · ${e.region}',
+                'aws' => e.region.isEmpty
+                    ? 'dynamodb · aws'
+                    : 'dynamodb · ${e.region}',
                 'local' => 'local · ${_hostOf(e.endpoint)}',
                 _ => _hostOf(e.endpoint),
               };
-        leading = Row(mainAxisSize: MainAxisSize.min, children: [
-          Container(width: 7, height: 7, // mockup .dot is 7px
-              decoration: const BoxDecoration(color: Accents.teal, shape: BoxShape.circle)),
-          const SizedBox(width: 7),
-          Text(sub, style: Ts.style(size: Ts.xs, color: t.text2, monoFont: true)),
-        ]);
+        leading = Row(
+          key: const ValueKey('home-statusbar-leading'),
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const CodexStatusDot(
+              key: ValueKey('home-statusbar-dot'),
+              status: CodexStatus.success,
+              semanticLabel: 'Endpoint available',
+            ),
+            const SizedBox(width: 7),
+            Text(
+              sub,
+              key: const ValueKey('home-statusbar-endpoint-summary'),
+              style: Ts.style(size: Ts.xs, color: t.text2, monoFont: true),
+            ),
+          ],
+        );
       } else {
         final c = state.selectedConfig;
         final st = c == null ? null : state.statuses[c.id];
@@ -324,39 +405,64 @@ class HomeChrome extends StatelessWidget {
             : running
                 ? (ready ? 'ready' : 'degraded')
                 : st.status;
-        leading = Row(mainAxisSize: MainAxisSize.min, children: [
-          _statusDot(st?.status ?? 'stopped'),
-          const SizedBox(width: 7),
-          Text('127.0.0.1:${c?.port ?? 0}',
-              style: Ts.style(size: Ts.xs, color: t.text2, monoFont: true, tabularNums: true)),
-          const SizedBox(width: 10),
-          Text(statusLabel, style: Ts.style(size: Ts.xs, color: _statusColor(context, st?.status ?? 'stopped'), monoFont: true)),
-          if (running && !ready) ...[
+        final semanticStatus = _codexStatus(statusLabel);
+        leading = Row(
+          key: const ValueKey('home-statusbar-leading'),
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CodexStatusDot(
+              key: const ValueKey('home-statusbar-dot'),
+              status: semanticStatus,
+              semanticLabel: 'Instance $statusLabel',
+            ),
+            const SizedBox(width: 7),
+            Text(
+              '127.0.0.1:${c?.port ?? 0}',
+              key: const ValueKey('home-statusbar-host'),
+              style: Ts.style(
+                size: Ts.xs,
+                color: t.text2,
+                monoFont: true,
+                tabularNums: true,
+              ),
+            ),
             const SizedBox(width: 10),
-            Text('backend degraded', style: Ts.style(size: Ts.xs, color: t.warning, monoFont: true)),
+            Text(
+              statusLabel,
+              key: const ValueKey('home-statusbar-status'),
+              style: Ts.style(
+                size: Ts.xs,
+                color: codexStatusColor(context, semanticStatus),
+                monoFont: true,
+              ),
+            ),
+            if (running && !ready) ...[
+              const SizedBox(width: 10),
+              Text(
+                'backend degraded',
+                key: const ValueKey('home-statusbar-backend'),
+                style: Ts.style(size: Ts.xs, color: t.warning, monoFont: true),
+              ),
+            ],
           ],
-        ]);
+        );
       }
       return Container(
+        key: const ValueKey('home-statusbar'),
         height: Dim.statusBarH,
         decoration: BoxDecoration(
-          color: t.panel, // mockup .statusbar bg = panel (white), not panel-2
+          color: t.panel2,
           border: Border(top: BorderSide(color: t.hairline)),
-          // mockup .statusbar: upward 0 -1px 3px shadow.
-          boxShadow: [
-            BoxShadow(
-              color: const Color(0xFF173369).withValues(
-                  alpha: Theme.of(context).brightness == Brightness.dark ? 0.5 : 0.07),
-              offset: const Offset(0, -1),
-              blurRadius: 3,
-            ),
-          ],
         ),
         padding: const EdgeInsets.symmetric(horizontal: 12),
         child: Row(children: [
           leading,
           const Spacer(),
-          Text('db0 · redimos', style: Ts.style(size: Ts.xs, color: t.text3, monoFont: true)),
+          Text(
+            'db0 · redimos',
+            key: const ValueKey('home-statusbar-trailing'),
+            style: Ts.style(size: Ts.xs, color: t.text3, monoFont: true),
+          ),
         ]),
       );
     });
@@ -383,62 +489,106 @@ class HomeChrome extends StatelessWidget {
   Widget _themeMenu() => Builder(builder: (context) {
         final t = AppTokens.of(context);
         return PopupMenuButton<ThemeMode>(
+          key: const ValueKey('home-theme-menu'),
+          initialValue: state.themeMode,
           tooltip: tr('app.theme'),
           padding: EdgeInsets.zero,
+          menuPadding: const EdgeInsets.symmetric(vertical: 4),
+          constraints: const BoxConstraints(minWidth: 180, maxWidth: 220),
+          position: PopupMenuPosition.under,
+          requestFocus: true,
+          style: _menuButtonStyle(t),
+          icon: const Icon(Icons.contrast),
+          iconSize: 14,
           onSelected: cb.onThemeMode,
           itemBuilder: (_) => [
-            _themeMenuItem(context, ThemeMode.light, Icons.light_mode_outlined, tr('theme.light')),
-            _themeMenuItem(context, ThemeMode.dark, Icons.dark_mode_outlined, tr('theme.dark')),
-            _themeMenuItem(context, ThemeMode.system, Icons.brightness_auto_outlined, tr('theme.system')),
+            _themeMenuItem(
+                ThemeMode.light, Icons.light_mode_outlined, tr('theme.light')),
+            _themeMenuItem(
+                ThemeMode.dark, Icons.dark_mode_outlined, tr('theme.dark')),
+            _themeMenuItem(ThemeMode.system, Icons.brightness_auto_outlined,
+                tr('theme.system')),
           ],
-          child: _tbtnBox(t, Icon(Icons.contrast, size: 14, color: t.text2)),
         );
       });
 
   Widget _langMenu() => Builder(builder: (context) {
         final t = AppTokens.of(context);
         return PopupMenuButton<AppLang>(
+          key: const ValueKey('home-language-menu'),
+          initialValue: state.lang,
           tooltip: tr('app.language'),
           padding: EdgeInsets.zero,
+          menuPadding: const EdgeInsets.symmetric(vertical: 4),
+          constraints: const BoxConstraints(minWidth: 152, maxWidth: 196),
+          position: PopupMenuPosition.under,
+          requestFocus: true,
+          style: _menuButtonStyle(t),
+          icon: Text(
+            '文',
+            style: Ts.style(
+              size: 14,
+              weight: FontWeight.w600,
+              color: t.text2,
+            ),
+          ),
           onSelected: cb.onLang,
           itemBuilder: (_) => [
-            _langMenuItem(context, AppLang.zh, '中文'),
-            _langMenuItem(context, AppLang.en, 'English'),
+            _langMenuItem(AppLang.zh, '中文'),
+            _langMenuItem(AppLang.en, 'English'),
           ],
-          // '文' rasterises as a tofu box in the capture channel (no CJK font
-          // in the golden bundle) — kept anyway: the HTML mockup shows 文.
-          child: _tbtnBox(
-              t, Text('文', style: Ts.style(size: 14, weight: FontWeight.w600, color: t.text2))),
         );
       });
 
-  PopupMenuItem<ThemeMode> _themeMenuItem(BuildContext context, ThemeMode m, IconData icon, String label) {
-    final selected = state.themeMode == m;
-    final color = selected ? Theme.of(context).colorScheme.primary : null;
-    return PopupMenuItem<ThemeMode>(
-      value: m,
-      child: Row(children: [
-        Icon(icon, size: 18, color: color),
-        const SizedBox(width: 10),
-        Text(label, style: TextStyle(color: color, fontWeight: selected ? FontWeight.w600 : null)),
-        const Spacer(),
-        if (selected) Icon(Icons.check, size: 16, color: color),
-      ]),
-    );
-  }
+  ButtonStyle _menuButtonStyle(AppTokens t) => ButtonStyle(
+        padding: const WidgetStatePropertyAll(EdgeInsets.zero),
+        minimumSize: const WidgetStatePropertyAll(Size(Dim.ctlH, Dim.ctlH)),
+        maximumSize: const WidgetStatePropertyAll(Size(Dim.ctlH, Dim.ctlH)),
+        fixedSize: const WidgetStatePropertyAll(Size.square(Dim.ctlH)),
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        visualDensity: VisualDensity.compact,
+        foregroundColor: WidgetStatePropertyAll(t.text2),
+        backgroundColor: WidgetStateProperty.resolveWith((states) {
+          if (states.contains(WidgetState.pressed)) return t.selection;
+          if (states.contains(WidgetState.hovered)) return t.hover;
+          return t.panel;
+        }),
+        overlayColor: const WidgetStatePropertyAll<Color>(Colors.transparent),
+        side: WidgetStateProperty.resolveWith(
+          (states) => BorderSide(
+            color: states.contains(WidgetState.focused) ? t.focus : t.border,
+            width: Dim.borderW,
+          ),
+        ),
+        shape: WidgetStatePropertyAll(
+          RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(Dim.radiusS),
+          ),
+        ),
+      );
 
-  PopupMenuItem<AppLang> _langMenuItem(BuildContext context, AppLang l, String label) {
-    final selected = state.lang == l;
-    final color = selected ? Theme.of(context).colorScheme.primary : null;
-    return PopupMenuItem<AppLang>(
-      value: l,
-      child: Row(children: [
-        Text(label, style: TextStyle(color: color, fontWeight: selected ? FontWeight.w600 : null)),
-        const Spacer(),
-        if (selected) Icon(Icons.check, size: 16, color: color),
-      ]),
-    );
-  }
+  PopupMenuEntry<ThemeMode> _themeMenuItem(
+    ThemeMode mode,
+    IconData icon,
+    String label,
+  ) =>
+      _CodexPopupMenuItem<ThemeMode>(
+        key: ValueKey('home-theme-menu-${mode.name}-item'),
+        keyName: 'home-theme-menu-${mode.name}',
+        value: mode,
+        selected: state.themeMode == mode,
+        icon: icon,
+        label: label,
+      );
+
+  PopupMenuEntry<AppLang> _langMenuItem(AppLang lang, String label) =>
+      _CodexPopupMenuItem<AppLang>(
+        key: ValueKey('home-language-menu-${lang.name}-item'),
+        keyName: 'home-language-menu-${lang.name}',
+        value: lang,
+        selected: state.lang == lang,
+        label: label,
+      );
 
   // AppBar action: stop-all / restore toggle. When anything is running it stops
   // all (recording the running set); when nothing is running but a set was
@@ -453,13 +603,15 @@ class HomeChrome extends StatelessWidget {
         constraints: const BoxConstraints(),
         visualDensity: VisualDensity.compact,
         splashRadius: 14,
-        icon: _tbtnBox(t, Icon(Icons.stop, size: 14, color: t.text2)), // mockup ⏹
+        icon:
+            _tbtnBox(t, Icon(Icons.stop, size: 14, color: t.text2)), // mockup ⏹
         onPressed: cb.onStopAll,
       );
     }
     if (state.stopAllSnapshot.isNotEmpty) {
       return IconButton(
-        tooltip: '${tr('app.startAll')} — ${tr('home.restore')} ${state.stopAllSnapshot.length} ${tr('home.configsSuffix')}',
+        tooltip:
+            '${tr('app.startAll')} — ${tr('home.restore')} ${state.stopAllSnapshot.length} ${tr('home.configsSuffix')}',
         padding: EdgeInsets.zero,
         constraints: const BoxConstraints(),
         visualDensity: VisualDensity.compact,
@@ -479,128 +631,153 @@ class HomeChrome extends StatelessWidget {
     );
   }
 
-  // ---------------------------------------------------------------- v2.3 ---
-  // Rail (leftmost 64px, constant dark navy) with the two entity-kind entries
-  // (Instance / Endpoint). Active entry = a gradient-tinted rounded tile with
-  // a glow + a 3px left indicator; inactive = a faint flat tile.
-
+  // The fixed 64px rail follows the active theme palette. Active, hover and
+  // focus treatments are paint-only, so they never change item geometry.
   Widget _rail() {
-    return Container(
-      width: Dim.railW,
-      decoration: BoxDecoration(
-        gradient: AppTokens.railGradient,
-        boxShadow: Depth.railShadow,
-      ),
-      child: SafeArea(
-        child: Column(children: [
-          const SizedBox(height: 14),
-          const RedimosLogo(size: 36),
-          const SizedBox(height: 12),
-          _railItem(
-            kind: EntityKind.instance,
-            icon: Icons.storage_outlined, // mockup rail glyph: DB drum
-            label: tr('nav.instances'),
-          ),
-          const SizedBox(height: 6),
-          _railItem(
-            kind: EntityKind.endpoint,
-            icon: Icons.swap_horiz, // mockup rail glyph: endpoint arrows
-            label: tr('nav.endpoints'),
-          ),
-        ]),
-      ),
-    );
+    return Builder(builder: (context) {
+      final t = AppTokens.of(context);
+      return Container(
+        key: const ValueKey('main-rail'),
+        width: Dim.railW,
+        decoration: BoxDecoration(color: t.railBg),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            SafeArea(
+              child: Column(children: [
+                const SizedBox(height: 14),
+                const RedimosLogo(
+                  key: ValueKey('main-rail-logo'),
+                  size: 36,
+                ),
+                const SizedBox(height: 12),
+                _railItem(
+                  kind: EntityKind.instance,
+                  icon: Icons.storage_outlined,
+                  label: tr('nav.instances'),
+                ),
+                const SizedBox(height: 6),
+                _railItem(
+                  kind: EntityKind.endpoint,
+                  icon: Icons.swap_horiz,
+                  label: tr('nav.endpoints'),
+                ),
+              ]),
+            ),
+            Positioned(
+              top: 0,
+              right: 0,
+              bottom: 0,
+              width: Dim.borderW,
+              child: ColoredBox(color: t.border),
+            ),
+          ],
+        ),
+      );
+    });
   }
 
-  // Mockup .rail-item (方案 B override): a 44×42 tile filled EXACTLY by a
-  // 32px icon row (with its ::after micro-gradient container) + a 10px/600
-  // label row, gap 0 (CP 5.6). The active 3px gradient indicator sits at the
-  // rail's left EDGE (overlapping the tile), so the icon stays centred.
   Widget _railItem({
     required EntityKind kind,
     required IconData icon,
     required String label,
   }) {
     final active = state.entityKind == kind;
-    return Tooltip(
-      message: label,
-      waitDuration: const Duration(milliseconds: 200),
-      child: InkWell(
-        onTap: () => cb.onEntityKind(kind),
-        borderRadius: BorderRadius.circular(8),
-        child: SizedBox(
-          width: Dim.railW,
-          child: Stack(children: [
-            // Active indicator pinned to the rail's left edge (mockup left:-10px).
-            if (active)
-              Positioned(
-                left: 0, top: 7, bottom: 7, width: 3,
-                child: Container(
-                  decoration: BoxDecoration(
-                    gradient: AppTokens.railIndicatorGradient,
-                    borderRadius: BorderRadius.circular(2),
-                    boxShadow: [
-                      BoxShadow(color: const Color(0xFF8BA2FF).withValues(alpha: 0.85), blurRadius: 8),
-                      BoxShadow(color: const Color(0xFFC3D0FF).withValues(alpha: 0.9), blurRadius: 2),
-                    ],
+    final keyName = kind == EntityKind.instance ? 'instance' : 'endpoint';
+    return Builder(builder: (context) {
+      final t = AppTokens.of(context);
+      var focused = false;
+      return StatefulBuilder(builder: (context, setRailState) {
+        return Tooltip(
+          message: label,
+          waitDuration: const Duration(milliseconds: 200),
+          child: SizedBox(
+            key: ValueKey('main-rail-$keyName-item'),
+            width: Dim.railW,
+            height: 42,
+            child: Stack(children: [
+              Center(
+                child: Material(
+                  key: ValueKey('main-rail-$keyName-tile'),
+                  color: active ? t.railActiveBg : Colors.transparent,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(Dim.radiusM),
+                    side: BorderSide(
+                      color: focused ? t.focus : Colors.transparent,
+                      width: Dim.borderW,
+                    ),
                   ),
-                ),
-              ),
-            Center(
-              child: Container(
-                width: 44,
-                height: 42,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(8),
-                  color: active ? const Color(0x248BA2FF) : Colors.transparent, // .14 alpha
-                  boxShadow: active
-                      ? [BoxShadow(color: const Color(0xFF8BA2FF).withValues(alpha: 0.18), blurRadius: 14)]
-                      : null,
-                ),
-                child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-                  // .rail-item::after — 32px icon container, micro gradient +
-                  // hairline ring; icon (16px, line-height 32) centred in it.
-                  Container(
-                    width: 32,
-                    height: 32,
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(9),
-                      gradient: const LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: [Color(0x219AA6DE), Color(0x0D9AA6DE)],
+                  clipBehavior: Clip.antiAlias,
+                  child: Semantics(
+                    button: true,
+                    enabled: true,
+                    selected: active,
+                    child: InkWell(
+                      key: ValueKey('main-rail-$keyName-action'),
+                      onTap: () => cb.onEntityKind(kind),
+                      onFocusChange: (value) {
+                        if (focused == value) return;
+                        setRailState(() => focused = value);
+                      },
+                      borderRadius: BorderRadius.circular(Dim.radiusM),
+                      hoverColor: t.hover,
+                      focusColor: t.focus.withValues(alpha: 0.16),
+                      highlightColor: t.selection,
+                      splashColor: Colors.transparent,
+                      child: SizedBox(
+                        key: ValueKey('main-rail-$keyName-focus-target'),
+                        width: 44,
+                        height: 42,
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(
+                              icon,
+                              size: 16,
+                              color: active ? t.railFgActive : t.railFg,
+                            ),
+                            const SizedBox(height: 3),
+                            FittedBox(
+                              fit: BoxFit.scaleDown,
+                              child: Text(
+                                label,
+                                maxLines: 1,
+                                softWrap: false,
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  letterSpacing: .2,
+                                  height: 1,
+                                  color: active ? t.railFgActive : t.railFg,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
-                      border: Border.all(color: const Color(0x0DFFFFFF)),
-                    ),
-                    child: Center(
-                      child: Icon(icon, size: 16,
-                          color: active ? AppTokens.railFgActive : AppTokens.railFg),
                     ),
                   ),
-                  // .r-label: 10px/600, line-height 10 (fills the tile: 32+10=42).
-                  // scaleDown guard: the i18n labels ('Instances'/'Endpoints',
-                  // 9 chars) are wider than the 44px tile in Inter 10px and
-                  // would wrap to two lines and overflow the tile; the mockup
-                  // shows one line, so scale down (≈0.94×) instead of wrapping.
-                  FittedBox(
-                    fit: BoxFit.scaleDown,
-                    child: Text(label,
-                        maxLines: 1,
-                        softWrap: false,
-                        style: TextStyle(
-                            fontSize: 10,
-                            letterSpacing: .2,
-                            height: 1,
-                            color: active ? AppTokens.railFgActive : AppTokens.railFg,
-                            fontWeight: FontWeight.w600)),
-                  ),
-                ]),
+                ),
               ),
-            ),
-          ]),
-        ),
-      ),
-    );
+              if (active)
+                Positioned(
+                  left: 0,
+                  top: 9,
+                  bottom: 9,
+                  width: 2,
+                  child: DecoratedBox(
+                    key: ValueKey('main-rail-$keyName-indicator'),
+                    decoration: BoxDecoration(
+                      color: t.accent,
+                      borderRadius: BorderRadius.circular(1),
+                    ),
+                  ),
+                ),
+            ]),
+          ),
+        );
+      });
+    });
   }
 
   // ---------------------------------------------------------------- v2.3 ---
@@ -614,145 +791,154 @@ class HomeChrome extends StatelessWidget {
       final q = state.entityQuery.trim().toLowerCase();
       final items = isInstance
           ? state.configs
-              .where((c) => q.isEmpty || c.name.toLowerCase().contains(q) || ':${c.port}'.contains(q))
+              .where((c) =>
+                  q.isEmpty ||
+                  c.name.toLowerCase().contains(q) ||
+                  ':${c.port}'.contains(q))
               .map((c) => _entityCardShell(
-                selected: c.id == state.selectedConfigId,
-                onTap: () => cb.onSelectConfig(c),
-                onHover: (h) => cb.onHoverCard(h ? c.id : null),
-                dot: _statusDot(state.statuses[c.id]?.status ?? 'stopped'),
-                badge: 'INST',
-                // Mockup .ep-badge.inst: t-hash (#cdddf8) 18% fill, fg
-                // #173369, 1px t-badge-border rgba(23,51,105,.28).
-                badgeBg: const Color(0xFFCDDDF8).withValues(alpha: 0.18),
-                badgeFg: const Color(0xFF173369),
-                badgeBorder: const Color(0x47173369),
-                name: c.name.isEmpty ? tr('config.unnamed') : c.name,
-                sub: ':${c.port} · ${_endpointFor(c)?.name ?? (c.endpoint.isEmpty ? 'AWS' : _hostOf(c.endpoint))}',
-                sub2: _statusLabel(c.id),
-                sub2Color: _statusColor(context, state.statuses[c.id]?.status ?? 'stopped'),
-                trailing: _hoverStartStop(c),
-              ))
+                    cardKey: c.id,
+                    selected: c.id == state.selectedConfigId,
+                    hovered: c.id == state.hoveredCardId,
+                    onTap: () => cb.onSelectConfig(c),
+                    onHover: (h) => cb.onHoverCard(h ? c.id : null),
+                    dot: _statusDot(state.statuses[c.id]?.status ?? 'stopped'),
+                    badge: 'INST',
+                    name: c.name.isEmpty ? tr('config.unnamed') : c.name,
+                    sub:
+                        ':${c.port} · ${_endpointFor(c)?.name ?? (c.endpoint.isEmpty ? 'AWS' : _hostOf(c.endpoint))}',
+                    sub2: _statusLabel(c.id),
+                    sub2Color: _statusColor(
+                        context, state.statuses[c.id]?.status ?? 'stopped'),
+                    trailing: _startStop(c),
+                    trailingVisible: state.hoveredCardId == c.id ||
+                        (state.statuses[c.id]?.isRunning ?? false) ||
+                        state.statuses[c.id]?.status == 'restarting',
+                  ))
           : state.endpoints
-              .where((e) => q.isEmpty || e.name.toLowerCase().contains(q) || e.endpoint.toLowerCase().contains(q))
+              .where((e) =>
+                  q.isEmpty ||
+                  e.name.toLowerCase().contains(q) ||
+                  e.endpoint.toLowerCase().contains(q))
               .map((e) => _entityCardShell(
-                selected: e.id == state.selectedEndpointId,
-                onTap: () => cb.onSelectEndpoint(e.id),
-                dot: Container(
-                    width: 7, height: 7, // mockup .dot is 7px
-                    decoration: BoxDecoration(color: t.success, shape: BoxShape.circle)),
-                badge: switch (e.kind) { 'local' => 'LOCAL', 'aws' => 'AWS', _ => 'URL' },
-                // Mockup .ep-badge variants: local = success 15%, aws =
-                // warning 16%, url = accent 13% fills, fg = same hue, no border.
-                badgeBg: switch (e.kind) {
-                  'local' => t.success.withValues(alpha: 0.15),
-                  'aws' => t.warning.withValues(alpha: 0.16),
-                  _ => t.accent.withValues(alpha: 0.13),
-                },
-                badgeFg: switch (e.kind) { 'local' => t.success, 'aws' => t.warning, _ => t.accent },
-                name: e.name.isEmpty ? tr('config.unnamed') : e.name,
-                sub: switch (e.kind) {
-                  'aws' => e.region.isEmpty ? 'AWS' : 'dynamodb · ${e.region}',
-                  'local' => _portLabel(e.endpoint),
-                  _ => _hostOf(e.endpoint),
-                },
-                sub2: '',
-                sub2Color: t.text3,
-                trailing: null,
-              ));
+                    cardKey: e.id,
+                    selected: e.id == state.selectedEndpointId,
+                    hovered: e.id == state.hoveredCardId,
+                    onTap: () => cb.onSelectEndpoint(e.id),
+                    onHover: (h) => cb.onHoverCard(h ? e.id : null),
+                    dot: Container(
+                        width: 7,
+                        height: 7,
+                        decoration: BoxDecoration(
+                            color: t.success, shape: BoxShape.circle)),
+                    badge: switch (e.kind) {
+                      'local' => 'LOCAL',
+                      'aws' => 'AWS',
+                      _ => 'URL'
+                    },
+                    name: e.name.isEmpty ? tr('config.unnamed') : e.name,
+                    sub: switch (e.kind) {
+                      'aws' =>
+                        e.region.isEmpty ? 'AWS' : 'dynamodb · ${e.region}',
+                      'local' => _portLabel(e.endpoint),
+                      _ => _hostOf(e.endpoint),
+                    },
+                    sub2: '',
+                    sub2Color: t.text3,
+                    trailing: null,
+                  ));
       return Container(
+        key: const ValueKey('entity-sidebar'),
         decoration: BoxDecoration(
           color: t.sidebar,
-          // mockup .sidebar: 1px right border + right-edge soft shadow (elevSide).
           border: Border(right: BorderSide(color: t.border)),
-          boxShadow: Depth.elevSide(Theme.of(context).brightness),
         ),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          // Filter: search (current kind).
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 12, 12, 6),
-            child: SizedBox(
-              height: Dim.ctlH,
-              child: TextField(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 12, 12, 6),
+              child: CodexSearchField(
+                key: const ValueKey('entity-sidebar-search'),
+                hintText: tr('br.search'),
                 onChanged: cb.onQueryChanged,
-                // Mockup .search-input: mono 12.
-                style: Ts.style(size: 12, color: t.text, monoFont: true),
-                decoration: InputDecoration(
-                  isDense: true,
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-                  hintText: tr('br.search'),
-                  // Mockup .search-input: mono 12.
-                  hintStyle: Ts.style(size: 12, color: t.text3, monoFont: true),
-                  prefixIcon: Icon(Icons.search, size: 16, color: t.text3),
-                  prefixIconConstraints: const BoxConstraints(minWidth: 30, minHeight: 0),
-                  filled: true,
-                  fillColor: t.panel, // mockup .search bg = --panel
-                  enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(Dim.radiusS), // radius-sm 6
-                      borderSide: BorderSide(color: t.border)),
-                  focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(Dim.radiusS),
-                      borderSide: BorderSide(color: t.focus, width: 1.4)),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+              child: SizedBox(
+                height: Dim.ctlH,
+                child: CodexButton(
+                  key: const ValueKey('entity-sidebar-new-action'),
+                  variant: CodexButtonVariant.primary,
+                  onPressed: cb.onNewConfig,
+                  icon: const Icon(Icons.add, size: 16),
+                  label: Text(tr('config.new')),
                 ),
               ),
             ),
-          ),
-          // New button for the current kind (kept on instances; endpoints gain one
-          // only via their own flows, so the endpoint pane reuses the same button
-          // and opens the new-config editor).
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-            child: SizedBox(
-              height: 32, // mockup .pbtn: 32px, radius-sm 6 (CP 9.x round 2)
-              child: FilledButton.icon(
-                onPressed: cb.onNewConfig,
-                icon: const Icon(Icons.add, size: 16),
-                // Explicit label style: the styleFrom(textStyle:) chain loses
-                // the font family in widget tests (blocky fallback face), so
-                // the label must carry its own Ts.style.
-                label: Text(tr('config.new'),
-                    style: Ts.style(size: Ts.md, weight: FontWeight.w600)),
-                style: FilledButton.styleFrom(
-                    minimumSize: const Size.fromHeight(32),
-                    padding: const EdgeInsets.symmetric(horizontal: 14),
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(Dim.radiusS))),
+            Padding(
+              key: const ValueKey('entity-sidebar-group-header'),
+              padding: const EdgeInsets.fromLTRB(12, 2, 12, 0),
+              child: Row(
+                children: [
+                  Icon(Icons.keyboard_arrow_down, size: 10, color: t.text3),
+                  const SizedBox(width: 7),
+                  Text(
+                    (isInstance ? tr('nav.instances') : tr('nav.endpoints'))
+                        .toUpperCase(),
+                    style: Ts.style(
+                      size: 10.5,
+                      weight: FontWeight.w700,
+                      color: t.text3,
+                      letterSpacing: 1,
+                    ),
+                  ),
+                  const SizedBox(width: 7),
+                  Container(
+                    key: const ValueKey('entity-sidebar-count'),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 7, vertical: 1),
+                    decoration: BoxDecoration(
+                      color: t.panel2,
+                      borderRadius: BorderRadius.circular(999),
+                      border: Border.all(color: t.hairline),
+                    ),
+                    child: Text(
+                      '${isInstance ? state.configs.length : state.endpoints.length}',
+                      style: Ts.style(
+                        size: 10,
+                        weight: FontWeight.w500,
+                        color: t.text2,
+                        monoFont: true,
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
-          ),
-          // Group header (mockup .grp-head: ▾ twisty + uppercase 10.5/700
-          // ls1 text-3 + .cnt-chip mono 10/500 panel-2 + hairline, radius
-          // 999, padding 1×7, colour text-2).
-          Padding(
-            padding: const EdgeInsets.fromLTRB(2, 2, 2, 0),
-            child: Row(children: [
-              Icon(Icons.keyboard_arrow_down, size: 10, color: t.text3), // .twisty ▾
-              const SizedBox(width: 7), // .grp-head gap:7
-              Text((isInstance ? tr('nav.instances') : tr('nav.endpoints')).toUpperCase(),
-                  style: Ts.style(size: 10.5, weight: FontWeight.w700, color: t.text3, letterSpacing: 1)),
-              const SizedBox(width: 7),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 1),
-                decoration: BoxDecoration(
-                    color: t.panel2,
-                    borderRadius: BorderRadius.circular(999),
-                    border: Border.all(color: t.hairline)),
-                child: Text('${isInstance ? state.configs.length : state.endpoints.length}',
-                    style: Ts.style(size: 10, weight: FontWeight.w500, color: t.text2, monoFont: true)),
-              ),
-            ]),
-          ),
-          Expanded(
-            child: items.isEmpty
-                ? Center(child: Text(tr('nav.noneYet'), style: Ts.style(size: Ts.md, color: t.text3)))
-                : ListView(
-                    // Mockup .ep-list: padding 10, gap 8 (cards carry 4+4
-                    // vertical margin; pixel-fidelity-v23 CP 9.x).
-                    padding: const EdgeInsets.fromLTRB(10, 4, 10, 10),
-                    children: items.toList()),
-          ),
-          const Divider(height: 1),
-          LocalDdbPanel(core: core, info: state.ddb, onMutated: cb.onDdbMutated),
-        ]),
+            Expanded(
+              child: items.isEmpty
+                  ? Center(
+                      key: const ValueKey('entity-sidebar-empty'),
+                      child: Text(
+                        tr('nav.noneYet'),
+                        style: Ts.style(size: Ts.md, color: t.text3),
+                      ),
+                    )
+                  : ListView(
+                      key: const ValueKey('entity-sidebar-list'),
+                      padding: const EdgeInsets.fromLTRB(10, 4, 10, 10),
+                      children: items.toList(),
+                    ),
+            ),
+            const Divider(height: 1),
+            LocalDdbPanel(
+              core: core,
+              info: state.ddb,
+              onMutated: cb.onDdbMutated,
+            ),
+          ],
+        ),
       );
     });
   }
@@ -764,20 +950,20 @@ class HomeChrome extends StatelessWidget {
     return s.status;
   }
 
-  // Hover-revealed start/stop control for an instance card (kept visible while
-  // active so a running instance can always be stopped).
-  Widget? _hoverStartStop(RedimosConfig c) {
+  // Start/stop control for an instance card. The card shell decides when to
+  // mount it: hover, active lifecycle, or keyboard focus anywhere in the card.
+  Widget _startStop(RedimosConfig c) {
     final st = state.statuses[c.id];
     final active = (st?.isRunning ?? false) || st?.status == 'restarting';
-    final hovered = state.hoveredCardId == c.id;
-    if (!hovered && !active) return null;
     return Builder(builder: (context) {
+      final t = AppTokens.of(context);
       return IconButton(
+        key: ValueKey('entity-card-${c.id}-start-stop'),
         tooltip: active ? tr('config.stop') : tr('config.start'),
         visualDensity: VisualDensity.compact,
         iconSize: 18,
         icon: Icon(active ? Icons.stop_circle : Icons.play_circle_fill,
-            color: active ? Colors.redAccent : Accents.green),
+            color: active ? t.danger : t.success),
         onPressed: () => cb.onStartStop(c),
       );
     });
@@ -787,97 +973,166 @@ class HomeChrome extends StatelessWidget {
   // sub-line (+ optional start/stop). Selected = accent border + selection
   // fill + inset 2px left accent (mockup .ep-card.selected).
   Widget _entityCardShell({
+    required String cardKey,
     required bool selected,
+    required bool hovered,
     required VoidCallback onTap,
     void Function(bool)? onHover,
     required Widget dot,
     required String badge,
-    required Color badgeBg,
-    required Color badgeFg,
-    Color? badgeBorder,
     required String name,
     required String sub,
     required String sub2,
     required Color sub2Color,
     Widget? trailing,
+    bool trailingVisible = false,
   }) {
     return Builder(builder: (context) {
       final t = AppTokens.of(context);
-      return Padding(
-        // Mockup .ep-list gap 8 → 4+4 per card.
-        padding: const EdgeInsets.fromLTRB(10, 4, 10, 4),
-        child: Material(
-          color: selected ? t.selection : t.panel,
-          borderRadius: BorderRadius.circular(Dim.radiusM), // --radius 8
-          child: InkWell(
-            onTap: onTap,
-            onHover: onHover,
-            borderRadius: BorderRadius.circular(Dim.radiusM),
-            child: Container(
-              decoration: BoxDecoration(
-                // Opaque fill REQUIRED: without it the elev-2 outer shadow
-                // composites through the transparent box interior and the
-                // card reads grey instead of white (ep-browser diagnosis).
-                color: selected ? t.selection : t.panel,
+      var cardFocused = false;
+      return StatefulBuilder(builder: (context, setCardState) {
+        final cardColor = selected
+            ? t.selection
+            : hovered
+                ? t.hover
+                : t.panel;
+        final showTrailing =
+            trailing != null && (trailingVisible || cardFocused);
+        return Focus(
+          skipTraversal: true,
+          onFocusChange: (value) {
+            if (cardFocused == value) return;
+            setCardState(() => cardFocused = value);
+          },
+          child: Padding(
+            key: ValueKey('entity-card-$cardKey'),
+            padding: const EdgeInsets.fromLTRB(10, 4, 10, 4),
+            child: Material(
+              key: ValueKey('entity-card-$cardKey-material'),
+              color: cardColor,
+              borderRadius: BorderRadius.circular(Dim.radiusM),
+              child: InkWell(
+                key: ValueKey('entity-card-$cardKey-action'),
+                onTap: onTap,
+                onHover: onHover,
                 borderRadius: BorderRadius.circular(Dim.radiusM),
-                // Mockup: 1px border in both states (accent when selected).
-                border: Border.all(color: selected ? t.accent : t.border),
-                boxShadow: Depth.elev2(Theme.of(context).brightness),
-              ),
-              // 2px left selection indicator (.ep-card.selected inset 2px).
-              foregroundDecoration: selected
-                  ? BoxDecoration(
-                      borderRadius: BorderRadius.circular(Dim.radiusM),
-                      border: Border(left: BorderSide(color: t.accent, width: 2)),
-                    )
-                  : null,
-              padding: const EdgeInsets.fromLTRB(12, 10, 12, 10), // 10px 12px
-              child: Row(children: [
-                dot,
-                const SizedBox(width: 7), // .ep-top gap:7
-                Expanded(
-                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Row(children: [
-                      Flexible(
-                        // Mockup .ep-name: 13/700 (v2.4 override).
-                        child: Text(name, overflow: TextOverflow.ellipsis,
-                            style: Ts.style(size: 13, weight: FontWeight.w700, color: t.text)),
+                hoverColor: Colors.transparent,
+                focusColor: t.focus.withValues(alpha: 0.12),
+                highlightColor: Colors.transparent,
+                splashColor: Colors.transparent,
+                child: Container(
+                  key: ValueKey('entity-card-$cardKey-surface'),
+                  decoration: BoxDecoration(
+                    color: cardColor,
+                    borderRadius: BorderRadius.circular(Dim.radiusM),
+                    border: Border.all(
+                      color: cardFocused
+                          ? t.focus
+                          : selected
+                              ? t.accent
+                              : t.border,
+                      width: Dim.borderW,
+                    ),
+                    boxShadow: Depth.elev1(Theme.of(context).brightness),
+                  ),
+                  // 2px left selection indicator (.ep-card.selected inset 2px).
+                  foregroundDecoration: selected
+                      ? BoxDecoration(
+                          borderRadius: BorderRadius.circular(Dim.radiusM),
+                          border: Border(
+                            left: BorderSide(color: t.accent, width: 2),
+                          ),
+                        )
+                      : null,
+                  padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+                  child: Row(children: [
+                    dot,
+                    const SizedBox(width: 7),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(children: [
+                            Flexible(
+                              child: Text(
+                                name,
+                                key: ValueKey('entity-card-$cardKey-name'),
+                                overflow: TextOverflow.ellipsis,
+                                style: Ts.style(
+                                  size: 13,
+                                  weight: FontWeight.w700,
+                                  color: t.text,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 6),
+                            Container(
+                              key: ValueKey('entity-card-$cardKey-badge'),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 7,
+                                vertical: 2,
+                              ),
+                              decoration: BoxDecoration(
+                                color: t.panel2,
+                                borderRadius: BorderRadius.circular(4),
+                                border: Border.all(color: t.hairline),
+                              ),
+                              child: Text(
+                                badge,
+                                style: Ts.style(
+                                  size: 9.5,
+                                  weight: FontWeight.w700,
+                                  color: t.text2,
+                                  letterSpacing: 0.6,
+                                  monoFont: true,
+                                ),
+                              ),
+                            ),
+                          ]),
+                          const SizedBox(height: 6),
+                          Row(children: [
+                            Flexible(
+                              child: Text(
+                                sub,
+                                overflow: TextOverflow.ellipsis,
+                                style: Ts.style(
+                                  size: Ts.xs,
+                                  color: t.text3,
+                                  monoFont: true,
+                                ),
+                              ),
+                            ),
+                            if (sub2.isNotEmpty) ...[
+                              const SizedBox(width: 12),
+                              Text(
+                                sub2,
+                                style: Ts.style(
+                                  size: Ts.xs,
+                                  weight: FontWeight.w600,
+                                  color: sub2Color,
+                                  monoFont: true,
+                                ),
+                              ),
+                            ],
+                          ]),
+                        ],
                       ),
-                      const SizedBox(width: 6),
-                      // .ep-badge: margin-left:auto, mono 9.5/700 ls.6,
-                      // padding 2×7, radius 4.
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                        decoration: BoxDecoration(
-                            color: badgeBg,
-                            borderRadius: BorderRadius.circular(4),
-                            border: badgeBorder == null
-                                ? null
-                                : Border.all(color: badgeBorder)),
-                        child: Text(badge,
-                            style: Ts.style(size: 9.5, weight: FontWeight.w700, color: badgeFg, letterSpacing: 0.6, monoFont: true)),
-                      ),
-                    ]),
-                    const SizedBox(height: 6), // .ep-card gap:6
-                    Row(children: [
-                      Flexible(
-                        child: Text(sub, overflow: TextOverflow.ellipsis,
-                            style: Ts.style(size: Ts.xs, color: t.text3, monoFont: true)),
-                      ),
-                      if (sub2.isNotEmpty) ...[
-                        const SizedBox(width: 12), // .ep-sub gap:12
-                        // Mockup .st-* status words are 600.
-                        Text(sub2, style: Ts.style(size: Ts.xs, weight: FontWeight.w600, color: sub2Color, monoFont: true)),
-                      ],
-                    ]),
+                    ),
+                    // The slot remains fixed while the action mounts for hover,
+                    // active lifecycle, or keyboard focus within this card.
+                    SizedBox(
+                      key: ValueKey('entity-card-$cardKey-trailing-slot'),
+                      width: Dim.trailingSlot,
+                      height: Dim.trailingSlot,
+                      child: showTrailing ? trailing : const SizedBox.shrink(),
+                    ),
                   ]),
                 ),
-                if (trailing != null) trailing,
-              ]),
+              ),
             ),
           ),
-        ),
-      );
+        );
+      });
     });
   }
 
@@ -899,7 +1154,9 @@ class HomeChrome extends StatelessWidget {
 
   String _hostOf(String url) {
     final u = Uri.tryParse(url);
-    return (u != null && u.host.isNotEmpty) ? (u.hasPort ? '${u.host}:${u.port}' : u.host) : url;
+    return (u != null && u.host.isNotEmpty)
+        ? (u.hasPort ? '${u.host}:${u.port}' : u.host)
+        : url;
   }
 
   String _portLabel(String url) {
@@ -908,43 +1165,170 @@ class HomeChrome extends StatelessWidget {
     return _hostOf(url);
   }
 
-  // Mockup maps stopped to .dot.err/.st-err (--danger), not grey.
-  Color _statusColor(BuildContext context, String status) {
-    final t = AppTokens.of(context);
-    return switch (status) {
-      'running' => goGreen(context),
-      'restarting' => Colors.amberAccent,
-      'error' => Colors.redAccent,
-      'failed' => Colors.redAccent,
-      'exited' => Colors.orangeAccent,
-      'stopped' => t.danger,
-      _ => Colors.grey,
-    };
+  CodexStatus _codexStatus(String status) => switch (status) {
+        'running' || 'ready' => CodexStatus.running,
+        'preparing' || 'restarting' || 'degraded' => CodexStatus.warning,
+        'error' || 'failed' || 'exited' || 'stopped' => CodexStatus.danger,
+        _ => CodexStatus.neutral,
+      };
+
+  Color _statusColor(BuildContext context, String status) =>
+      codexStatusColor(context, _codexStatus(status));
+
+  Widget _statusDot(String status) => CodexStatusDot(
+        status: _codexStatus(status),
+        semanticLabel: 'Instance $status',
+        glow: true,
+      );
+}
+
+class _CodexPopupMenuItem<T> extends PopupMenuEntry<T> {
+  const _CodexPopupMenuItem({
+    super.key,
+    required this.keyName,
+    required this.value,
+    required this.selected,
+    required this.label,
+    this.icon,
+  });
+
+  final String keyName;
+  final T value;
+  final bool selected;
+  final String label;
+  final IconData? icon;
+
+  @override
+  double get height => Dim.rowH;
+
+  @override
+  bool represents(T? value) => value == this.value;
+
+  @override
+  State<_CodexPopupMenuItem<T>> createState() => _CodexPopupMenuItemState<T>();
+}
+
+class _CodexPopupMenuItemState<T> extends State<_CodexPopupMenuItem<T>> {
+  bool _hovered = false;
+  bool _focused = false;
+  bool _pressed = false;
+
+  void _setHovered(bool value) {
+    if (_hovered != value) setState(() => _hovered = value);
   }
 
-  // Mockup .dot: 7×7 circle + same-hue 55% glow (0 0 5px).
-  Widget _statusDot(String status) => Builder(builder: (context) {
-        final c = _statusColor(context, status);
-        return Container(
-            width: 7, height: 7,
-            decoration: BoxDecoration(
-                color: c,
-                shape: BoxShape.circle,
-                boxShadow: [BoxShadow(color: c.withValues(alpha: 0.55), blurRadius: 5)]));
-      });
+  void _setFocused(bool value) {
+    if (_focused != value) setState(() => _focused = value);
+  }
+
+  void _setPressed(bool value) {
+    if (_pressed != value) setState(() => _pressed = value);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = AppTokens.of(context);
+    final base = widget.selected ? t.selection : Colors.transparent;
+    final background = _pressed
+        ? t.selection
+        : _hovered
+            ? Color.alphaBlend(t.hover, base)
+            : _focused
+                ? Color.alphaBlend(t.focus.withValues(alpha: 0.12), base)
+                : base;
+    final foreground = widget.selected ? t.accent : t.text;
+
+    return MergeSemantics(
+      child: Semantics(
+        role: SemanticsRole.menuItem,
+        enabled: true,
+        button: true,
+        selected: widget.selected,
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            key: ValueKey('${widget.keyName}-action'),
+            onTap: () => Navigator.pop<T>(context, widget.value),
+            onHover: _setHovered,
+            onFocusChange: _setFocused,
+            onHighlightChanged: _setPressed,
+            canRequestFocus: true,
+            mouseCursor: SystemMouseCursors.click,
+            splashFactory: NoSplash.splashFactory,
+            splashColor: Colors.transparent,
+            highlightColor: Colors.transparent,
+            hoverColor: Colors.transparent,
+            focusColor: Colors.transparent,
+            child: Container(
+              key: ValueKey('${widget.keyName}-row'),
+              height: Dim.rowH,
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              decoration: BoxDecoration(
+                color: background,
+                border: Border.all(
+                  color: _focused ? t.focus : Colors.transparent,
+                  width: Dim.borderW,
+                ),
+                borderRadius: BorderRadius.circular(Dim.radiusS),
+              ),
+              child: Row(children: [
+                SizedBox.square(
+                  dimension: 18,
+                  child: widget.icon == null
+                      ? null
+                      : Icon(
+                          widget.icon,
+                          key: ValueKey('${widget.keyName}-icon'),
+                          size: 16,
+                          color: foreground,
+                        ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    widget.label,
+                    key: ValueKey('${widget.keyName}-label'),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Ts.style(
+                      size: Ts.md,
+                      weight:
+                          widget.selected ? FontWeight.w600 : FontWeight.w500,
+                      color: foreground,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                SizedBox.square(
+                  dimension: 16,
+                  child: widget.selected
+                      ? Icon(
+                          Icons.check,
+                          key: ValueKey('${widget.keyName}-check'),
+                          size: 15,
+                          color: t.accent,
+                        )
+                      : null,
+                ),
+              ]),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 // ---------------------------------------------------------------------------
 // Shared chrome bits used both by HomeChrome and the capture channel.
 // ---------------------------------------------------------------------------
 
-/// The v2.3 primary CTA (mid bar end slot / context button). Dark theme flips
-/// to a white fill + near-black text.
-Widget chromeCta(BuildContext context, IconData icon, String label, VoidCallback onPressed) {
+/// Primary CTA for the mid-bar end slot and contextual actions.
+Widget chromeCta(
+    BuildContext context, IconData icon, String label, VoidCallback onPressed) {
   final t = AppTokens.of(context);
-  final dark = Theme.of(context).brightness == Brightness.dark;
-  final bg = dark ? const Color(0xFFF5F7FB) : t.accent;
-  final fg = dark ? const Color(0xFF10142E) : t.onAccent;
+  final bg = t.accent;
+  final fg = t.onAccent;
   return Padding(
     padding: const EdgeInsets.only(right: 6),
     child: SizedBox(
@@ -954,8 +1338,8 @@ Widget chromeCta(BuildContext context, IconData icon, String label, VoidCallback
         icon: Icon(icon, size: 16, color: fg),
         // Explicit label style: styleFrom(textStyle:) loses the font family
         // in widget tests (blocky fallback face) — see home sidebar button.
-        label: Text(label,
-            style: Ts.style(size: Ts.md, weight: FontWeight.w600)),
+        label:
+            Text(label, style: Ts.style(size: Ts.md, weight: FontWeight.w600)),
         style: FilledButton.styleFrom(
           backgroundColor: bg,
           foregroundColor: fg,
@@ -969,58 +1353,43 @@ Widget chromeCta(BuildContext context, IconData icon, String label, VoidCallback
   );
 }
 
-/// The app mark (mockup .rail-logo): a 36px rounded red tile (155° gradient
-/// #ec5a4f→#d33a31→#ae2a21) with a bold white 'R', raised by a rich multi-layer
-/// shadow (inset top highlight + inset bottom shade + 1px ring + drop shadow).
+/// Compact app mark for the rail. It uses the theme accent directly rather
+/// than a separate brand gradient, keeping light and dark chrome consistent.
 class RedimosLogo extends StatelessWidget {
   const RedimosLogo({super.key, this.size = 36});
+
   final double size;
+
   @override
   Widget build(BuildContext context) {
+    final t = AppTokens.of(context);
     final dark = Theme.of(context).brightness == Brightness.dark;
     return Container(
       width: size,
       height: size,
       alignment: Alignment.center,
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(10),
-        gradient: const LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [Color(0xFFEC5A4F), Color(0xFFD33A31), Color(0xFFAE2A21)],
-          stops: [0.0, 0.48, 1.0],
-        ),
+        color: t.accent,
+        borderRadius: BorderRadius.circular(Dim.radiusL),
+        border: Border.all(color: t.onAccent.withValues(alpha: 0.12)),
         boxShadow: [
-          // inset top highlight
           BoxShadow(
-              color: Colors.white.withValues(alpha: dark ? 0.30 : 0.32),
-              offset: const Offset(0, 1),
-              blurRadius: 0),
-          // inset bottom shade
-          BoxShadow(
-              color: const Color(0xFF600A05).withValues(alpha: dark ? 0.45 : 0.35),
-              offset: const Offset(0, -2),
-              blurRadius: 4),
-          // 1px outer ring
-          BoxShadow(
-              color: Colors.white.withValues(alpha: dark ? 0.07 : 0.06),
-              spreadRadius: 1,
-              blurRadius: 0),
-          // drop shadow
-          BoxShadow(
-              color: Colors.black.withValues(alpha: dark ? 0.65 : 0.5),
-              offset: const Offset(0, 3),
-              blurRadius: dark ? 10 : 8,
-              spreadRadius: -2),
+            color: Colors.black.withValues(alpha: dark ? 0.24 : 0.12),
+            offset: const Offset(0, 2),
+            blurRadius: 5,
+          ),
         ],
       ),
-      child: const Text('R',
-          style: TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.w700,
-              letterSpacing: -0.5,
-              color: Colors.white,
-              height: 1)),
+      child: Text(
+        'R',
+        style: TextStyle(
+          fontSize: 16,
+          fontWeight: FontWeight.w700,
+          letterSpacing: -0.5,
+          color: t.onAccent,
+          height: 1,
+        ),
+      ),
     );
   }
 }

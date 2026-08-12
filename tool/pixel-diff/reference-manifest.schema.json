@@ -1,0 +1,199 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://redimos.local/schemas/codex-reference-manifest-v1.json",
+  "title": "Redimos Codex visual reference manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "referenceVersion",
+    "viewport",
+    "renderingEnvironment",
+    "screens",
+    "history"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "referenceVersion": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._-]*$"
+    },
+    "viewport": { "$ref": "#/$defs/viewport" },
+    "renderingEnvironment": { "$ref": "#/$defs/environment" },
+    "screens": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/screen" }
+    },
+    "captureRuns": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/captureRun" }
+    },
+    "noiseMeasurement": { "$ref": "#/$defs/noiseMeasurement" },
+    "history": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/historyEntry" }
+    }
+  },
+  "$defs": {
+    "viewport": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["logicalWidth", "logicalHeight", "dpr"],
+      "properties": {
+        "logicalWidth": { "type": "integer", "minimum": 1 },
+        "logicalHeight": { "type": "integer", "minimum": 1 },
+        "dpr": { "type": "number", "exclusiveMinimum": 0 }
+      }
+    },
+    "environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["platform", "flutter", "fontMode"],
+      "properties": {
+        "platform": { "type": "string", "minLength": 1 },
+        "flutter": { "type": "string", "minLength": 1 },
+        "fontMode": { "enum": ["bundled"] }
+      }
+    },
+    "region": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "x", "y", "width", "height"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-zA-Z0-9_-]*$"
+        },
+        "x": { "type": "number", "minimum": 0 },
+        "y": { "type": "number", "minimum": 0 },
+        "width": { "type": "number", "exclusiveMinimum": 0 },
+        "height": { "type": "number", "exclusiveMinimum": 0 }
+      }
+    },
+    "screen": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "theme",
+        "file",
+        "source",
+        "approval",
+        "regions"
+      ],
+      "properties": {
+        "id": {
+          "enum": [
+            "inst-browse",
+            "inst-console",
+            "inst-monitor",
+            "inst-logs",
+            "inst-playground",
+            "inst-config",
+            "ep-overview",
+            "ep-browser"
+          ]
+        },
+        "theme": { "enum": ["light", "dark"] },
+        "file": {
+          "type": "string",
+          "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*(?:^|/)v2\\.3-archive(?:/|$)).+\\.png$"
+        },
+        "source": { "type": "string", "minLength": 1 },
+        "approval": { "enum": ["candidate", "approved", "rejected"] },
+        "regions": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/region" }
+        }
+      }
+    },
+    "captureRun": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["runNumber", "directory", "metadata", "purpose"],
+      "properties": {
+        "runNumber": { "type": "integer", "minimum": 1 },
+        "directory": {
+          "type": "string",
+          "pattern": "^captures/run-[1-9][0-9]*$"
+        },
+        "metadata": {
+          "type": "string",
+          "pattern": "^captures/run-[1-9][0-9]*/capture-metadata\\.json$"
+        },
+        "purpose": { "const": "noise-floor" }
+      }
+    },
+    "noiseMeasurement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "runNumbers",
+        "report",
+        "thresholdPolicy",
+        "thresholdApproval",
+        "legacyV23ThresholdImported",
+        "rationale"
+      ],
+      "properties": {
+        "status": { "enum": ["planned", "measured"] },
+        "runNumbers": {
+          "type": "array",
+          "minItems": 3,
+          "uniqueItems": true,
+          "items": { "type": "integer", "minimum": 1 }
+        },
+        "report": {
+          "type": "string",
+          "pattern": "^reports/[a-z0-9][a-z0-9._-]*\\.json$"
+        },
+        "reportSha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "thresholdPolicy": { "const": "strictly-greater-than-measured-noise" },
+        "thresholdApproval": { "const": "pending" },
+        "legacyV23ThresholdImported": { "const": false },
+        "rationale": { "type": "string", "minLength": 1 }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "status": { "const": "measured" } },
+            "required": ["status"]
+          },
+          "then": { "required": ["reportSha256"] }
+        }
+      ]
+    },
+    "historyEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reason",
+        "affected",
+        "renderingEnvironment",
+        "approval",
+        "recordedAt"
+      ],
+      "properties": {
+        "reason": { "type": "string", "minLength": 1 },
+        "affected": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "renderingEnvironment": { "$ref": "#/$defs/environment" },
+        "approval": { "enum": ["candidate", "approved", "rejected"] },
+        "reviewer": { "type": "string", "minLength": 1 },
+        "fixtureRevision": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "buildRevision": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "fontRevision": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "recordedAt": { "type": "string", "format": "date-time" }
+      }
+    }
+  }
+}

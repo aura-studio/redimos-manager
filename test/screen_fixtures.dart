@@ -22,39 +22,15 @@ import 'package:redimos_manager/src/endpoint_detail.dart';
 import 'package:redimos_manager/src/logs_page.dart';
 import 'package:redimos_manager/src/models.dart';
 import 'package:redimos_manager/src/playground_page.dart';
-import 'package:redimos_manager/src/ui_tokens.dart';
+import 'package:redimos_manager/src/ui_theme.dart';
 
 import 'fake_core.dart';
 import 'fake_resp_server.dart';
 import 'golden_fonts.dart';
 
-/// The app's _appTheme (main.dart) replicated for tests, plus the real UI
-/// font — the test environment has no platform font to fall back to.
-ThemeData goldenTheme(Brightness b) {
-  final t = AppTokens.forBrightness(b);
-  final td = ThemeData(
-    useMaterial3: true,
-    brightness: b,
-    scaffoldBackgroundColor: t.bg,
-    dividerColor: t.hairline,
-    fontFamily: kGoldenUiFont,
-    colorScheme: b == Brightness.dark
-        ? const ColorScheme.dark().copyWith(primary: t.accent, surface: t.panel)
-        : const ColorScheme.light().copyWith(primary: t.accent, surface: t.panel),
-    extensions: [t],
-    fontFamilyFallback: Ts.sans,
-    dividerTheme: DividerThemeData(
-      thickness: 1,
-      space: 1,
-      color: t.hairline,
-    ),
-  );
-  // CP 5.2: mirror _appTheme's CSS half-leading stamp (main.dart).
-  // CP 7.x: mirror _appTheme's MatSuppress chrome kill (single builder in
-  // ui_tokens.dart, so the two factories cannot drift).
-  return MatSuppress.apply(
-      td.copyWith(textTheme: Ts.withCssLeading(td.textTheme)), t);
-}
+/// The production theme with the deterministic UI font registered by tests.
+ThemeData goldenTheme(Brightness brightness) =>
+    appTheme(brightness, fontFamily: kGoldenUiFont);
 
 /// Pump [child] inside the app-equivalent MaterialApp/Scaffold at the design's
 /// 1280×800 logical size (×2 for crisp PNGs). [shotKey] optionally wraps the
@@ -80,6 +56,7 @@ Future<void> pumpScreen(WidgetTester tester,
   await tester.pumpWidget(MaterialApp(
     debugShowCheckedModeBanner: false,
     theme: goldenTheme(dark ? Brightness.dark : Brightness.light),
+    scrollBehavior: appScrollBehavior,
     home: shotKey == null
         ? Scaffold(body: body)
         : RepaintBoundary(key: shotKey, child: Scaffold(body: body)),
@@ -165,13 +142,58 @@ List<double> fixtureHist(double base, double amp, double phase) =>
 /// higher = more). The capture channel seeds the design's exact zigzag; the
 /// golden channel mirrors it (pixel-fidelity-v23 CP 9.x).
 const mockSparkCpu = <double>[
-  14, 18, 16, 26, 22, 34, 28, 32, 24, 36, 30, 38, 32, 40, 34, 37
+  14,
+  18,
+  16,
+  26,
+  22,
+  34,
+  28,
+  32,
+  24,
+  36,
+  30,
+  38,
+  32,
+  40,
+  34,
+  37
 ];
 const mockSparkMem = <double>[
-  12, 13, 15, 14, 18, 17, 20, 19, 22, 21, 24, 23, 26, 25, 27, 28
+  12,
+  13,
+  15,
+  14,
+  18,
+  17,
+  20,
+  19,
+  22,
+  21,
+  24,
+  23,
+  26,
+  25,
+  27,
+  28
 ];
 const mockSparkOps = <double>[
-  22, 16, 30, 18, 34, 22, 40, 26, 32, 18, 36, 24, 38, 28, 42, 30
+  22,
+  16,
+  30,
+  18,
+  34,
+  22,
+  40,
+  26,
+  32,
+  18,
+  36,
+  24,
+  38,
+  28,
+  42,
+  30
 ];
 
 // ---------------------------------------------------------------------------
@@ -184,7 +206,8 @@ Future<void> pumpInstBrowse(WidgetTester t,
       dark: dark,
       shotKey: shotKey,
       chrome: chrome,
-      child: BrowserPageView(config: fixtureConfig(), running: true, core: fakeCore));
+      child: BrowserPageView(
+          config: fixtureConfig(), running: true, core: fakeCore));
   await t.pump(const Duration(milliseconds: 50));
 }
 
@@ -310,8 +333,8 @@ Future<void> pumpInstBrowseLoaded(WidgetTester t,
   });
   await t.pump();
   await t.pump(const Duration(milliseconds: 100));
-  final drawerField = find.byWidgetPredicate((w) =>
-      w is TextField && (w.decoration?.hintText ?? '') == 'GET key …');
+  final drawerField = find.byWidgetPredicate(
+      (w) => w is TextField && (w.decoration?.hintText ?? '') == 'GET key …');
   await t.runAsync(() async {
     await t.enterText(drawerField, 'HGETALL user:1001');
     await t.testTextInput.receiveAction(TextInputAction.done);
@@ -413,7 +436,10 @@ Future<void> pumpInstPlayground(WidgetTester t,
       shotKey: shotKey,
       chrome: chrome,
       child: PlaygroundView(
-          core: fakeCore, config: fixtureConfig(), kind: 'redis', running: true));
+          core: fakeCore,
+          config: fixtureConfig(),
+          kind: 'redis',
+          running: true));
   await t.pump(const Duration(milliseconds: 50));
 }
 

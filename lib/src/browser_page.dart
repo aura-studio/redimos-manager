@@ -23,6 +23,11 @@ import 'models.dart';
 import 'native.dart';
 import 'resp_client.dart';
 import 'cli_drawer.dart';
+import 'ui_fields.dart';
+import 'ui_primitives.dart';
+import 'ui_states.dart';
+import 'ui_surfaces.dart';
+import 'ui_table.dart';
 import 'ui_tokens.dart';
 
 /// Rows loaded so far and the cursor to fetch more. One open key = one tab.
@@ -51,11 +56,13 @@ class _KeyTab {
   //   hash=(field,value)  list=(absIndex,value)  set=(member,'')  zset=(member,score)
   final List<List<String>> rows = [];
   int total = 0;
-  String cursor = '0'; // hash/set: *SCAN cursor. list/zset: unused (index = rows.length)
+  String cursor =
+      '0'; // hash/set: *SCAN cursor. list/zset: unused (index = rows.length)
   bool hasMore = false;
   bool loadingMore = false;
-  bool mutating = false; // a write is in flight — freeze row edit/delete (positional
-                         // list delete would drift if a second op raced it)
+  bool mutating =
+      false; // a write is in flight — freeze row edit/delete (positional
+  // list delete would drift if a second op raced it)
   String filter = '';
   bool desc = true; // zset display order — ARDM defaults to DESC
   int? sortCol; // 0 = first data column, 1 = second; null = server order
@@ -79,7 +86,10 @@ class BrowserPageView extends StatefulWidget {
   final bool running;
   final NativeCore core;
   const BrowserPageView(
-      {super.key, required this.config, required this.running, required this.core});
+      {super.key,
+      required this.config,
+      required this.running,
+      required this.core});
 
   @override
   State<BrowserPageView> createState() => _BrowserPageViewState();
@@ -93,7 +103,8 @@ class _BrowserPageViewState extends State<BrowserPageView>
   bool _connecting = false;
   String? _connError;
   Timer? _reconnect;
-  int _connGen = 0; // bumped on disconnect/config-change so a stale in-flight connect bails
+  int _connGen =
+      0; // bumped on disconnect/config-change so a stale in-flight connect bails
   int _delSeq = 0; // uniquifier for positional list-delete sentinels
 
   // left panel
@@ -116,8 +127,10 @@ class _BrowserPageViewState extends State<BrowserPageView>
   final _tabs = <_KeyTab>[];
   int _active = -1;
 
-  String? get _selected => _active >= 0 && _active < _tabs.length ? _tabs[_active].key : null;
-  _KeyTab? get _activeTab => _active >= 0 && _active < _tabs.length ? _tabs[_active] : null;
+  String? get _selected =>
+      _active >= 0 && _active < _tabs.length ? _tabs[_active].key : null;
+  _KeyTab? get _activeTab =>
+      _active >= 0 && _active < _tabs.length ? _tabs[_active] : null;
 
   @override
   bool get wantKeepAlive => true;
@@ -139,7 +152,8 @@ class _BrowserPageViewState extends State<BrowserPageView>
   @override
   void didUpdateWidget(BrowserPageView old) {
     super.didUpdateWidget(old);
-    if (old.config.id != widget.config.id || old.config.port != widget.config.port) {
+    if (old.config.id != widget.config.id ||
+        old.config.port != widget.config.port) {
       _disconnect();
       _resetAll();
       if (widget.running) _connect();
@@ -171,7 +185,9 @@ class _BrowserPageViewState extends State<BrowserPageView>
       _connError = null;
     });
     final c = RedisClient('127.0.0.1', widget.config.port,
-        auth: widget.config.requirepass.isEmpty ? null : widget.config.requirepass);
+        auth: widget.config.requirepass.isEmpty
+            ? null
+            : widget.config.requirepass);
     c.onClosed = (_) {
       if (!mounted || gen != _connGen) return;
       setState(() => _client = null);
@@ -221,7 +237,9 @@ class _BrowserPageViewState extends State<BrowserPageView>
     _reconnect?.cancel();
     if (!mounted || !widget.running) return;
     _reconnect = Timer(const Duration(seconds: 2), () {
-      if (mounted && widget.running && !(_client?.connected ?? false)) _connect();
+      if (mounted && widget.running && !(_client?.connected ?? false)) {
+        _connect();
+      }
     });
   }
 
@@ -340,7 +358,9 @@ class _BrowserPageViewState extends State<BrowserPageView>
         case 'string':
           final bytes = await c.getBytes(t.key);
           final v = (await c.get(t.key)) ?? '';
-          if (!_tabs.contains(t)) return; // tab closed mid-load → strCtrl disposed
+          if (!_tabs.contains(t)) {
+            return; // tab closed mid-load → strCtrl disposed
+          }
           t.strCtrl.text = v;
           t.strBytes = bytes ?? Uint8List(0);
           t.strFormat = 'Text';
@@ -376,7 +396,8 @@ class _BrowserPageViewState extends State<BrowserPageView>
   Future<void> _hashPage(_KeyTab t) async {
     final before = t.rows.length;
     do {
-      final (cur, pairs) = await _client!.hscan(t.key, t.cursor, count: _pageSize);
+      final (cur, pairs) =
+          await _client!.hscan(t.key, t.cursor, count: _pageSize);
       t.cursor = cur;
       for (final p in pairs) {
         t.rows.add([p.$1, p.$2]);
@@ -388,7 +409,8 @@ class _BrowserPageViewState extends State<BrowserPageView>
   Future<void> _setPage(_KeyTab t) async {
     final before = t.rows.length;
     do {
-      final (cur, items) = await _client!.sscan(t.key, t.cursor, count: _pageSize);
+      final (cur, items) =
+          await _client!.sscan(t.key, t.cursor, count: _pageSize);
       t.cursor = cur;
       for (final m in items) {
         t.rows.add([m, '']);
@@ -441,7 +463,10 @@ class _BrowserPageViewState extends State<BrowserPageView>
           await _zsetPage(t);
       }
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('$e')));
+      }
     }
     if (mounted) setState(() => t.loadingMore = false);
   }
@@ -463,8 +488,8 @@ class _BrowserPageViewState extends State<BrowserPageView>
     // reload the tab against the live server instead.
     if (t != null && t.loadGen != _connGen) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text(tr('br.reconnectedReloaded'))));
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(tr('br.reconnectedReloaded'))));
       }
       if (_tabs.contains(t)) await _loadTab(t);
       return;
@@ -474,7 +499,10 @@ class _BrowserPageViewState extends State<BrowserPageView>
       await op();
       if (t != null && _tabs.contains(t)) await _loadTab(t);
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('$e')));
+      }
     } finally {
       if (t != null && mounted) setState(() => t.mutating = false);
     }
@@ -484,7 +512,8 @@ class _BrowserPageViewState extends State<BrowserPageView>
   /// first equal element, not the row the user clicked). Tag the slot with a
   /// unique sentinel then remove that sentinel.
   Future<void> _lremAt(String key, int index) async {
-    final sentinel = '__redimos_rmdel_${_delSeq++}_${DateTime.now().microsecondsSinceEpoch}__';
+    final sentinel =
+        '__redimos_rmdel_${_delSeq++}_${DateTime.now().microsecondsSinceEpoch}__';
     await _client!.lset(key, index, sentinel);
     await _client!.lrem(key, 1, sentinel);
   }
@@ -493,7 +522,9 @@ class _BrowserPageViewState extends State<BrowserPageView>
     await Clipboard.setData(ClipboardData(text: text));
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(label ?? tr('br.copied')), duration: const Duration(milliseconds: 900)),
+        SnackBar(
+            content: Text(label ?? tr('br.copied')),
+            duration: const Duration(milliseconds: 900)),
       );
     }
   }
@@ -501,14 +532,16 @@ class _BrowserPageViewState extends State<BrowserPageView>
   // ---- copy-as-command (ARDM parity: row </> and header </>) ----
 
   /// Double-quote an argument the way ARDM's "Copy as command" does.
-  String _cq(String s) => '"${s.replaceAll(r'\', r'\\').replaceAll('"', r'\"')}"';
+  String _cq(String s) =>
+      '"${s.replaceAll(r'\', r'\\').replaceAll('"', r'\"')}"';
 
   /// The redis command recreating ONE row of a collection key.
   String _rowCommand(_KeyTab t, List<String> row) => switch (t.type) {
         'hash' => 'HSET ${_cq(t.key)} ${_cq(row[0])} ${_cq(row[1])}',
         'list' => 'RPUSH ${_cq(t.key)} ${_cq(row[1])}',
         'set' => 'SADD ${_cq(t.key)} ${_cq(row[0])}',
-        'zset' => 'ZADD ${_cq(t.key)} ${row[1]} ${_cq(row[0])}', // score unquoted
+        'zset' =>
+          'ZADD ${_cq(t.key)} ${row[1]} ${_cq(row[0])}', // score unquoted
         _ => '',
       };
 
@@ -516,10 +549,13 @@ class _BrowserPageViewState extends State<BrowserPageView>
   /// current display order — same output as ARDM's blue header </> button.
   String _keyCommand(_KeyTab t) => switch (t.type) {
         'string' => 'SET ${_cq(t.key)} ${_cq(t.strCtrl.text)}',
-        'hash' => 'HSET ${_cq(t.key)} ${t.rows.map((r) => '${_cq(r[0])} ${_cq(r[1])}').join(' ')}',
-        'list' => 'RPUSH ${_cq(t.key)} ${t.rows.map((r) => _cq(r[1])).join(' ')}',
+        'hash' =>
+          'HSET ${_cq(t.key)} ${t.rows.map((r) => '${_cq(r[0])} ${_cq(r[1])}').join(' ')}',
+        'list' =>
+          'RPUSH ${_cq(t.key)} ${t.rows.map((r) => _cq(r[1])).join(' ')}',
         'set' => 'SADD ${_cq(t.key)} ${t.rows.map((r) => _cq(r[0])).join(' ')}',
-        'zset' => 'ZADD ${_cq(t.key)} ${t.rows.map((r) => '${r[1]} ${_cq(r[0])}').join(' ')}',
+        'zset' =>
+          'ZADD ${_cq(t.key)} ${t.rows.map((r) => '${r[1]} ${_cq(r[0])}').join(' ')}',
         _ => '',
       };
 
@@ -528,41 +564,53 @@ class _BrowserPageViewState extends State<BrowserPageView>
   @override
   Widget build(BuildContext context) {
     super.build(context);
-    if (!widget.running) {
-      return _center(Icons.play_circle_outline, tr('br.instanceNotRunning'),
-          tr('br.startToBrowse'));
-    }
-    if (_client == null) {
-      return Center(
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          const SizedBox(width: 34, height: 34, child: CircularProgressIndicator(strokeWidth: 3)),
-          const SizedBox(height: 16),
-          Text(_connError ?? tr('br.connecting')),
-          Text('127.0.0.1:${widget.config.port}',
-              style: const TextStyle(fontSize: 12, color: Colors.grey)),
-        ]),
-      );
-    }
-    return Theme(
-      data: _denseTabTheme(context),
-      child: Column(children: [
-        Expanded(
-          child: Row(children: [
-            // Mockup .sidebar: elev-side soft right-edge shadow over the border.
-            Container(
-              width: Dim.sidebarW,
-              decoration: BoxDecoration(
-                boxShadow: Depth.elevSide(Theme.of(context).brightness),
+    final connected = _client != null;
+    final state = !widget.running
+        ? CodexContentState.empty
+        : connected
+            ? CodexContentState.content
+            : _connError == null
+                ? CodexContentState.loading
+                : CodexContentState.error;
+    return CodexStateShell(
+      key: const ValueKey('browser-page-state'),
+      state: state,
+      message: !widget.running
+          ? tr('br.instanceNotRunning')
+          : _connError ?? tr('br.connecting'),
+      detail: !widget.running
+          ? tr('br.startToBrowse')
+          : connected
+              ? null
+              : _connError == null
+                  ? '127.0.0.1:${widget.config.port}'
+                  : '127.0.0.1:${widget.config.port}',
+      icon: !widget.running
+          ? const Icon(Icons.play_circle_outline, size: 22)
+          : null,
+      bodyPadding: const EdgeInsets.symmetric(horizontal: 32, vertical: 24),
+      content: Theme(
+        key: ValueKey('browser-content-${widget.config.id}'),
+        data: _denseTabTheme(context),
+        child: Column(children: [
+          Expanded(
+            child: Row(children: [
+              // Mockup .sidebar: elev-side soft right-edge shadow over the border.
+              Container(
+                width: Dim.sidebarW,
+                decoration: BoxDecoration(
+                  boxShadow: Depth.elevSide(Theme.of(context).brightness),
+                ),
+                child: _leftPanel(),
               ),
-              child: _leftPanel(),
-            ),
-            const VerticalDivider(width: 1),
-            Expanded(child: _rightPanel()),
-          ]),
-        ),
-        // v2.3 CLI drawer: collapsible RESP console pinned to the Browse floor.
-        CliDrawer(host: '127.0.0.1', port: widget.config.port),
-      ]),
+              const VerticalDivider(width: 1),
+              Expanded(child: _rightPanel()),
+            ]),
+          ),
+          // v2.3 CLI drawer: collapsible RESP console pinned to the Browse floor.
+          CliDrawer(host: '127.0.0.1', port: widget.config.port),
+        ]),
+      ),
     );
   }
 
@@ -588,16 +636,22 @@ class _BrowserPageViewState extends State<BrowserPageView>
         child: Row(children: [
           // Mockup .side-tools .count: mono, 600 + tabular-nums (v2.4).
           Text('${_keys.length} ${tr('br.keysUnit')}${_scanDone ? '' : '+'}',
-              style: Ts.style(size: Ts.sm, weight: FontWeight.w600, color: tok.text2,
-                  monoFont: true, tabularNums: true)),
+              style: Ts.style(
+                  size: Ts.sm,
+                  weight: FontWeight.w600,
+                  color: tok.text2,
+                  monoFont: true,
+                  tabularNums: true)),
           const Spacer(),
           // Mockup .seg: segmented 树/平铺 control.
           _viewSeg(tok),
           const SizedBox(width: 4),
           _sideToolBtn(
-            tooltip: _selectMode ? tr('br.exitSelect') : tr('br.selectMultiple'),
+            tooltip:
+                _selectMode ? tr('br.exitSelect') : tr('br.selectMultiple'),
             icon: _selectMode ? Icons.check_box : Icons.check_box_outlined,
             on: _selectMode,
+            exposesSelectedState: true,
             tok: tok,
             onTap: () => setState(() {
               _selectMode = !_selectMode;
@@ -616,9 +670,9 @@ class _BrowserPageViewState extends State<BrowserPageView>
       const Divider(height: 1),
       Expanded(
         child: _keys.isEmpty
-            ? Center(
-                child: Text(_scanning ? tr('br.scanning') : tr('br.noKeys'),
-                    style: const TextStyle(color: Colors.grey)))
+            ? (_scanning
+                ? CodexTablePlaceholder.loading(message: tr('br.scanning'))
+                : CodexTablePlaceholder.empty(message: tr('br.noKeys')))
             : ListView(children: _tree ? _treeNodes() : _flatNodes()),
       ),
       if (_selectMode && _checked.isNotEmpty)
@@ -627,14 +681,18 @@ class _BrowserPageViewState extends State<BrowserPageView>
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
           child: Row(children: [
             Text('${_checked.length} ${tr('br.selected')}',
-                style: TextStyle(color: Theme.of(context).colorScheme.onErrorContainer)),
+                style: TextStyle(
+                    color: Theme.of(context).colorScheme.onErrorContainer)),
             const Spacer(),
-            TextButton(
+            CodexButton(
+              variant: CodexButtonVariant.ghost,
+              semanticLabel: tr('br.clear'),
               onPressed: () => setState(_checked.clear),
-              child: Text(tr('br.clear')),
+              label: Text(tr('br.clear')),
             ),
-            FilledButton.icon(
-              style: FilledButton.styleFrom(backgroundColor: Theme.of(context).colorScheme.error),
+            CodexButton(
+              variant: CodexButtonVariant.danger,
+              semanticLabel: tr('br.delete'),
               onPressed: _batchDelete,
               icon: const Icon(Icons.delete_outline, size: 16),
               label: Text(tr('br.delete')),
@@ -691,24 +749,39 @@ class _BrowserPageViewState extends State<BrowserPageView>
                 height: 14,
                 child: CircularProgressIndicator(strokeWidth: 2, color: color))
             : Text(label,
-                style: Ts.style(size: Ts.md, weight: FontWeight.w500, color: color)),
+                style: Ts.style(
+                    size: Ts.md, weight: FontWeight.w500, color: color)),
       ),
     );
   }
 
   // Mockup .seg: 26px segmented control for tree/flat.
   Widget _viewSeg(AppTokens tok) {
-    Widget segBtn({required IconData icon, required bool on, required VoidCallback onTap, required String tooltip}) {
+    Widget segBtn(
+        {required IconData icon,
+        required bool on,
+        required VoidCallback onTap,
+        required String tooltip}) {
       return Tooltip(
         message: tooltip,
-        child: InkWell(
+        excludeFromSemantics: true,
+        child: Semantics(
+          label: tooltip,
+          button: true,
+          enabled: true,
+          selected: on,
           onTap: onTap,
-          child: Container(
-            width: 30,
-            height: 26,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(color: on ? tok.selection : Colors.transparent),
-            child: Icon(icon, size: 15, color: on ? tok.accent : tok.text3),
+          excludeSemantics: true,
+          child: InkWell(
+            onTap: onTap,
+            child: Container(
+              width: 30,
+              height: 26,
+              alignment: Alignment.center,
+              decoration:
+                  BoxDecoration(color: on ? tok.selection : Colors.transparent),
+              child: Icon(icon, size: 15, color: on ? tok.accent : tok.text3),
+            ),
           ),
         ),
       );
@@ -742,100 +815,73 @@ class _BrowserPageViewState extends State<BrowserPageView>
     required String tooltip,
     required IconData icon,
     required bool on,
+    bool exposesSelectedState = false,
     required AppTokens tok,
     required VoidCallback onTap,
   }) {
     return Tooltip(
       message: tooltip,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(Dim.radiusS),
+      excludeFromSemantics: true,
+      child: Semantics(
+        label: tooltip,
+        button: true,
+        enabled: true,
+        selected: exposesSelectedState ? on : null,
         onTap: onTap,
-        child: Container(
-          width: 26,
-          height: 26,
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            color: on ? tok.selection : Colors.transparent,
-            borderRadius: BorderRadius.circular(Dim.radiusS),
+        excludeSemantics: true,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(Dim.radiusS),
+          onTap: onTap,
+          child: Container(
+            width: 26,
+            height: 26,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: on ? tok.selection : Colors.transparent,
+              borderRadius: BorderRadius.circular(Dim.radiusS),
+            ),
+            child: Icon(icon, size: 15, color: on ? tok.accent : tok.text2),
           ),
-          child: Icon(icon, size: 15, color: on ? tok.accent : tok.text2),
         ),
       ),
     );
   }
 
-  // Mockup .f-select: 30px-tall mono 12px bordered chip + caret for the DB picker.
+  // Shared compact select keeps DB identifiers in the mono stack while
+  // preserving the native nullable DropdownButton callback contract.
   Widget _dbSelect(AppTokens tok) {
     return Tooltip(
-      message: widget.config.multiDb ? tr('br.selectDatabase') : tr('br.multiDbOff'),
-      child: Container(
-        height: Dim.ctlH,
-        padding: const EdgeInsets.symmetric(horizontal: 8),
-        decoration: BoxDecoration(
-          color: tok.panel,
-          borderRadius: BorderRadius.circular(Dim.radiusS),
-          border: Border.all(color: tok.border),
-        ),
-        child: DropdownButtonHideUnderline(
-          child: DropdownButton<int>(
-            value: _db,
-            isDense: true,
-            icon: Icon(Icons.arrow_drop_down, size: 16, color: tok.text3),
-            style: Ts.style(size: Ts.md, color: tok.text2, monoFont: true),
-            items: [
-              for (var i = 0; i < 16; i++)
-                DropdownMenuItem(value: i, child: Text('DB$i')),
-            ],
-            onChanged: (v) async {
-              if (v == null) return;
-              setState(() => _db = v);
-              await _client?.select(v);
-              if (!mounted) return;
-              _reload();
-            },
-          ),
+      message:
+          widget.config.multiDb ? tr('br.selectDatabase') : tr('br.multiDbOff'),
+      child: SizedBox(
+        width: 72,
+        child: CodexSelectField<int>(
+          value: _db,
+          style: Ts.style(size: Ts.md, color: tok.text2, monoFont: true),
+          items: [
+            for (var i = 0; i < 16; i++)
+              DropdownMenuItem(value: i, child: Text('DB$i')),
+          ],
+          onChanged: (v) async {
+            if (v == null) return;
+            setState(() => _db = v);
+            await _client?.select(v);
+            if (!mounted) return;
+            _reload();
+          },
         ),
       ),
     );
   }
 
-  // Mockup .search: 30px-tall bordered box, search icon + mono 12px input.
-  Widget _searchBox(AppTokens tok) {
-    return Container(
-      height: Dim.ctlH,
-      decoration: BoxDecoration(
-        color: tok.panel,
-        borderRadius: BorderRadius.circular(Dim.radiusS),
-        border: Border.all(color: tok.border),
-      ),
-      padding: const EdgeInsets.symmetric(horizontal: 8),
-      child: Row(children: [
-        Icon(Icons.search, size: 15, color: tok.text3),
-        const SizedBox(width: 6),
-        Expanded(
-          child: TextField(
-            controller: _search,
-            style: Ts.style(size: Ts.md, color: tok.text, monoFont: true),
-            decoration: InputDecoration(
-              isDense: true,
-              // Shield from the theme-level .f-input contentPadding (CP 7.6):
-              // the bordered container already provides the mockup .search
-              // padding; the inner input is borderless with none of its own.
-              contentPadding: EdgeInsets.zero,
-              border: InputBorder.none,
-              hintText: 'Glob pattern, e.g. user:*',
-              hintStyle: Ts.style(size: Ts.md, color: tok.text3, monoFont: true),
-            ),
-            onSubmitted: (_) => _reload(),
-          ),
-        ),
-        InkWell(
-          onTap: _reload,
-          child: Icon(Icons.arrow_forward, size: 14, color: tok.text3),
-        ),
-      ]),
-    );
-  }
+  Widget _searchBox(AppTokens tok) => CodexSearchField(
+        controller: _search,
+        hintText: 'Glob pattern, e.g. user:*',
+        searchLabel: tr('br.refresh'),
+        style: Ts.style(size: Ts.md, color: tok.text, monoFont: true),
+        onSubmitted: (_) => _reload(),
+        onSearch: _reload,
+      );
 
   List<Widget> _flatNodes() => [
         for (final k in _keys) _leaf(k, k, 0),
@@ -848,7 +894,9 @@ class _BrowserPageViewState extends State<BrowserPageView>
     return InkWell(
       onTap: () {
         if (_selectMode) {
-          setState(() => _checked.contains(key) ? _checked.remove(key) : _checked.add(key));
+          setState(() => _checked.contains(key)
+              ? _checked.remove(key)
+              : _checked.add(key));
         } else {
           _openKey(key);
         }
@@ -860,7 +908,9 @@ class _BrowserPageViewState extends State<BrowserPageView>
         // v2.3: selection fill + 2px left accent indicator.
         decoration: BoxDecoration(
           color: sel ? tok.selection : null,
-          border: sel ? Border(left: BorderSide(color: tok.accent, width: 2)) : null,
+          border: sel
+              ? Border(left: BorderSide(color: tok.accent, width: 2))
+              : null,
           borderRadius: BorderRadius.circular(Dim.radiusS),
         ),
         // Mockup .node.key: padding-left 24px base, 40px when nested (deep).
@@ -870,7 +920,9 @@ class _BrowserPageViewState extends State<BrowserPageView>
             Padding(
               padding: const EdgeInsets.only(right: 4),
               child: Icon(
-                _checked.contains(key) ? Icons.check_box : Icons.check_box_outline_blank,
+                _checked.contains(key)
+                    ? Icons.check_box
+                    : Icons.check_box_outline_blank,
                 size: 15,
                 color: Theme.of(context).colorScheme.primary,
               ),
@@ -884,7 +936,10 @@ class _BrowserPageViewState extends State<BrowserPageView>
           Expanded(
             child: Text(label,
                 overflow: TextOverflow.ellipsis,
-                style: Ts.style(size: Ts.md, color: tok.text, monoFont: true,
+                style: Ts.style(
+                    size: Ts.md,
+                    color: tok.text,
+                    monoFont: true,
                     weight: sel ? FontWeight.w600 : FontWeight.normal)),
           ),
         ]),
@@ -901,11 +956,12 @@ class _BrowserPageViewState extends State<BrowserPageView>
       alignment: Alignment.center,
       decoration: BoxDecoration(
         color: c.fill,
-        borderRadius: BorderRadius.circular(5),
+        borderRadius: BorderRadius.circular(Dim.radiusS),
         border: Border.all(color: c.border),
       ),
       child: Text(_leafTypeLetter(type),
-          style: Ts.style(size: 10, weight: FontWeight.w700, color: c.fg, monoFont: true)),
+          style: Ts.style(
+              size: 10, weight: FontWeight.w700, color: c.fg, monoFont: true)),
     );
   }
 
@@ -933,7 +989,8 @@ class _BrowserPageViewState extends State<BrowserPageView>
     final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
     final choice = await showMenu<String>(
       context: context,
-      position: RelativeRect.fromLTRB(pos.dx, pos.dy, overlay.size.width - pos.dx, 0),
+      position:
+          RelativeRect.fromLTRB(pos.dx, pos.dy, overlay.size.width - pos.dx, 0),
       items: [
         PopupMenuItem(value: 'open', child: Text(tr('br.open'))),
         PopupMenuItem(value: 'copy', child: Text(tr('br.copyName'))),
@@ -957,14 +1014,16 @@ class _BrowserPageViewState extends State<BrowserPageView>
       final parts = k.split(':');
       var node = root;
       for (var i = 0; i < parts.length - 1; i++) {
-        node = (node.putIfAbsent('/$i/${parts[i]}', () => <String, dynamic>{})) as Map<String, dynamic>;
+        node = (node.putIfAbsent('/$i/${parts[i]}', () => <String, dynamic>{}))
+            as Map<String, dynamic>;
       }
       node[parts.last] = k; // leaf: value is the full key
     }
     return _renderBranch(root, 0, '');
   }
 
-  List<Widget> _renderBranch(Map<String, dynamic> node, int depth, String prefix) {
+  List<Widget> _renderBranch(
+      Map<String, dynamic> node, int depth, String prefix) {
     final branches = <String>[];
     final leaves = <MapEntry<String, String>>[];
     node.forEach((k, v) {
@@ -998,7 +1057,8 @@ class _BrowserPageViewState extends State<BrowserPageView>
 
   int _countLeaves(Map<String, dynamic> node) {
     var n = 0;
-    node.forEach((_, v) => n += v is Map<String, dynamic> ? _countLeaves(v) : 1);
+    node.forEach(
+        (_, v) => n += v is Map<String, dynamic> ? _countLeaves(v) : 1);
     return n;
   }
 
@@ -1006,7 +1066,14 @@ class _BrowserPageViewState extends State<BrowserPageView>
 
   Widget _rightPanel() {
     if (_tabs.isEmpty) {
-      return _center(Icons.vpn_key, tr('br.noKeySelected'), tr('br.pickKey'));
+      return CodexStateShell(
+        key: const ValueKey('browser-key-empty-state'),
+        state: CodexContentState.empty,
+        message: tr('br.noKeySelected'),
+        detail: tr('br.pickKey'),
+        icon: const Icon(Icons.vpn_key, size: 22),
+        content: const SizedBox.shrink(),
+      );
     }
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       _tabStrip(),
@@ -1015,7 +1082,8 @@ class _BrowserPageViewState extends State<BrowserPageView>
         child: Container(
           decoration: BoxDecoration(
             color: AppTokens.of(context).panel,
-            border: Border(top: BorderSide(color: AppTokens.of(context).border)),
+            border:
+                Border(top: BorderSide(color: AppTokens.of(context).border)),
           ),
           child: _detail(_tabs[_active]),
         ),
@@ -1052,13 +1120,15 @@ class _BrowserPageViewState extends State<BrowserPageView>
   Widget _ktab(AppTokens tok, int i, bool active) {
     return InkWell(
       onTap: () => setState(() => _active = i),
-      borderRadius: const BorderRadius.vertical(top: Radius.circular(Dim.radiusS)),
+      borderRadius:
+          const BorderRadius.vertical(top: Radius.circular(Dim.radiusS)),
       child: Container(
         constraints: const BoxConstraints(maxWidth: 220),
         padding: const EdgeInsets.only(left: 12, right: 6),
         decoration: BoxDecoration(
           color: active ? tok.panel : Colors.transparent,
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(Dim.radiusS)),
+          borderRadius:
+              const BorderRadius.vertical(top: Radius.circular(Dim.radiusS)),
           border: Border(
             top: BorderSide(color: active ? tok.border : Colors.transparent),
             left: BorderSide(color: active ? tok.border : Colors.transparent),
@@ -1077,13 +1147,25 @@ class _BrowserPageViewState extends State<BrowserPageView>
           ),
           const SizedBox(width: 6),
           // Mockup .ktab-x: a small × glyph, text-3.
-          InkWell(
-            onTap: () => _closeTab(i),
-            borderRadius: BorderRadius.circular(4),
-            child: Padding(
-              padding: const EdgeInsets.all(2),
-              child: Text('×',
-                  style: Ts.style(size: Ts.md, color: tok.text3, height: 1)),
+          Tooltip(
+            message: '${tr('br.close')} ${_tabs[i].key}',
+            excludeFromSemantics: true,
+            child: Semantics(
+              label: '${tr('br.close')} ${_tabs[i].key}',
+              button: true,
+              enabled: true,
+              onTap: () => _closeTab(i),
+              excludeSemantics: true,
+              child: InkWell(
+                onTap: () => _closeTab(i),
+                borderRadius: BorderRadius.circular(4),
+                child: Padding(
+                  padding: const EdgeInsets.all(2),
+                  child: Text('×',
+                      style:
+                          Ts.style(size: Ts.md, color: tok.text3, height: 1)),
+                ),
+              ),
             ),
           ),
         ]),
@@ -1093,16 +1175,30 @@ class _BrowserPageViewState extends State<BrowserPageView>
 
   // Mockup .ktab-add: 30px-wide centred ghost tile at the end of the strip.
   Widget _addTabTile(AppTokens tok) {
+    void showPickKeyHint() =>
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(tr('br.pickKey')),
+          duration: const Duration(seconds: 2),
+        ));
+
     return Tooltip(
       message: tr('br.pickKey'),
-      child: InkWell(
-        onTap: () => ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(tr('br.pickKey')), duration: const Duration(seconds: 2))),
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(Dim.radiusS)),
-        child: SizedBox(
-          width: 30,
-          child: Center(
-            child: Text('＋', style: Ts.style(size: Ts.md, color: tok.text3)),
+      excludeFromSemantics: true,
+      child: Semantics(
+        label: tr('br.pickKey'),
+        button: true,
+        enabled: true,
+        onTap: showPickKeyHint,
+        excludeSemantics: true,
+        child: InkWell(
+          onTap: showPickKeyHint,
+          borderRadius:
+              const BorderRadius.vertical(top: Radius.circular(Dim.radiusS)),
+          child: SizedBox(
+            width: 30,
+            child: Center(
+              child: Text('＋', style: Ts.style(size: Ts.md, color: tok.text3)),
+            ),
           ),
         ),
       ),
@@ -1110,14 +1206,31 @@ class _BrowserPageViewState extends State<BrowserPageView>
   }
 
   Widget _detail(_KeyTab t) {
-    if (t.loading) return const Center(child: CircularProgressIndicator());
-    if (t.error != null) return _center(Icons.error_outline, tr('br.cannotReadKey'), t.error!);
+    final state = t.loading
+        ? CodexContentState.loading
+        : t.error != null
+            ? CodexContentState.error
+            : CodexContentState.content;
+    return CodexStateShell(
+      key: ValueKey('browser-key-state-${t.key}'),
+      state: state,
+      message: t.loading ? tr('br.connecting') : tr('br.cannotReadKey'),
+      detail: t.error,
+      retryLabel: tr('br.refresh'),
+      onRetry: state == CodexContentState.error ? _refreshTab : null,
+      bodyPadding: const EdgeInsets.symmetric(horizontal: 32, vertical: 24),
+      content: _loadedDetail(t),
+    );
+  }
+
+  Widget _loadedDetail(_KeyTab t) {
     // The string editor fills the pane height (ARDM's textarea does), so it
     // lays out without an outer scroll; collection tables keep the scroll.
     if (t.type == 'string') {
       return Padding(
         padding: const EdgeInsets.all(11),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        child:
+            Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           _keyHeader(t),
           const SizedBox(height: 16),
           Expanded(child: _stringEditor(t)),
@@ -1142,7 +1255,9 @@ class _BrowserPageViewState extends State<BrowserPageView>
     void applyTtl() {
       final s = int.tryParse(t.ttlCtrl.text.trim());
       // 0 / blank / negative → persist (EXPIRE key 0 would delete the key).
-      _guard(() => s == null || s <= 0 ? _client!.persist(t.key) : _client!.expire(t.key, s));
+      _guard(() => s == null || s <= 0
+          ? _client!.persist(t.key)
+          : _client!.expire(t.key, s));
     }
 
     return SizedBox(
@@ -1155,50 +1270,53 @@ class _BrowserPageViewState extends State<BrowserPageView>
       child: LayoutBuilder(builder: (context, constraints) {
         final compact = constraints.maxWidth < 800;
         return Row(children: [
-        _typeBadgeBig(tok, t.type),
-        const SizedBox(width: 10),
-        // Inline keyname (mockup .keyname): 16px mono 700, no surrounding box.
-        Flexible(
-          child: Tooltip(
-            message: tr('br.renameNotSupported'),
-            child: Text(t.key,
-                overflow: TextOverflow.ellipsis,
-                style: Ts.style(
-                    size: 16, weight: FontWeight.w700, color: tok.text,
-                    monoFont: true, letterSpacing: -0.1)),
+          _typeBadgeBig(tok, t.type),
+          const SizedBox(width: 10),
+          // Inline keyname (mockup .keyname): 16px mono 700, no surrounding box.
+          Flexible(
+            child: Tooltip(
+              message: tr('br.renameNotSupported'),
+              child: Text(t.key,
+                  overflow: TextOverflow.ellipsis,
+                  style: Ts.style(
+                      size: 16,
+                      weight: FontWeight.w700,
+                      color: tok.text,
+                      monoFont: true,
+                      letterSpacing: -0.1)),
+            ),
           ),
-        ),
-        IconButton(
-          tooltip: tr('br.copyKeyName'),
-          visualDensity: VisualDensity.compact,
-          onPressed: () => _copy(t.key, tr('br.keyNameCopied')),
-          icon: Icon(Icons.copy, size: 13, color: tok.text3),
-        ),
-        // Mockup .key-meta: mono labels + 600 mono values, only when loaded.
-        if (!t.loading && t.error == null) _keyMeta(tok, t, compact: compact),
-        const Spacer(),
-        // Mockup .key-actions: TTL group + copy-as-command + Refresh + Delete.
-        _ttlGroup(tok, t, applyTtl, compact: compact),
-        SizedBox(width: compact ? 4 : 6),
-        _abtn(tok,
-            label: tr('br.copyAsCommand'),
-            icon: Icons.code,
-            compact: compact,
-            onTap: () => _copy(_keyCommand(t), tr('br.commandCopied'))),
-        SizedBox(width: compact ? 4 : 6),
-        _abtn(tok,
-            label: tr('br.refresh'),
-            icon: Icons.refresh,
-            compact: compact,
-            onTap: _refreshTab),
-        SizedBox(width: compact ? 4 : 6),
-        _abtn(tok,
-            label: tr('br.deleteKey'),
-            icon: Icons.delete_outline,
-            danger: true,
-            compact: compact,
-            onTap: () => _deleteKeys([t.key])),
-      ]);
+          IconButton(
+            tooltip: tr('br.copyKeyName'),
+            visualDensity: VisualDensity.compact,
+            onPressed: () => _copy(t.key, tr('br.keyNameCopied')),
+            icon: Icon(Icons.copy, size: 13, color: tok.text3),
+          ),
+          // Mockup .key-meta: mono labels + 600 mono values, only when loaded.
+          if (!t.loading && t.error == null) _keyMeta(tok, t, compact: compact),
+          const Spacer(),
+          // Mockup .key-actions: TTL group + copy-as-command + Refresh + Delete.
+          _ttlGroup(tok, t, applyTtl, compact: compact),
+          SizedBox(width: compact ? 4 : 6),
+          _abtn(tok,
+              label: tr('br.copyAsCommand'),
+              icon: Icons.code,
+              compact: compact,
+              onTap: () => _copy(_keyCommand(t), tr('br.commandCopied'))),
+          SizedBox(width: compact ? 4 : 6),
+          _abtn(tok,
+              label: tr('br.refresh'),
+              icon: Icons.refresh,
+              compact: compact,
+              onTap: _refreshTab),
+          SizedBox(width: compact ? 4 : 6),
+          _abtn(tok,
+              label: tr('br.deleteKey'),
+              icon: Icons.delete_outline,
+              danger: true,
+              compact: compact,
+              onTap: () => _deleteKeys([t.key])),
+        ]);
       }),
     );
   }
@@ -1208,11 +1326,14 @@ class _BrowserPageViewState extends State<BrowserPageView>
     Widget item(String label, String value) => Padding(
           padding: EdgeInsets.only(left: compact ? 8 : 14),
           child: Row(mainAxisSize: MainAxisSize.min, children: [
-            Text('$label ',
-                style: Ts.style(size: Ts.md, color: tok.text3)),
+            Text('$label ', style: Ts.style(size: Ts.md, color: tok.text3)),
             Text(value,
-                style: Ts.style(size: Ts.md, weight: FontWeight.w600, color: tok.text2,
-                    monoFont: true, tabularNums: true)),
+                style: Ts.style(
+                    size: Ts.md,
+                    weight: FontWeight.w600,
+                    color: tok.text2,
+                    monoFont: true,
+                    tabularNums: true)),
           ]),
         );
     final countLabel = switch (t.type) {
@@ -1254,7 +1375,11 @@ class _BrowserPageViewState extends State<BrowserPageView>
             controller: t.ttlCtrl,
             keyboardType: TextInputType.number,
             textAlign: TextAlign.center,
-            style: Ts.style(size: Ts.md, color: tok.text, monoFont: true, tabularNums: true),
+            style: Ts.style(
+                size: Ts.md,
+                color: tok.text,
+                monoFont: true,
+                tabularNums: true),
             decoration: const InputDecoration(
               isDense: true,
               border: InputBorder.none,
@@ -1270,7 +1395,8 @@ class _BrowserPageViewState extends State<BrowserPageView>
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 2),
             child: Text('Apply',
-                style: Ts.style(size: Ts.sm, weight: FontWeight.w600, color: tok.accent)),
+                style: Ts.style(
+                    size: Ts.sm, weight: FontWeight.w600, color: tok.accent)),
           ),
         ),
       ]),
@@ -1282,7 +1408,11 @@ class _BrowserPageViewState extends State<BrowserPageView>
   // narrow pane inside the home chrome) tightens the horizontal padding so the
   // keycard head's right cluster fits; the wide layout keeps 11px.
   Widget _abtn(AppTokens tok,
-      {required String label, IconData? icon, bool danger = false, bool compact = false, VoidCallback? onTap}) {
+      {required String label,
+      IconData? icon,
+      bool danger = false,
+      bool compact = false,
+      VoidCallback? onTap}) {
     final color = danger ? tok.danger : tok.text2;
     return InkWell(
       borderRadius: BorderRadius.circular(Dim.radiusS),
@@ -1301,7 +1431,9 @@ class _BrowserPageViewState extends State<BrowserPageView>
             Icon(icon, size: 13, color: color),
             const SizedBox(width: 5),
           ],
-          Text(label, style: Ts.style(size: Ts.md, weight: FontWeight.w500, color: color)),
+          Text(label,
+              style:
+                  Ts.style(size: Ts.md, weight: FontWeight.w500, color: color)),
         ]),
       ),
     );
@@ -1316,12 +1448,16 @@ class _BrowserPageViewState extends State<BrowserPageView>
       alignment: Alignment.center,
       decoration: BoxDecoration(
         color: c.fill,
-        borderRadius: BorderRadius.circular(5),
+        borderRadius: BorderRadius.circular(Dim.radiusS),
         border: Border.all(color: c.border),
       ),
       child: Text(_typeLabel(type).toUpperCase(),
-          style: Ts.style(size: 10, weight: FontWeight.w700, color: c.fg,
-              monoFont: true, letterSpacing: 0.8)),
+          style: Ts.style(
+              size: 10,
+              weight: FontWeight.w700,
+              color: c.fg,
+              monoFont: true,
+              letterSpacing: 0.8)),
     );
   }
 
@@ -1343,29 +1479,39 @@ class _BrowserPageViewState extends State<BrowserPageView>
             onAdd: () => _fieldValueDialog(tr('br.addNewLine'),
                 onSubmit: (f, v) => _client!.hset(t.key, f, v)),
             rowEdit: (r) => _fieldValueDialog(tr('br.editLine'),
-                field: r[0], value: r[1], fieldLocked: true,
+                field: r[0],
+                value: r[1],
+                fieldLocked: true,
                 onSubmit: (f, v) => _client!.hset(t.key, f, v)),
             rowDelete: (r) => _client!.hdel(t.key, r[0]));
       case 'list':
-        return _collectionEditor(t, ['#', tr('br.value')], numbered: false,
+        return _collectionEditor(t, ['#', tr('br.value')],
+            numbered: false,
             onAdd: () => _listAddDialog(t.key),
-            rowEdit: (r) => _singleValueDialog(tr('br.editLine'), value: r[1],
+            rowEdit: (r) => _singleValueDialog(tr('br.editLine'),
+                value: r[1],
                 onSubmit: (v) => _client!.lset(t.key, int.parse(r[0]), v)),
             rowDelete: (r) => _lremAt(t.key, int.parse(r[0])));
       case 'set':
-        return _collectionEditor(t, [tr('br.member')], singleColumn: true,
-            onAdd: () => _singleValueDialog(tr('br.addNewLine'), onSubmit: (v) => _client!.sadd(t.key, v)),
+        return _collectionEditor(t, [tr('br.member')],
+            singleColumn: true,
+            onAdd: () => _singleValueDialog(tr('br.addNewLine'),
+                onSubmit: (v) => _client!.sadd(t.key, v)),
             rowEdit: (r) => _singleValueDialog(tr('br.editLine'), value: r[0],
-                onSubmit: (v) async {
+                    onSubmit: (v) async {
                   await _client!.sadd(t.key, v);
                   if (v != r[0]) await _client!.srem(t.key, r[0]);
                 }),
             rowDelete: (r) => _client!.srem(t.key, r[0]));
       case 'zset':
-        return _collectionEditor(t, [tr('br.score'), tr('br.member')], scoreFirst: true,
+        return _collectionEditor(t, [tr('br.score'), tr('br.member')],
+            scoreFirst: true,
             onAdd: () => _scoreMemberDialog(tr('br.addNewLine'),
                 onSubmit: (s, m) => _client!.zadd(t.key, s, m)),
-            rowEdit: (r) => _scoreMemberDialog(tr('br.editLine'), score: r[1], member: r[0], memberLocked: true,
+            rowEdit: (r) => _scoreMemberDialog(tr('br.editLine'),
+                score: r[1],
+                member: r[0],
+                memberLocked: true,
                 onSubmit: (s, m) => _client!.zadd(t.key, s, m)),
             rowDelete: (r) => _client!.zrem(t.key, r[0]));
       default:
@@ -1400,7 +1546,8 @@ class _BrowserPageViewState extends State<BrowserPageView>
           field = row[0];
           bytes = (await _client!.hgetBytes(t.key, row[0])) ?? Uint8List(0);
         case 'list':
-          bytes = (await _client!.lindexBytes(t.key, int.parse(row[0]))) ?? Uint8List(0);
+          bytes = (await _client!.lindexBytes(t.key, int.parse(row[0]))) ??
+              Uint8List(0);
         case 'set':
           member = row[0];
           bytes = Uint8List.fromList(utf8.encode(row[0]));
@@ -1409,10 +1556,14 @@ class _BrowserPageViewState extends State<BrowserPageView>
           score = row[1];
           bytes = Uint8List.fromList(utf8.encode(row[0]));
         default:
-          bytes = Uint8List.fromList(utf8.encode(row.length > 1 ? row[1] : row[0]));
+          bytes =
+              Uint8List.fromList(utf8.encode(row.length > 1 ? row[1] : row[0]));
       }
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('$e')));
+      }
       return;
     }
     if (!mounted) return;
@@ -1424,33 +1575,37 @@ class _BrowserPageViewState extends State<BrowserPageView>
           height: 540,
           child: Padding(
             padding: const EdgeInsets.all(16),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-              Row(children: [
-                Expanded(
-                  child: Text('${tr('br.view')} · ${t.key}${field.isNotEmpty ? ' · $field' : ''}',
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
-                ),
-                IconButton(
-                  tooltip: tr('br.close'),
-                  icon: const Icon(Icons.close, size: 18),
-                  onPressed: () => Navigator.pop(ctx),
-                ),
-              ]),
-              const SizedBox(height: 8),
-              Expanded(
-                child: FormatViewer(
-                  core: widget.core,
-                  bytes: bytes,
-                  formatters: _formatters,
-                  onManage: _manageFormatters,
-                  redisKey: t.key,
-                  field: field,
-                  member: member,
-                  score: score,
-                ),
-              ),
-            ]),
+            child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(children: [
+                    Expanded(
+                      child: Text(
+                          '${tr('br.view')} · ${t.key}${field.isNotEmpty ? ' · $field' : ''}',
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                              fontSize: 14, fontWeight: FontWeight.w600)),
+                    ),
+                    IconButton(
+                      tooltip: tr('br.close'),
+                      icon: const Icon(Icons.close, size: 18),
+                      onPressed: () => Navigator.pop(ctx),
+                    ),
+                  ]),
+                  const SizedBox(height: 8),
+                  Expanded(
+                    child: FormatViewer(
+                      core: widget.core,
+                      bytes: bytes,
+                      formatters: _formatters,
+                      onManage: _manageFormatters,
+                      redisKey: t.key,
+                      field: field,
+                      member: member,
+                      score: score,
+                    ),
+                  ),
+                ]),
           ),
         ),
       ),
@@ -1472,11 +1627,14 @@ class _BrowserPageViewState extends State<BrowserPageView>
     bool singleColumn = false,
   }) {
     final tok = AppTokens.of(context);
-    final brightness = Theme.of(context).brightness;
     final f = t.filter.trim().toLowerCase();
     var visible = f.isEmpty
         ? t.rows
-        : t.rows.where((r) => r[0].toLowerCase().contains(f) || r[1].toLowerCase().contains(f)).toList();
+        : t.rows
+            .where((r) =>
+                r[0].toLowerCase().contains(f) ||
+                r[1].toLowerCase().contains(f))
+            .toList();
 
     // Column-header sorting over the loaded rows (display column → row slot).
     // zset: col0=score(r[1]) col1=member(r[0]); list (!numbered): the only data
@@ -1488,9 +1646,11 @@ class _BrowserPageViewState extends State<BrowserPageView>
       int cmp(List<String> a, List<String> b) {
         final x = cellOf(a, t.sortCol!), y = cellOf(b, t.sortCol!);
         final nx = num.tryParse(x), ny = num.tryParse(y);
-        final c = (nx != null && ny != null) ? nx.compareTo(ny) : x.compareTo(y);
+        final c =
+            (nx != null && ny != null) ? nx.compareTo(ny) : x.compareTo(y);
         return t.sortAsc ? c : -c;
       }
+
       visible = [...visible]..sort(cmp);
     }
 
@@ -1502,112 +1662,97 @@ class _BrowserPageViewState extends State<BrowserPageView>
     // reachable via the key's FormatViewer (string) — collection rows drop them
     // to match the mockup's three-glyph action cell.
 
-    return Stack(children: [
-      Container(
-        decoration: BoxDecoration(
-          color: tok.panel,
-          borderRadius: BorderRadius.circular(Dim.radiusM),
-          border: Border.all(color: tok.border),
-          boxShadow: Depth.elev2(brightness),
-        ),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(Dim.radiusM - 1),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-            // Head band (mockup .valuepane-head): panel-2 + bottom hairline.
+    return CodexSurface(
+      variant: CodexSurfaceVariant.elevated,
+      padding: EdgeInsets.zero,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Head band (mockup .valuepane-head): panel-2 + bottom hairline.
+          Container(
+            decoration: BoxDecoration(
+              color: tok.panel2,
+              border: Border(bottom: BorderSide(color: tok.hairline)),
+            ),
+            padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+            child: Row(children: [
+              // Mockup .vp-title: 11px 600 uppercase eyebrow.
+              Text(_valuePaneTitle(t).toUpperCase(),
+                  style: Ts.style(
+                      size: Ts.xs,
+                      weight: FontWeight.w600,
+                      letterSpacing: 0.8,
+                      color: tok.text3)),
+              const SizedBox(width: 12),
+              // zset keeps its DESC/ASC order toggle in the band.
+              if (scoreFirst) _zsetOrderSeg(tok, t),
+              const Spacer(),
+              // Mockup .filter-input: 200px 26px mono 11px.
+              SizedBox(
+                width: 200,
+                child: CodexTextField(
+                  height: 26,
+                  style: Ts.style(
+                    size: Ts.xs,
+                    color: tok.text,
+                    monoFont: true,
+                    letterSpacing: 0.6,
+                  ),
+                  decoration: InputDecoration(
+                    hintText: tr('br.keywordSearch').toUpperCase(),
+                    hintStyle: Ts.style(
+                      size: Ts.xs,
+                      color: tok.text3,
+                      monoFont: true,
+                      letterSpacing: 0.6,
+                    ),
+                  ),
+                  onChanged: (v) => setState(() => t.filter = v),
+                ),
+              ),
+              const SizedBox(width: 8),
+              // Mockup .abtn.ghost ＋ Field.
+              _ghostAddBtn(tok, onAdd),
+            ]),
+          ),
+          // Table body.
+          if (visible.isEmpty)
+            CodexTablePlaceholder.empty(
+              message: t.filter.isEmpty
+                  ? tr('br.empty')
+                  : tr('br.noMatchInLoadedRows'),
+            )
+          else
+            _valueTable(tok, t, visible, dataCols,
+                scoreFirst: scoreFirst,
+                numbered: numbered,
+                singleColumn: singleColumn,
+                disabled: t.mutating,
+                onEdit: rowEdit,
+                onDelete: rowDelete),
+          if (t.hasMore)
             Container(
               decoration: BoxDecoration(
-                color: tok.panel2,
-                border: Border(bottom: BorderSide(color: tok.hairline)),
+                border: Border(top: BorderSide(color: tok.hairline)),
               ),
-              padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
-              child: Row(children: [
-                // Mockup .vp-title: 11px 600 uppercase eyebrow.
-                Text(_valuePaneTitle(t).toUpperCase(),
-                    style: Ts.style(size: Ts.xs, weight: FontWeight.w600,
-                        letterSpacing: 0.8, color: tok.text3)),
-                const SizedBox(width: 12),
-                // zset keeps its DESC/ASC order toggle in the band.
-                if (scoreFirst) _zsetOrderSeg(tok, t),
-                const Spacer(),
-                // Mockup .filter-input: 200px 26px mono 11px.
-                SizedBox(
-                  width: 200,
-                  height: 26,
-                  child: TextField(
-                    style: Ts.style(size: Ts.xs, color: tok.text, monoFont: true, letterSpacing: 0.6),
-                    decoration: InputDecoration(
-                      isDense: true,
-                      hintText: tr('br.keywordSearch').toUpperCase(),
-                      hintStyle: Ts.style(size: Ts.xs, color: tok.text3, monoFont: true, letterSpacing: 0.6),
-                      filled: true,
-                      fillColor: tok.panel,
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                      enabledBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(Dim.radiusS),
-                        borderSide: BorderSide(color: tok.border),
-                      ),
-                      focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(Dim.radiusS),
-                        borderSide: BorderSide(color: tok.focus),
-                      ),
-                    ),
-                    onChanged: (v) => setState(() => t.filter = v),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                // Mockup .abtn.ghost ＋ Field.
-                _ghostAddBtn(tok, onAdd),
-              ]),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: _abtn(tok,
+                    label:
+                        '${tr('br.loadMore')}  (${t.rows.length}/${t.total})',
+                    onTap: t.loadingMore ? null : () => _loadMoreRows(t)),
+              ),
             ),
-            // Table body.
-            if (visible.isEmpty)
-              Padding(
-                padding: const EdgeInsets.all(20),
-                child: Center(
-                  child: Text(t.filter.isEmpty ? tr('br.empty') : tr('br.noMatchInLoadedRows'),
-                      style: Ts.style(size: Ts.md, color: tok.text3)),
-                ),
-              )
-            else
-              _valueTable(tok, t, visible, dataCols,
-                  scoreFirst: scoreFirst, numbered: numbered, singleColumn: singleColumn,
-                  disabled: t.mutating, onEdit: rowEdit, onDelete: rowDelete),
-            if (t.hasMore)
-              Container(
-                decoration: BoxDecoration(
-                  border: Border(top: BorderSide(color: tok.hairline)),
-                ),
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                child: Align(
-                  alignment: Alignment.centerLeft,
-                  child: _abtn(tok,
-                      label: '${tr('br.loadMore')}  (${t.rows.length}/${t.total})',
-                      onTap: t.loadingMore ? null : () => _loadMoreRows(t)),
-                ),
-              ),
-            if (f.isNotEmpty && t.hasMore)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-                child: Text(tr('br.filterLoadedOnly'),
-                    style: Ts.style(size: Ts.xs, color: tok.text3)),
-              ),
-          ]),
-        ),
-      ),
-      // 1px top inner highlight.
-      Positioned(
-        left: 1, right: 1, top: 0,
-        child: IgnorePointer(
-          child: Container(
-            height: 1,
-            decoration: BoxDecoration(
-              color: tok.highlight,
-              borderRadius: const BorderRadius.vertical(top: Radius.circular(Dim.radiusM - 1)),
+          if (f.isNotEmpty && t.hasMore)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+              child: Text(tr('br.filterLoadedOnly'),
+                  style: Ts.style(size: Ts.xs, color: tok.text3)),
             ),
-          ),
-        ),
+        ],
       ),
-    ]);
+    );
   }
 
   String _valuePaneTitle(_KeyTab t) => switch (t.type) {
@@ -1635,7 +1780,8 @@ class _BrowserPageViewState extends State<BrowserPageView>
           Icon(Icons.add, size: 13, color: tok.text2),
           const SizedBox(width: 4),
           Text(tr('br.addNewLine'),
-              style: Ts.style(size: Ts.md, weight: FontWeight.w500, color: tok.text2)),
+              style: Ts.style(
+                  size: Ts.md, weight: FontWeight.w500, color: tok.text2)),
         ]),
       ),
     );
@@ -1645,8 +1791,14 @@ class _BrowserPageViewState extends State<BrowserPageView>
     return SegmentedButton<bool>(
       style: const ButtonStyle(visualDensity: VisualDensity.compact),
       segments: [
-        ButtonSegment(value: true, label: Text(tr('br.desc')), icon: const Icon(Icons.arrow_drop_down)),
-        ButtonSegment(value: false, label: Text(tr('br.asc')), icon: const Icon(Icons.arrow_drop_up)),
+        ButtonSegment(
+            value: true,
+            label: Text(tr('br.desc')),
+            icon: const Icon(Icons.arrow_drop_down)),
+        ButtonSegment(
+            value: false,
+            label: Text(tr('br.asc')),
+            icon: const Icon(Icons.arrow_drop_up)),
       ],
       selected: {t.desc},
       onSelectionChanged: (s) => _setZsetOrder(t, s.first),
@@ -1675,8 +1827,7 @@ class _BrowserPageViewState extends State<BrowserPageView>
     ];
 
     return LayoutBuilder(
-      builder: (ctx, box) => SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
+      builder: (ctx, box) => CodexHorizontalScrollView(
         // IntrinsicWidth: the horizontal viewport hands its child an
         // UNBOUNDED width, and a stretch Column under it would force that
         // infinity onto every row (layout crash). IntrinsicWidth resolves a
@@ -1685,13 +1836,19 @@ class _BrowserPageViewState extends State<BrowserPageView>
         child: IntrinsicWidth(
           child: ConstrainedBox(
             constraints: BoxConstraints(minWidth: box.maxWidth),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-              _vHead(tok, t, columns),
-              for (var i = 0; i < visible.length; i++)
-                _vRow(tok, t, i, visible[i], columns,
-                    scoreFirst: scoreFirst, numbered: numbered, singleColumn: singleColumn,
-                    disabled: disabled, onEdit: onEdit, onDelete: onDelete),
-            ]),
+            child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  _vHead(tok, t, columns),
+                  for (var i = 0; i < visible.length; i++)
+                    _vRow(tok, t, i, visible[i], columns,
+                        scoreFirst: scoreFirst,
+                        numbered: numbered,
+                        singleColumn: singleColumn,
+                        disabled: disabled,
+                        onEdit: onEdit,
+                        onDelete: onDelete),
+                ]),
           ),
         ),
       ),
@@ -1699,25 +1856,24 @@ class _BrowserPageViewState extends State<BrowserPageView>
   }
 
   Widget _vHead(AppTokens tok, _KeyTab t, List<_VCol> columns) {
-    return Container(
-      decoration: BoxDecoration(
-        color: tok.panel,
-        border: Border(bottom: BorderSide(color: tok.border)),
-      ),
-      child: Row(children: [
-        for (final c in columns)
-          _vHeadCell(tok, t, c),
-      ]),
+    return CodexTableHeader(
+      children: [
+        for (final c in columns) _vHeadCell(tok, t, c),
+      ],
     );
   }
 
   Widget _vHeadCell(AppTokens tok, _KeyTab t, _VCol c) {
     // Mockup .vtable thead th: 10.5px 600 uppercase ls .7px text-3, padding 7/12.
     final label = Padding(
-      padding: EdgeInsets.only(left: c.isLn ? 0 : 12, right: 12, top: 7, bottom: 7),
+      padding:
+          EdgeInsets.only(left: c.isLn ? 0 : 12, right: 12, top: 7, bottom: 7),
       child: Text(c.label.toUpperCase(),
-          style: Ts.style(size: 10.5, weight: FontWeight.w600,
-              letterSpacing: 0.7, color: tok.text3)),
+          style: Ts.style(
+              size: 10.5,
+              weight: FontWeight.w600,
+              letterSpacing: 0.7,
+              color: tok.text3)),
     );
     final sortable = c.sortCol != null;
     final sorted = sortable && t.sortCol == c.sortCol;
@@ -1741,7 +1897,14 @@ class _BrowserPageViewState extends State<BrowserPageView>
       );
     }
     // Mockup .vtable: .ln 34px, Field .w-180 fixed, Value flex, .w-120 actions.
-    if (c.isLn) return SizedBox(width: 34, child: Align(alignment: Alignment.centerRight, child: Padding(padding: const EdgeInsets.only(right: 8), child: child)));
+    if (c.isLn) {
+      return SizedBox(
+          width: 34,
+          child: Align(
+              alignment: Alignment.centerRight,
+              child: Padding(
+                  padding: const EdgeInsets.only(right: 8), child: child)));
+    }
     if (c.isActions) return SizedBox(width: 120, child: child);
     if (c.pk) return SizedBox(width: 180, child: child);
     return Expanded(child: child);
@@ -1763,8 +1926,6 @@ class _BrowserPageViewState extends State<BrowserPageView>
     final cells = scoreFirst
         ? [row[1], row[0]]
         : (singleColumn ? [row[0]] : [row[0], row[1]]);
-    final zebra = i.isOdd;
-    final rowBg = zebra ? tok.panel2 : tok.panel;
     final valueTextColor = disabled ? tok.text3 : tok.text;
 
     Widget cellWidget(_VCol c) {
@@ -1777,7 +1938,11 @@ class _BrowserPageViewState extends State<BrowserPageView>
             child: Padding(
               padding: const EdgeInsets.only(right: 8),
               child: Text('${i + 1}',
-                  style: Ts.style(size: Ts.xs, color: tok.text3, monoFont: true, tabularNums: true)),
+                  style: Ts.style(
+                      size: Ts.xs,
+                      color: tok.text3,
+                      monoFont: true,
+                      tabularNums: true)),
             ),
           ),
         );
@@ -1788,16 +1953,23 @@ class _BrowserPageViewState extends State<BrowserPageView>
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 12),
             child: Row(mainAxisSize: MainAxisSize.min, children: [
-              _rowAct(tok, const Icon(Icons.mode_edit_outlined, size: 13), tr('br.edit'),
-                  disabled ? null : () => onEdit(row)),
+              _rowAct(tok, const Icon(Icons.mode_edit_outlined, size: 13),
+                  tr('br.edit'), disabled ? null : () => onEdit(row)),
               const SizedBox(width: 4),
               // Tap copies the value; long-press copies the recreating command.
-              _rowActCmd(tok, const Icon(Icons.content_copy, size: 13), tr('br.copyValue'),
-                  onTap: () => _copy(scoreFirst || singleColumn ? row[0] : row[1], tr('br.valueCopied')),
-                  onLongPress: () => _copy(_rowCommand(t, row), tr('br.commandCopied'))),
+              _rowActCmd(tok, const Icon(Icons.content_copy, size: 13),
+                  tr('br.copyValue'),
+                  onTap: () => _copy(
+                      scoreFirst || singleColumn ? row[0] : row[1],
+                      tr('br.valueCopied')),
+                  onLongPress: () =>
+                      _copy(_rowCommand(t, row), tr('br.commandCopied'))),
               const SizedBox(width: 4),
               // Mockup .rowact: ALL three glyphs are text-3 (even delete).
-              _rowAct(tok, Text('⌫', style: Ts.style(size: Ts.md, height: 1)), tr('br.delete'),
+              _rowAct(
+                  tok,
+                  Text('⌫', style: Ts.style(size: Ts.md, height: 1)),
+                  tr('br.delete'),
                   disabled ? null : () => _guard(() => onDelete(row))),
             ]),
           ),
@@ -1831,32 +2003,38 @@ class _BrowserPageViewState extends State<BrowserPageView>
       return Expanded(child: cell);
     }
 
-    return Container(
-      height: Dim.rowH,
-      decoration: BoxDecoration(
-        color: rowBg,
-        border: Border(bottom: BorderSide(color: tok.hairline)),
-      ),
-      child: Row(children: [for (final c in columns) cellWidget(c)]),
+    return CodexTableRow(
+      striped: i.isOdd,
+      enabled: !disabled,
+      children: [for (final c in columns) cellWidget(c)],
     );
   }
 
   // Mockup .rowact: a plain 13px text-3 glyph button (✎/⧉ are Material icons —
   // the literal glyphs are not in Inter and rasterise as tofu bars).
-  Widget _rowAct(AppTokens tok, Widget glyph, String tooltip, VoidCallback? onTap) {
+  Widget _rowAct(
+      AppTokens tok, Widget glyph, String tooltip, VoidCallback? onTap) {
     final color = onTap == null ? tok.text3.withValues(alpha: 0.4) : tok.text3;
     return Tooltip(
       message: tooltip,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(4),
+      excludeFromSemantics: true,
+      child: Semantics(
+        label: tooltip,
+        button: true,
+        enabled: onTap != null,
         onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.all(3),
-          child: IconTheme(
-            data: IconThemeData(size: 13, color: color),
-            child: DefaultTextStyle(
-              style: Ts.style(size: Ts.md, color: color, height: 1),
-              child: glyph,
+        excludeSemantics: true,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(4),
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.all(3),
+            child: IconTheme(
+              data: IconThemeData(size: 13, color: color),
+              child: DefaultTextStyle(
+                style: Ts.style(size: Ts.md, color: color, height: 1),
+                child: glyph,
+              ),
             ),
           ),
         ),
@@ -1870,17 +2048,26 @@ class _BrowserPageViewState extends State<BrowserPageView>
     final color = onTap == null ? tok.text3.withValues(alpha: 0.4) : tok.text3;
     return Tooltip(
       message: tooltip,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(4),
+      excludeFromSemantics: true,
+      child: Semantics(
+        label: tooltip,
+        button: true,
+        enabled: onTap != null,
         onTap: onTap,
         onLongPress: onLongPress,
-        child: Padding(
-          padding: const EdgeInsets.all(3),
-          child: IconTheme(
-            data: IconThemeData(size: 13, color: color),
-            child: DefaultTextStyle(
-              style: Ts.style(size: Ts.md, color: color, height: 1),
-              child: glyph,
+        excludeSemantics: true,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(4),
+          onTap: onTap,
+          onLongPress: onLongPress,
+          child: Padding(
+            padding: const EdgeInsets.all(3),
+            child: IconTheme(
+              data: IconThemeData(size: 13, color: color),
+              child: DefaultTextStyle(
+                style: Ts.style(size: Ts.md, color: color, height: 1),
+                child: glyph,
+              ),
             ),
           ),
         ),
@@ -1894,14 +2081,19 @@ class _BrowserPageViewState extends State<BrowserPageView>
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text(keys.length == 1 ? tr('br.deleteKeyQ') : '${tr('br.delete')} ${keys.length} ${tr('br.keysQ')}'),
+        title: Text(keys.length == 1
+            ? tr('br.deleteKeyQ')
+            : '${tr('br.delete')} ${keys.length} ${tr('br.keysQ')}'),
         content: Text(keys.length == 1
             ? 'Permanently delete "${keys.first}"? This cannot be undone.'
             : '${tr('br.permDelete')} ${keys.length} ${tr('br.keysQCannotUndo')}'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(tr('br.cancel'))),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: Text(tr('br.cancel'))),
           FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: Theme.of(context).colorScheme.error),
+            style: FilledButton.styleFrom(
+                backgroundColor: Theme.of(context).colorScheme.error),
             onPressed: () => Navigator.pop(ctx, true),
             child: Text(tr('br.delete')),
           ),
@@ -1921,7 +2113,8 @@ class _BrowserPageViewState extends State<BrowserPageView>
     setState(() {
       // Remember which tab is active by key — indices shift as we remove tabs
       // before it, so a plain clamp would land on the wrong tab.
-      final activeKey = _active >= 0 && _active < _tabs.length ? _tabs[_active].key : null;
+      final activeKey =
+          _active >= 0 && _active < _tabs.length ? _tabs[_active].key : null;
       _keys.removeWhere(keys.contains);
       _checked.removeAll(keys);
       for (var i = _tabs.length - 1; i >= 0; i--) {
@@ -1932,11 +2125,14 @@ class _BrowserPageViewState extends State<BrowserPageView>
       }
       _active = _tabs.isEmpty
           ? -1
-          : (activeKey == null ? 0 : _tabs.indexWhere((t) => t.key == activeKey));
+          : (activeKey == null
+              ? 0
+              : _tabs.indexWhere((t) => t.key == activeKey));
       if (_active < 0) _active = _tabs.isEmpty ? -1 : 0;
     });
     if (failed > 0) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$failed ${tr('br.keysCouldNotDelete')}')));
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('$failed ${tr('br.keysCouldNotDelete')}')));
     }
   }
 
@@ -1949,9 +2145,12 @@ class _BrowserPageViewState extends State<BrowserPageView>
         title: Text(tr('br.deleteWholeFolder')),
         content: Text(trp('br.deleteFolderBody', {'prefix': prefix})),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(tr('br.cancel'))),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: Text(tr('br.cancel'))),
           FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: Theme.of(context).colorScheme.error),
+            style: FilledButton.styleFrom(
+                backgroundColor: Theme.of(context).colorScheme.error),
             onPressed: () => Navigator.pop(ctx, true),
             child: Text(tr('br.delete')),
           ),
@@ -1963,18 +2162,23 @@ class _BrowserPageViewState extends State<BrowserPageView>
     // (SCAN MATCH is a glob: unescaped `[ ] * ?` would over- or under-match), then
     // belt-and-braces filter on the literal prefix.
     final literal = '$prefix:';
-    final matchPrefix = prefix.replaceAllMapped(RegExp(r'[\\*?\[\]^]'), (m) => '\\${m[0]}');
+    final matchPrefix =
+        prefix.replaceAllMapped(RegExp(r'[\\*?\[\]^]'), (m) => '\\${m[0]}');
     final toDel = <String>[];
     var cursor = '0';
     var guard = 0;
     try {
       do {
-        final page = await _client!.scan(cursor, match: '$matchPrefix:*', count: 500);
+        final page =
+            await _client!.scan(cursor, match: '$matchPrefix:*', count: 500);
         toDel.addAll(page.items.where((k) => k.startsWith(literal)));
         cursor = page.cursor;
       } while (cursor != '0' && guard++ < 1000);
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('$e')));
+      }
       return;
     }
     for (final k in toDel) {
@@ -1983,7 +2187,9 @@ class _BrowserPageViewState extends State<BrowserPageView>
       } catch (_) {}
     }
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${tr('br.deleted')} ${toDel.length} ${tr('br.keyPlural')}')));
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content:
+            Text('${tr('br.deleted')} ${toDel.length} ${tr('br.keyPlural')}')));
     _reload();
   }
 
@@ -1994,8 +2200,12 @@ class _BrowserPageViewState extends State<BrowserPageView>
         title: Text(tr('br.loadAllKeysQ')),
         content: Text(tr('br.loadAllWarning')),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(tr('br.cancel'))),
-          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: Text(tr('br.loadAll'))),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: Text(tr('br.cancel'))),
+          FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: Text(tr('br.loadAll'))),
         ],
       ),
     );
@@ -2020,11 +2230,17 @@ class _BrowserPageViewState extends State<BrowserPageView>
           content: SizedBox(
             width: 380,
             child: Column(mainAxisSize: MainAxisSize.min, children: [
-              TextField(controller: nameCtrl, decoration: InputDecoration(labelText: tr('br.keyName'), border: const OutlineInputBorder())),
+              TextField(
+                  controller: nameCtrl,
+                  decoration: InputDecoration(
+                      labelText: tr('br.keyName'),
+                      border: const OutlineInputBorder())),
               const SizedBox(height: 12),
               DropdownButtonFormField<String>(
                 initialValue: type,
-                decoration: InputDecoration(labelText: tr('br.type'), border: const OutlineInputBorder()),
+                decoration: InputDecoration(
+                    labelText: tr('br.type'),
+                    border: const OutlineInputBorder()),
                 items: const [
                   DropdownMenuItem(value: 'string', child: Text('String')),
                   DropdownMenuItem(value: 'hash', child: Text('Hash')),
@@ -2049,7 +2265,9 @@ class _BrowserPageViewState extends State<BrowserPageView>
             ]),
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx), child: Text(tr('br.cancel'))),
+            TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: Text(tr('br.cancel'))),
             FilledButton(
               onPressed: () async {
                 final name = nameCtrl.text.trim();
@@ -2067,19 +2285,27 @@ class _BrowserPageViewState extends State<BrowserPageView>
                   try {
                     existing = await c.type(name);
                   } catch (_) {
-                    existing = 'none'; // connection dropped mid-dialog; skip the precheck
+                    existing =
+                        'none'; // connection dropped mid-dialog; skip the precheck
                   }
-                  if (existing != 'none' && existing.isNotEmpty && ctx.mounted) {
+                  if (existing != 'none' &&
+                      existing.isNotEmpty &&
+                      ctx.mounted) {
                     final go = await showDialog<bool>(
                       context: ctx,
                       builder: (c2) => AlertDialog(
                         title: Text(tr('br.overwriteKeyQ')),
-                        content: Text('A "$existing" key named "$name" already exists. '
+                        content: Text(
+                            'A "$existing" key named "$name" already exists. '
                             'Creating a String will replace it. Continue?'),
                         actions: [
-                          TextButton(onPressed: () => Navigator.pop(c2, false), child: Text(tr('br.cancel'))),
+                          TextButton(
+                              onPressed: () => Navigator.pop(c2, false),
+                              child: Text(tr('br.cancel'))),
                           FilledButton(
-                            style: FilledButton.styleFrom(backgroundColor: Theme.of(c2).colorScheme.error),
+                            style: FilledButton.styleFrom(
+                                backgroundColor:
+                                    Theme.of(c2).colorScheme.error),
                             onPressed: () => Navigator.pop(c2, true),
                             child: Text(tr('br.overwrite')),
                           ),
@@ -2097,18 +2323,22 @@ class _BrowserPageViewState extends State<BrowserPageView>
                       await c.set(name, v.isEmpty ? '' : v);
                     case 'hash':
                       final p = v.split('=');
-                      await c.hset(name, p.first, p.length > 1 ? p.sublist(1).join('=') : '');
+                      await c.hset(name, p.first,
+                          p.length > 1 ? p.sublist(1).join('=') : '');
                     case 'list':
                       await c.rpush(name, v);
                     case 'set':
                       await c.sadd(name, v);
                     case 'zset':
                       final p = v.split('=');
-                      await c.zadd(name, p.first.isEmpty ? '0' : p.first, p.length > 1 ? p.sublist(1).join('=') : '');
+                      await c.zadd(name, p.first.isEmpty ? '0' : p.first,
+                          p.length > 1 ? p.sublist(1).join('=') : '');
                   }
                 });
                 if (!mounted) return;
-                if (!_keys.contains(name)) setState(() => _keys.insert(0, name));
+                if (!_keys.contains(name)) {
+                  setState(() => _keys.insert(0, name));
+                }
                 _openKey(name);
               },
               child: Text(tr('br.create')),
@@ -2123,7 +2353,10 @@ class _BrowserPageViewState extends State<BrowserPageView>
     try {
       await op();
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('$e')));
+      }
     }
   }
 
@@ -2138,8 +2371,13 @@ class _BrowserPageViewState extends State<BrowserPageView>
           content: SizedBox(
             width: 380,
             child: Column(mainAxisSize: MainAxisSize.min, children: [
-              TextField(controller: ctrl, minLines: 3, maxLines: 10,
-                  decoration: InputDecoration(labelText: tr('br.value'), border: const OutlineInputBorder())),
+              TextField(
+                  controller: ctrl,
+                  minLines: 3,
+                  maxLines: 10,
+                  decoration: InputDecoration(
+                      labelText: tr('br.value'),
+                      border: const OutlineInputBorder())),
               const SizedBox(height: 12),
               Row(children: [
                 Text(tr('br.pushAt')),
@@ -2156,11 +2394,15 @@ class _BrowserPageViewState extends State<BrowserPageView>
             ]),
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx), child: Text(tr('br.cancel'))),
+            TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: Text(tr('br.cancel'))),
             FilledButton(
               onPressed: () {
                 Navigator.pop(ctx);
-                _guard(() => where == 'head' ? _client!.lpush(key, ctrl.text) : _client!.rpush(key, ctrl.text));
+                _guard(() => where == 'head'
+                    ? _client!.lpush(key, ctrl.text)
+                    : _client!.rpush(key, ctrl.text));
               },
               child: Text(tr('br.add')),
             ),
@@ -2178,26 +2420,36 @@ class _BrowserPageViewState extends State<BrowserPageView>
   }
 
   Future<void> _fieldValueDialog(String title,
-      {String? field, String? value, bool fieldLocked = false,
+      {String? field,
+      String? value,
+      bool fieldLocked = false,
       required Future<void> Function(String, String) onSubmit}) async {
     final f = TextEditingController(text: field ?? '');
     final v = TextEditingController(text: value ?? '');
     await _formDialog(title, [f, v], (x) => onSubmit(x[0], x[1]),
-        labels: [tr('br.field'), tr('br.value')], locked: [fieldLocked, false], multiline: const [false, true]);
+        labels: [tr('br.field'), tr('br.value')],
+        locked: [fieldLocked, false],
+        multiline: const [false, true]);
   }
 
   Future<void> _scoreMemberDialog(String title,
-      {String? score, String? member, bool memberLocked = false,
+      {String? score,
+      String? member,
+      bool memberLocked = false,
       required Future<void> Function(String, String) onSubmit}) async {
     final s = TextEditingController(text: score ?? '');
     final m = TextEditingController(text: member ?? '');
     await _formDialog(title, [s, m], (x) => onSubmit(x[0], x[1]),
-        labels: [tr('br.score'), tr('br.member')], locked: [false, memberLocked], multiline: const [false, true]);
+        labels: [tr('br.score'), tr('br.member')],
+        locked: [false, memberLocked],
+        multiline: const [false, true]);
   }
 
   Future<void> _formDialog(String title, List<TextEditingController> ctrls,
       Future<void> Function(List<String>) onSubmit,
-      {required List<String> labels, List<bool>? locked, List<bool>? multiline}) async {
+      {required List<String> labels,
+      List<bool>? locked,
+      List<bool>? multiline}) async {
     await showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -2215,12 +2467,14 @@ class _BrowserPageViewState extends State<BrowserPageView>
                     valueListenable: ctrls[i],
                     builder: (c2, v, _) => Row(children: [
                       Text('${tr('br.size')}: ${utf8.encode(v.text).length}B',
-                          style: TextStyle(fontSize: 12, color: Theme.of(c2).hintColor)),
+                          style: TextStyle(
+                              fontSize: 12, color: Theme.of(c2).hintColor)),
                       const SizedBox(width: 8),
                       TextButton.icon(
                         onPressed: () => _copy(v.text, tr('br.valueCopied')),
                         icon: const Icon(Icons.copy, size: 13),
-                        label: Text(tr('br.copy'), style: const TextStyle(fontSize: 12)),
+                        label: Text(tr('br.copy'),
+                            style: const TextStyle(fontSize: 12)),
                       ),
                       const Spacer(),
                     ]),
@@ -2231,13 +2485,16 @@ class _BrowserPageViewState extends State<BrowserPageView>
                 enabled: locked == null || !locked[i],
                 minLines: (multiline != null && multiline[i]) ? 8 : 1,
                 maxLines: (multiline != null && multiline[i]) ? 16 : 1,
-                decoration: InputDecoration(labelText: labels[i], border: const OutlineInputBorder()),
+                decoration: InputDecoration(
+                    labelText: labels[i], border: const OutlineInputBorder()),
               ),
             ],
           ]),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: Text(tr('br.cancel'))),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: Text(tr('br.cancel'))),
           FilledButton(
             onPressed: () {
               Navigator.pop(ctx);
@@ -2249,19 +2506,6 @@ class _BrowserPageViewState extends State<BrowserPageView>
       ),
     );
   }
-
-  Widget _center(IconData icon, String title, String subtitle) => Center(
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          Icon(icon, size: 40, color: Colors.grey),
-          const SizedBox(height: 12),
-          Text(title, style: const TextStyle(fontSize: 14)),
-          const SizedBox(height: 6),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 40),
-            child: Text(subtitle, textAlign: TextAlign.center, style: const TextStyle(fontSize: 12, color: Colors.grey)),
-          ),
-        ]),
-      );
 }
 
 // One column descriptor for the value table: the line-number gutter, a data
@@ -2331,10 +2575,15 @@ class _FolderState extends State<_Folder> {
             Expanded(
               child: Text(widget.name,
                   overflow: TextOverflow.ellipsis,
-                  style: Ts.style(size: Ts.lg, weight: FontWeight.w500, color: tok.text)),
+                  style: Ts.style(
+                      size: Ts.lg, weight: FontWeight.w500, color: tok.text)),
             ),
             Text('${widget.count}',
-                style: Ts.style(size: Ts.xs, color: tok.text3, monoFont: true, tabularNums: true)),
+                style: Ts.style(
+                    size: Ts.xs,
+                    color: tok.text3,
+                    monoFont: true,
+                    tabularNums: true)),
           ]),
         ),
       ),
@@ -2347,7 +2596,8 @@ class _FolderState extends State<_Folder> {
     final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
     final choice = await showMenu<String>(
       context: context,
-      position: RelativeRect.fromLTRB(pos.dx, pos.dy, overlay.size.width - pos.dx, 0),
+      position:
+          RelativeRect.fromLTRB(pos.dx, pos.dy, overlay.size.width - pos.dx, 0),
       items: [
         PopupMenuItem(value: 'delete', child: Text(tr('br.scanDeleteFolder'))),
       ],

@@ -24,6 +24,9 @@ class FakeRespServer {
   ServerSocket? _server;
   final _sockets = <Socket>[];
 
+  final List<List<String>> commands = [];
+  final Map<String, String> errorsByCommand = {};
+
   int get port => _server?.port ?? 0;
   int get connectionCount => _sockets.length;
 
@@ -116,7 +119,8 @@ class FakeRespServer {
       final len = int.tryParse(lenLine.substring(1));
       if (len == null || len < 0) return null;
       if (pos + len + 2 > bytes.length) return null;
-      args.add(utf8.decode(bytes.sublist(pos, pos + len), allowMalformed: true));
+      args.add(
+          utf8.decode(bytes.sublist(pos, pos + len), allowMalformed: true));
       pos += len + 2;
     }
     return (args, pos);
@@ -195,7 +199,10 @@ class FakeRespServer {
 
   Uint8List _dispatch(List<String> args) {
     if (args.isEmpty) return _error('ERR empty command');
+    commands.add(List<String>.of(args));
     final cmd = args[0].toUpperCase();
+    final configuredError = errorsByCommand[cmd];
+    if (configuredError != null) return _error(configuredError);
     final key = args.length > 1 ? args[1] : '';
 
     switch (cmd) {
@@ -251,7 +258,8 @@ class FakeRespServer {
         // MEMORY USAGE user:1001 — the mockup console's third command.
         return _int(412);
       case 'INFO':
-        return _bulk('# Server\r\nredis_version:7.2.0\r\nuptime_in_seconds:8040\r\n');
+        return _bulk(
+            '# Server\r\nredis_version:7.2.0\r\nuptime_in_seconds:8040\r\n');
       default:
         return _error("ERR unknown command '$cmd'");
     }
@@ -274,9 +282,8 @@ class FakeRespServer {
 
   List<String> _matchGlob(String pattern) {
     if (pattern == '*' || pattern.isEmpty) return keyTypes.keys.toList();
-    final escaped = RegExp.escape(pattern)
-        .replaceAll(r'\*', '.*')
-        .replaceAll(r'\?', '.');
+    final escaped =
+        RegExp.escape(pattern).replaceAll(r'\*', '.*').replaceAll(r'\?', '.');
     final re = RegExp('^$escaped\$');
     return keyTypes.keys.where((k) => re.hasMatch(k)).toList();
   }

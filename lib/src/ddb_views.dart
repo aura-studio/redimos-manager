@@ -14,6 +14,9 @@ import 'i18n.dart';
 import 'models.dart';
 import 'monitor_widgets.dart';
 import 'native.dart';
+import 'ui_states.dart';
+import 'ui_surfaces.dart';
+import 'ui_tokens.dart';
 
 // The engine dashboard — the content the instance Monitor tab's old
 // "LOCAL DYNAMODB" section rendered, now full-page. Same tiles, same guards:
@@ -39,26 +42,39 @@ class DdbMonitorView extends StatelessWidget {
   Widget build(BuildContext context) {
     final d = ddb;
     if (d == null) {
-      // No engine snapshot at all (never configured). The tab itself only
-      // exists for an endpoint bound to the engine, so this is a transient
-      // first-frame state — keep it minimal.
-      return Center(
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          const Icon(Icons.storage, size: 40, color: Colors.grey),
-          const SizedBox(height: 12),
-          Text(tr('home.stopped'), style: const TextStyle(fontSize: 14)),
-        ]),
+      return Padding(
+        padding: const EdgeInsets.all(16),
+        child: CodexStateShell(
+          key: const ValueKey('ddb-monitor-state'),
+          state: CodexContentState.empty,
+          content: const SizedBox.shrink(),
+          message: tr('home.stopped'),
+          icon: Icon(
+            Icons.storage,
+            size: 24,
+            color: AppTokens.of(context).text3,
+          ),
+        ),
       );
     }
     final up = d.status == 'running';
+    final tokens = AppTokens.of(context);
     // "runtime · product" — mirrors the config dropdown labels so the tile
     // says both how it runs and which backend (e.g. "Docker · LocalStack").
     final engine = ddbEngineLabel(d.config.engine);
     // Same sparkHeight (48) as the redimos dashboard so every chart box on
     // either entity's page is an identical size.
     Widget spark(String label, String value, List<double> data, Color color) =>
-        SparkTile(label: label, value: value, data: data, color: color, width: null, sparkHeight: 48);
+        SparkTile(
+          label: label,
+          value: value,
+          data: data,
+          color: color,
+          width: null,
+          sparkHeight: 48,
+        );
     return SingleChildScrollView(
+      key: const ValueKey('ddb-monitor-scroll'),
       padding: const EdgeInsets.all(16),
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         sectionHeader(context, Icons.storage, 'LOCAL DYNAMODB',
@@ -67,16 +83,25 @@ class DdbMonitorView extends StatelessWidget {
         IntrinsicHeight(
           child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
             Expanded(
-                child: spark(tr('home.cpu'), up ? '${d.cpuPercent.toStringAsFixed(1)} %' : '—',
-                    cpuHist, const Color(0xFF7FB2E6))),
+                child: spark(
+                    tr('home.cpu'),
+                    up ? '${d.cpuPercent.toStringAsFixed(1)} %' : '—',
+                    cpuHist,
+                    tokens.accent)),
             const SizedBox(width: 12),
             Expanded(
-                child: spark(tr('home.memory'), up ? '${(d.memBytes / (1024 * 1024)).round()} MB' : '—',
-                    memHist, const Color(0xFF57CF92))),
+                child: spark(
+                    tr('home.memory'),
+                    up ? '${(d.memBytes / (1024 * 1024)).round()} MB' : '—',
+                    memHist,
+                    tokens.success)),
             const SizedBox(width: 12),
             Expanded(
-                child: spark(tr('home.diskIo'), up ? fmtRate(d.diskPerSec) : '—',
-                    diskHist, const Color(0xFFD9A85B))),
+                child: spark(
+                    tr('home.diskIo'),
+                    up ? fmtRate(d.diskPerSec) : '—',
+                    diskHist,
+                    tokens.warning)),
           ]),
         ),
         const SizedBox(height: 12),
@@ -85,8 +110,14 @@ class DdbMonitorView extends StatelessWidget {
         // the redimos dashboard applies on the instance page).
         tileRow([
           // Dynamic first …
-          InfoTile(label: tr('home.uptime'), fitReference: engine, value: up ? fmtUptime(d.uptimeSec) : '—'),
-          InfoTile(label: tr('home.restarts'), fitReference: engine, value: '${d.restarts}'),
+          InfoTile(
+              label: tr('home.uptime'),
+              fitReference: engine,
+              value: up ? fmtUptime(d.uptimeSec) : '—'),
+          InfoTile(
+              label: tr('home.restarts'),
+              fitReference: engine,
+              value: '${d.restarts}'),
           // Unlike the redimos Latency tile (scraped from redimos's own
           // /metrics), this number is MEASURED by the native probe loop: a
           // timed ListTables round-trip against the engine. The two are
@@ -96,13 +127,21 @@ class DdbMonitorView extends StatelessWidget {
           InfoTile(
               label: tr('home.latency'),
               fitReference: engine,
-              value: up && d.probeOk ? '${d.latencyMs.toStringAsFixed(2)} ms' : '—'),
-          InfoTile(label: tr('home.status'), fitReference: engine, value: up ? tr('home.running') : d.status),
+              value: up && d.probeOk
+                  ? '${d.latencyMs.toStringAsFixed(2)} ms'
+                  : '—'),
+          InfoTile(
+              label: tr('home.status'),
+              fitReference: engine,
+              value: up ? tr('home.running') : d.status),
           // The `d.pid > 0` guard is load-bearing, not defensive: an ADOPTED
           // docker/localstack DDB is never assigned a pid (tryAdoptDocker),
           // so it reads 0 for its whole life. Note that in docker mode this
           // is the `docker run` CLI shim's host pid, not the container's.
-          InfoTile(label: tr('home.pid'), fitReference: engine, value: up && d.pid > 0 ? '${d.pid}' : '—'),
+          InfoTile(
+              label: tr('home.pid'),
+              fitReference: engine,
+              value: up && d.pid > 0 ? '${d.pid}' : '—'),
           // The LIVE port while up — the port the Latency tile actually
           // probed: rm_ddb_set persists a new port without restarting, so
           // config.port can name a port nothing is bound to. Falls back to
@@ -114,7 +153,8 @@ class DdbMonitorView extends StatelessWidget {
               value: up && d.port > 0 ? '${d.port}' : '${d.config.port}'),
           // "Engine" (not a run-mode label) because the choice is a different
           // backend product — dynamodb-local vs LocalStack — not just a mode.
-          InfoTile(label: tr('home.engine'), fitReference: engine, value: engine),
+          InfoTile(
+              label: tr('home.engine'), fitReference: engine, value: engine),
         ]),
       ]),
     );
@@ -157,7 +197,9 @@ class _DdbLogsViewState extends State<DdbLogsView> {
       if (!linesEqual(l, _lines)) {
         setState(() => _lines = l);
         WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (_scroll.hasClients) _scroll.jumpTo(_scroll.position.maxScrollExtent);
+          if (_scroll.hasClients) {
+            _scroll.jumpTo(_scroll.position.maxScrollExtent);
+          }
         });
       }
     } catch (_) {}
@@ -165,37 +207,41 @@ class _DdbLogsViewState extends State<DdbLogsView> {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
+    final tokens = AppTokens.of(context);
     // A bounded tail so the log never grows without limit (same bound the
     // instance Logs tab applies).
     const maxTail = 200;
     final tail = _lines.length > maxTail
         ? _lines.sublist(_lines.length - maxTail)
         : _lines;
+    final state =
+        tail.isEmpty ? CodexContentState.empty : CodexContentState.content;
     return Padding(
       padding: const EdgeInsets.all(16),
-      child: Container(
-        width: double.infinity,
-        decoration: BoxDecoration(
-          color: scheme.surfaceContainerLowest,
-          borderRadius: BorderRadius.circular(6),
-        ),
-        padding: const EdgeInsets.all(12),
-        alignment: Alignment.topLeft,
-        child: tail.isEmpty
-            ? Text(tr('home.noOutput'),
-                style: TextStyle(color: Theme.of(context).textTheme.bodySmall?.color))
-            : SingleChildScrollView(
-                controller: _scroll,
-                child: SelectableText(
-                  tail.join('\n'),
-                  style: TextStyle(
-                      fontFamily: 'monospace',
-                      fontSize: 12,
-                      height: 1.4,
-                      color: scheme.onSurface),
+      child: CodexStateShell(
+        key: const ValueKey('ddb-logs-state'),
+        state: state,
+        message: tr('home.noOutput'),
+        content: CodexSurface(
+          variant: CodexSurfaceVariant.sunken,
+          padding: const EdgeInsets.all(12),
+          child: Align(
+            alignment: Alignment.topLeft,
+            child: SingleChildScrollView(
+              key: const ValueKey('ddb-logs-scroll'),
+              controller: _scroll,
+              child: SelectableText(
+                tail.join('\n'),
+                style: Ts.style(
+                  size: Ts.md,
+                  height: 1.4,
+                  color: tokens.text,
+                  monoFont: true,
                 ),
               ),
+            ),
+          ),
+        ),
       ),
     );
   }

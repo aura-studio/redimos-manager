@@ -19,6 +19,8 @@ import 'i18n.dart';
 import 'item_editor.dart';
 import 'models.dart';
 import 'native.dart';
+import 'ui_states.dart';
+import 'ui_table.dart';
 import 'ui_tokens.dart';
 
 // The second tuple element is an i18n key (translated at render), not display text.
@@ -81,6 +83,32 @@ ThemeData _denseTabTheme(BuildContext context) => Theme.of(context).copyWith(
       materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
     );
 
+Widget _semanticIconButton({
+  required String label,
+  required Widget icon,
+  required VoidCallback? onPressed,
+  VisualDensity? visualDensity,
+  bool? selected,
+}) =>
+    Tooltip(
+      message: label,
+      excludeFromSemantics: true,
+      child: Semantics(
+        label: label,
+        button: true,
+        enabled: onPressed != null,
+        selected: selected,
+        onTap: onPressed,
+        excludeSemantics: true,
+        child: IconButton(
+          visualDensity: visualDensity,
+          isSelected: selected,
+          onPressed: onPressed,
+          icon: icon,
+        ),
+      ),
+    );
+
 class TablePageView extends StatefulWidget {
   final NativeCore core;
   final RedimosConfig config;
@@ -114,7 +142,6 @@ class TablePageViewState extends State<TablePageView>
     with AutomaticKeepAliveClientMixin {
   TableMeta? _meta;
   String? _metaError;
-  bool _loadingMeta = false;
 
   // query form
   // Flat (endpoint Browser) mode starts with the advanced form collapsed —
@@ -151,6 +178,9 @@ class TablePageViewState extends State<TablePageView>
   // Multi-select (AWS Explore items checkboxes), keyed by the row's DynamoDB
   // JSON — stable for the lifetime of one loaded page.
   final _checked = <String>{};
+  int _entityGeneration = 0;
+  int _metaGeneration = 0;
+  int _runGeneration = 0;
 
   @override
   bool get wantKeepAlive => true;
@@ -169,6 +199,9 @@ class TablePageViewState extends State<TablePageView>
         oldWidget.config.table != widget.config.table ||
         oldWidget.config.endpoint != widget.config.endpoint ||
         oldWidget.tableOverride != widget.tableOverride) {
+      _entityGeneration++;
+      _metaGeneration++;
+      _runGeneration++;
       _resetAll();
       _loadMeta();
     }
@@ -176,6 +209,9 @@ class TablePageViewState extends State<TablePageView>
 
   @override
   void dispose() {
+    _entityGeneration++;
+    _metaGeneration++;
+    _runGeneration++;
     _scanFilter.dispose();
     _projectInput.dispose();
     _pk.dispose();
@@ -194,7 +230,9 @@ class TablePageViewState extends State<TablePageView>
     _isQuery = false;
     _projection = 'all';
     _projectAttrs.clear();
+    _projectInput.clear();
     _pk.clear();
+    _skOp = 'eq';
     _skV1.clear();
     _skV2.clear();
     _scanFilter.clear();
@@ -204,6 +242,7 @@ class TablePageViewState extends State<TablePageView>
     }
     _filters.clear();
     _panelOpen = !_flat;
+    _running = false;
     _page = null;
     _pageError = null;
     _stack
@@ -212,18 +251,32 @@ class TablePageViewState extends State<TablePageView>
     _pageIdx = 0;
     _hiddenCols.clear();
     _sortCol = null;
+    _sortAsc = true;
+    _checked.clear();
+    // _pageSize is a user preference and intentionally survives table changes.
   }
 
   Future<void> _loadMeta() async {
+    final metaGeneration = ++_metaGeneration;
+    final entityGeneration = _entityGeneration;
+    final config = _effCfg;
     setState(() {
-      _loadingMeta = true;
+      _meta = null;
       _metaError = null;
     });
     await Future.delayed(const Duration(milliseconds: 16));
-    final m = widget.core.tableMeta(_effCfg);
-    if (!mounted) return;
+    if (!mounted ||
+        metaGeneration != _metaGeneration ||
+        entityGeneration != _entityGeneration) {
+      return;
+    }
+    final m = widget.core.tableMeta(config);
+    if (!mounted ||
+        metaGeneration != _metaGeneration ||
+        entityGeneration != _entityGeneration) {
+      return;
+    }
     setState(() {
-      _loadingMeta = false;
       if (m.ok) {
         _meta = m;
         _metaError = null;
@@ -232,11 +285,17 @@ class TablePageViewState extends State<TablePageView>
         _metaError = m.error ?? tr('tbl.failedDescribeTable');
       }
     });
-    if (m.ok) _run(); // auto-scan on open, like the console's Autopreview
+    if (m.ok &&
+        metaGeneration == _metaGeneration &&
+        entityGeneration == _entityGeneration) {
+      _run(); // auto-scan on open, like the console's Autopreview
+    }
   }
 
   TableTarget? get _target =>
-      (_meta != null && _targetIdx < _meta!.targets.length) ? _meta!.targets[_targetIdx] : null;
+      (_meta != null && _targetIdx < _meta!.targets.length)
+          ? _meta!.targets[_targetIdx]
+          : null;
 
   // v2.3 endpoint Browser = the flat item table: the header strip, the
   // advanced Scan/Query card and the in-page Create button are all folded
@@ -258,7 +317,8 @@ class TablePageViewState extends State<TablePageView>
     final rows = _sortedRows(p.rows);
     if (q.isEmpty) return rows;
     return rows
-        .where((r) => r.cells.values.any((c) => c.repr.toLowerCase().contains(q)))
+        .where(
+            (r) => r.cells.values.any((c) => c.repr.toLowerCase().contains(q)))
         .toList();
   }
 
@@ -271,14 +331,21 @@ class TablePageViewState extends State<TablePageView>
       'projection': _projection,
       'projectAttrs': _projectAttrs,
       'pkValue': _pk.text.trim(),
-      'skCond': (_isQuery && _skV1.text.trim().isNotEmpty && (_target?.sk != null))
-          ? {'op': _skOp, 'v1': _skV1.text, 'v2': _skV2.text}
-          : null,
+      'skCond':
+          (_isQuery && _skV1.text.trim().isNotEmpty && (_target?.sk != null))
+              ? {'op': _skOp, 'v1': _skV1.text, 'v2': _skV2.text}
+              : null,
       'scanForward': !_sortDesc,
       'filters': [
         for (final f in _filters)
           if (f.attr.text.trim().isNotEmpty)
-            {'attr': f.attr.text.trim(), 'type': f.type, 'op': f.op, 'v1': f.v1.text, 'v2': f.v2.text},
+            {
+              'attr': f.attr.text.trim(),
+              'type': f.type,
+              'op': f.op,
+              'v1': f.v1.text,
+              'v2': f.v2.text
+            },
       ],
       'limit': _pageSize,
       'startKey': startKey,
@@ -287,6 +354,8 @@ class TablePageViewState extends State<TablePageView>
 
   Future<void> _run({bool resetPaging = true}) async {
     if (_meta == null) return;
+    final runGeneration = ++_runGeneration;
+    final entityGeneration = _entityGeneration;
     if (resetPaging) {
       _stack
         ..clear()
@@ -299,8 +368,18 @@ class TablePageViewState extends State<TablePageView>
       _checked.clear(); // selection is per loaded page
     });
     await Future.delayed(const Duration(milliseconds: 16));
-    final page = widget.core.tablePage(_buildReq(_stack[_pageIdx]));
-    if (!mounted) return;
+    if (!mounted ||
+        runGeneration != _runGeneration ||
+        entityGeneration != _entityGeneration) {
+      return;
+    }
+    final request = _buildReq(_stack[_pageIdx]);
+    final page = widget.core.tablePage(request);
+    if (!mounted ||
+        runGeneration != _runGeneration ||
+        entityGeneration != _entityGeneration) {
+      return;
+    }
     setState(() {
       _running = false;
       if (page.ok) {
@@ -347,61 +426,79 @@ class TablePageViewState extends State<TablePageView>
   @override
   Widget build(BuildContext context) {
     super.build(context);
-    // Gate on the EFFECTIVE table (override included) so the Explorer — whose
-    // config.table is empty — becomes usable the moment a table is picked in
-    // the Browser's Tables sidebar.
-    if (_effTable.trim().isEmpty) {
-      return _center(Icons.table_chart_outlined, tr('tbl.noTableConfigured'),
-          tr('tbl.setTableNameToBrowse'));
-    }
+    final noTable = _effTable.trim().isEmpty;
+    final state = noTable
+        ? CodexContentState.empty
+        : _metaError != null
+            ? CodexContentState.error
+            : _meta == null
+                ? CodexContentState.loading
+                : CodexContentState.content;
+    final showHeader = !noTable && (!_flat || _awsMode);
+
     return Theme(
       data: _denseTabTheme(context),
-      child: SingleChildScrollView(
-      padding: EdgeInsets.all(_flat ? 0 : 12),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        // The header (AWS read-only chip / foreign-browse controls) always
-        // renders, even when the table can't be read — so the safety state
-        // stays legible and a table that was just deleted can still be
-        // recreated from here. In flat mode the valuepane head carries the
-        // table name + refresh, so the strip collapses to the AWS chip.
-        if (!_flat || _awsMode) _headerRow(),
-        if (!_flat || _awsMode) const SizedBox(height: 12),
-        if (_loadingMeta && _meta == null)
-          const Padding(
-            padding: EdgeInsets.symmetric(vertical: 60),
-            child: Center(child: CircularProgressIndicator()),
-          )
-        else if (_metaError != null)
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 48),
-            child: _center(Icons.error_outline, tr('tbl.cannotReadTable'), _metaError!,
-                action: FilledButton.icon(
-                    onPressed: _loadMeta,
-                    icon: const Icon(Icons.refresh),
-                    label: Text(tr('tbl.retry')))),
-          )
-        else ...[
-          // Flat mode: the advanced Scan/Query form is one tap away (the
-          // valuepane head's tune toggle) but never in the way — the single
-          // SCAN FILTER box covers the common case.
-          if (!_flat || _panelOpen)
-            Padding(
-              padding: _flat ? const EdgeInsets.all(12) : EdgeInsets.zero,
-              child: _queryCard(),
-            ),
-          if (!_flat && _pageError != null) ...[
-            const SizedBox(height: 12),
-            _banner(),
-          ],
-          if (_flat && _pageError != null)
-            Padding(padding: const EdgeInsets.fromLTRB(12, 0, 12, 12), child: _banner()),
-          if (_page != null) ...[
-            if (!_flat) const SizedBox(height: 12),
-            _resultsCard(),
-          ],
-        ],
-      ]),
-    ));
+      child: CodexStateShell(
+        key: const ValueKey('table-page-state'),
+        state: state,
+        toolbar: showHeader
+            ? Padding(
+                key: const ValueKey('table-page-header'),
+                padding: EdgeInsets.fromLTRB(
+                  _flat ? 0 : 12,
+                  _flat ? 0 : 12,
+                  _flat ? 0 : 12,
+                  0,
+                ),
+                child: _headerRow(),
+              )
+            : null,
+        headerGap: showHeader ? 12 : 0,
+        message: noTable
+            ? tr('tbl.noTableConfigured')
+            : state == CodexContentState.error
+                ? tr('tbl.cannotReadTable')
+                : '',
+        detail: noTable ? tr('tbl.setTableNameToBrowse') : _metaError,
+        retryLabel: tr('tbl.retry'),
+        onRetry: state == CodexContentState.error ? _loadMeta : null,
+        icon: noTable ? const Icon(Icons.table_chart_outlined, size: 22) : null,
+        bodyPadding: const EdgeInsets.symmetric(horizontal: 32, vertical: 24),
+        content: state != CodexContentState.content
+            ? const SizedBox.shrink()
+            : SingleChildScrollView(
+                key: ValueKey('table-scroll-${widget.config.id}-$_effTable'),
+                padding: EdgeInsets.all(_flat ? 0 : 12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    // Flat mode: the advanced Scan/Query form is one tap away
+                    // (the valuepane head's tune toggle) but never in the way —
+                    // the single SCAN FILTER box covers the common case.
+                    if (!_flat || _panelOpen)
+                      Padding(
+                        padding:
+                            _flat ? const EdgeInsets.all(12) : EdgeInsets.zero,
+                        child: _queryCard(),
+                      ),
+                    if (!_flat && _pageError != null) ...[
+                      const SizedBox(height: 12),
+                      _banner(),
+                    ],
+                    if (_flat && _pageError != null)
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                        child: _banner(),
+                      ),
+                    if (_page != null) ...[
+                      if (!_flat) const SizedBox(height: 12),
+                      _resultsCard(),
+                    ],
+                  ],
+                ),
+              ),
+      ),
+    );
   }
 
   // AWS mode (no endpoint) is read-only for item writes: the manager can't tell a
@@ -414,7 +511,8 @@ class TablePageViewState extends State<TablePageView>
     final host = (Uri.tryParse(ep)?.host ?? '').toLowerCase();
     return host == 'amazonaws.com' ||
         host.endsWith('.amazonaws.com') ||
-        host.endsWith('.amazonaws.com.cn'); // explicit AWS host (incl. China partition)
+        host.endsWith(
+            '.amazonaws.com.cn'); // explicit AWS host (incl. China partition)
   }
 
   // Browse-any-table: the endpoint Browser's Tables sidebar points this view at
@@ -422,10 +520,12 @@ class TablePageViewState extends State<TablePageView>
   // the table swapped; endpoint/creds stay the config's own. Writes on the
   // override table are offered when allowOverrideWrites is set (non-AWS).
   bool get _foreignBrowse =>
-      widget.tableOverride != null && widget.tableOverride != widget.config.table;
+      widget.tableOverride != null &&
+      widget.tableOverride != widget.config.table;
   String get _effTable => widget.tableOverride ?? widget.config.table;
-  RedimosConfig get _effCfg =>
-      _foreignBrowse ? (widget.config.copy()..table = widget.tableOverride!) : widget.config;
+  RedimosConfig get _effCfg => _foreignBrowse
+      ? (widget.config.copy()..table = widget.tableOverride!)
+      : widget.config;
 
   Widget _headerRow() {
     final scheme = Theme.of(context).colorScheme;
@@ -435,7 +535,8 @@ class TablePageViewState extends State<TablePageView>
       Flexible(
         child: Text(_effTable,
             overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontSize: 15.5, fontWeight: FontWeight.w600)),
+            style:
+                const TextStyle(fontSize: 15.5, fontWeight: FontWeight.w600)),
       ),
       // The endpoint Browser owns its selection, so no transient browse chrome
       // shows there; on AWS the amber chip below carries the read-only message.
@@ -443,7 +544,8 @@ class TablePageViewState extends State<TablePageView>
         const SizedBox(width: 10),
         Chip(
           visualDensity: VisualDensity.compact,
-          avatar: Icon(Icons.lock_outline, size: 15, color: Colors.amber.shade700),
+          avatar:
+              Icon(Icons.lock_outline, size: 15, color: Colors.amber.shade700),
           label: Text(tr('ep.awsReadOnly'),
               style: TextStyle(color: Colors.amber.shade700)),
         ),
@@ -478,24 +580,33 @@ class TablePageViewState extends State<TablePageView>
           InkWell(
             onTap: () => setState(() => _panelOpen = !_panelOpen),
             child: Row(children: [
-              Icon(_panelOpen ? Icons.expand_more : Icons.chevron_right, size: 20),
+              Icon(_panelOpen ? Icons.expand_more : Icons.chevron_right,
+                  size: 20),
               const SizedBox(width: 4),
               Text(tr('tbl.scanOrQueryItems'),
-                  style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600)),
+                  style: const TextStyle(
+                      fontSize: 13.5, fontWeight: FontWeight.w600)),
             ]),
           ),
           if (!_panelOpen)
             Padding(
               padding: const EdgeInsets.only(left: 24, top: 2),
               child: Text(tr('tbl.expandToQueryOrScan'),
-                  style: TextStyle(fontSize: 12, color: Theme.of(context).hintColor)),
+                  style: TextStyle(
+                      fontSize: 12, color: Theme.of(context).hintColor)),
             ),
           if (_panelOpen) ...[
             const SizedBox(height: 10),
             SegmentedButton<bool>(
               segments: [
-                ButtonSegment(value: false, label: Text(tr('tbl.scan')), icon: const Icon(Icons.list, size: 16)),
-                ButtonSegment(value: true, label: Text(tr('tbl.query')), icon: const Icon(Icons.search, size: 16)),
+                ButtonSegment(
+                    value: false,
+                    label: Text(tr('tbl.scan')),
+                    icon: const Icon(Icons.list, size: 16)),
+                ButtonSegment(
+                    value: true,
+                    label: Text(tr('tbl.query')),
+                    icon: const Icon(Icons.search, size: 16)),
               ],
               selected: {_isQuery},
               onSelectionChanged: (s) => setState(() => _isQuery = s.first),
@@ -516,7 +627,9 @@ class TablePageViewState extends State<TablePageView>
                 onPressed: _running ? null : () => _run(),
                 child: _running
                     ? const SizedBox(
-                        width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2))
                     : Text(tr('tbl.run')),
               ),
               const SizedBox(width: 12),
@@ -560,8 +673,10 @@ class TablePageViewState extends State<TablePageView>
           isDense: true,
           decoration: _dec(),
           items: [
-            DropdownMenuItem(value: 'all', child: Text(tr('tbl.allAttributes'))),
-            DropdownMenuItem(value: 'specific', child: Text(tr('tbl.specificAttributes'))),
+            DropdownMenuItem(
+                value: 'all', child: Text(tr('tbl.allAttributes'))),
+            DropdownMenuItem(
+                value: 'specific', child: Text(tr('tbl.specificAttributes'))),
           ],
           onChanged: (v) => setState(() => _projection = v ?? 'all'),
         ),
@@ -577,7 +692,8 @@ class TablePageViewState extends State<TablePageView>
             ),
           ),
           const SizedBox(width: 8),
-          OutlinedButton(onPressed: _addProjectAttr, child: Text(tr('tbl.addAttribute'))),
+          OutlinedButton(
+              onPressed: _addProjectAttr, child: Text(tr('tbl.addAttribute'))),
         ]),
         if (_projectAttrs.isNotEmpty) ...[
           const SizedBox(height: 8),
@@ -611,19 +727,23 @@ class TablePageViewState extends State<TablePageView>
     final t = _target;
     if (t == null) return const SizedBox.shrink();
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Text(tr('tbl.partitionKey'), style: const TextStyle(fontWeight: FontWeight.w600)),
+      Text(tr('tbl.partitionKey'),
+          style: const TextStyle(fontWeight: FontWeight.w600)),
       const SizedBox(height: 6),
       Row(children: [
         Expanded(flex: 2, child: _readonlyAttr(t.pk.name)),
         const SizedBox(width: 12),
         Expanded(
           flex: 5,
-          child: TextField(controller: _pk, decoration: _dec(hint: tr('tbl.enterAttributeValue'))),
+          child: TextField(
+              controller: _pk,
+              decoration: _dec(hint: tr('tbl.enterAttributeValue'))),
         ),
       ]),
       if (t.sk != null) ...[
         const SizedBox(height: 16),
-        Text(tr('tbl.sortKey'), style: const TextStyle(fontWeight: FontWeight.w600)),
+        Text(tr('tbl.sortKey'),
+            style: const TextStyle(fontWeight: FontWeight.w600)),
         const SizedBox(height: 6),
         Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Expanded(flex: 2, child: _readonlyAttr(t.sk!.name)),
@@ -635,7 +755,8 @@ class TablePageViewState extends State<TablePageView>
               isDense: true,
               decoration: _dec(),
               items: [
-                for (final c in _skConds) DropdownMenuItem(value: c.$1, child: Text(tr(c.$2))),
+                for (final c in _skConds)
+                  DropdownMenuItem(value: c.$1, child: Text(tr(c.$2))),
               ],
               onChanged: (v) => setState(() => _skOp = v ?? 'eq'),
             ),
@@ -644,10 +765,13 @@ class TablePageViewState extends State<TablePageView>
           Expanded(
             flex: 3,
             child: Column(children: [
-              TextField(controller: _skV1, decoration: _dec(hint: tr('tbl.enterAttributeValue'))),
+              TextField(
+                  controller: _skV1,
+                  decoration: _dec(hint: tr('tbl.enterAttributeValue'))),
               if (_skOp == 'between') ...[
                 const SizedBox(height: 6),
-                TextField(controller: _skV2, decoration: _dec(hint: tr('tbl.and'))),
+                TextField(
+                    controller: _skV2, decoration: _dec(hint: tr('tbl.and'))),
               ],
             ]),
           ),
@@ -678,17 +802,25 @@ class TablePageViewState extends State<TablePageView>
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       const Divider(height: 24),
       Text.rich(TextSpan(children: [
-        TextSpan(text: tr('tbl.filters'), style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+        TextSpan(
+            text: tr('tbl.filters'),
+            style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
         TextSpan(
             text: tr('tbl.optional'),
-            style: TextStyle(fontStyle: FontStyle.italic, fontSize: 13, color: scheme.onSurfaceVariant)),
+            style: TextStyle(
+                fontStyle: FontStyle.italic,
+                fontSize: 13,
+                color: scheme.onSurfaceVariant)),
       ])),
       const SizedBox(height: 10),
       if (_filters.isNotEmpty) ...[
         Row(children: [
-          Expanded(flex: _fFlex[0], child: Text(tr('tbl.attributeName'), style: label)),
+          Expanded(
+              flex: _fFlex[0],
+              child: Text(tr('tbl.attributeName'), style: label)),
           const SizedBox(width: 10),
-          Expanded(flex: _fFlex[1], child: Text(tr('tbl.condition'), style: label)),
+          Expanded(
+              flex: _fFlex[1], child: Text(tr('tbl.condition'), style: label)),
           const SizedBox(width: 10),
           Expanded(flex: _fFlex[2], child: Text(tr('tbl.type'), style: label)),
           const SizedBox(width: 10),
@@ -720,10 +852,12 @@ class TablePageViewState extends State<TablePageView>
             decoration: InputDecoration(
               isDense: true,
               prefixIcon: const Icon(Icons.search, size: 16),
-              prefixIconConstraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+              prefixIconConstraints:
+                  const BoxConstraints(minWidth: 32, minHeight: 32),
               hintText: tr('tbl.enterAttributeName'),
               border: const OutlineInputBorder(),
-              contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
             ),
           ),
         ),
@@ -734,7 +868,10 @@ class TablePageViewState extends State<TablePageView>
             initialValue: f.op,
             isDense: true,
             decoration: _dec(),
-            items: [for (final c in _filterConds) DropdownMenuItem(value: c.$1, child: Text(tr(c.$2)))],
+            items: [
+              for (final c in _filterConds)
+                DropdownMenuItem(value: c.$1, child: Text(tr(c.$2)))
+            ],
             onChanged: (v) => setState(() => f.op = v ?? 'eq'),
           ),
         ),
@@ -745,25 +882,40 @@ class TablePageViewState extends State<TablePageView>
             initialValue: f.type,
             isDense: true,
             decoration: _dec(),
-            items: [for (final t in _filterTypes) DropdownMenuItem(value: t.$1, child: Text(t.$2))],
-            onChanged: f.needsValue ? (v) => setState(() => f.type = v ?? 'S') : null,
+            items: [
+              for (final t in _filterTypes)
+                DropdownMenuItem(value: t.$1, child: Text(t.$2))
+            ],
+            onChanged:
+                f.needsValue ? (v) => setState(() => f.type = v ?? 'S') : null,
           ),
         ),
         const SizedBox(width: 10),
         Expanded(
           flex: _fFlex[3],
           child: !f.needsValue
-              ? TextField(enabled: false, decoration: _dec(hint: tr('tbl.notRequired')))
+              ? TextField(
+                  enabled: false, decoration: _dec(hint: tr('tbl.notRequired')))
               : f.needsTwo
                   ? Row(children: [
-                      Expanded(child: TextField(controller: f.v1, decoration: _dec(hint: tr('tbl.enterAttributeValue')))),
+                      Expanded(
+                          child: TextField(
+                              controller: f.v1,
+                              decoration:
+                                  _dec(hint: tr('tbl.enterAttributeValue')))),
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 8),
                         child: Text(tr('tbl.and')),
                       ),
-                      Expanded(child: TextField(controller: f.v2, decoration: _dec(hint: tr('tbl.enterAttributeValue')))),
+                      Expanded(
+                          child: TextField(
+                              controller: f.v2,
+                              decoration:
+                                  _dec(hint: tr('tbl.enterAttributeValue')))),
                     ])
-                  : TextField(controller: f.v1, decoration: _dec(hint: tr('tbl.enterAttributeValue'))),
+                  : TextField(
+                      controller: f.v1,
+                      decoration: _dec(hint: tr('tbl.enterAttributeValue'))),
         ),
         const SizedBox(width: 10),
         SizedBox(
@@ -799,7 +951,9 @@ class TablePageViewState extends State<TablePageView>
         child: Row(children: [
           Icon(Icons.error_outline, color: scheme.error, size: 20),
           const SizedBox(width: 8),
-          Expanded(child: Text(_pageError!, style: TextStyle(color: scheme.onErrorContainer))),
+          Expanded(
+              child: Text(_pageError!,
+                  style: TextStyle(color: scheme.onErrorContainer))),
         ]),
       );
     }
@@ -827,63 +981,64 @@ class TablePageViewState extends State<TablePageView>
     // + key summary + SCAN FILTER + advanced toggle + pagination + ＋ Item);
     // the instance Browse keeps the AWS-console "Items returned" toolbar.
     final head = _flat ? _valuepaneHead(t) : _toolbar(t, p, rows, selCount);
-    final body = Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        head,
-        if (!_flat) const SizedBox(height: 8),
-        if (rows.isEmpty)
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 40),
-            child: Center(
-              child: Column(children: [
-                Icon(Icons.inbox_outlined, size: 36, color: Theme.of(context).hintColor),
-                const SizedBox(height: 8),
-                Text(tr('tbl.noItems')),
-                const SizedBox(height: 4),
-                Text(tr('tbl.noItemsToDisplay'),
-                    style: TextStyle(fontSize: 12, color: Theme.of(context).hintColor)),
-              ]),
-            ),
-          )
-        else
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: DataTable(
-              columnSpacing: 16,
-              headingRowHeight: 30,
-              // Mockup .vtable td height = var(--row-h) = 30, fixed.
-              dataRowMinHeight: 30,
-              dataRowMaxHeight: 30,
-              // Mockup shows no checkbox column — selection is by row click.
-              showCheckboxColumn: false,
-              onSelectAll: (v) => setState(() {
-                _checked.clear();
-                if (v == true) _checked.addAll(rows.map((r) => r.ddbJson));
-              }),
-              columns: [
-                // v2.3 flat table leads with a 34px right-aligned line-number
-                // gutter (mockup .vtable .ln); the gutter header stays empty.
-                if (_flat)
-                  const DataColumn(label: SizedBox(width: 34)),
-                for (final c in cols)
-                  DataColumn(
-                    label: _colHeader(c),
-                    onSort: (_, __) => setState(() {
-                      if (_sortCol == c) {
-                        _sortAsc = !_sortAsc;
-                      } else {
-                        _sortCol = c;
-                        _sortAsc = true;
-                      }
-                    }),
-                  ),
-              ],
-              rows: [
-                for (var i = 0; i < rows.length; i++)
-                  _dataRow(t, rows[i], i, cols),
-              ],
-            ),
+    final body =
+        Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      head,
+      if (!_flat) const SizedBox(height: 8),
+      if (rows.isEmpty)
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 40),
+          child: Center(
+            child: Column(children: [
+              Icon(Icons.inbox_outlined,
+                  size: 36, color: Theme.of(context).hintColor),
+              const SizedBox(height: 8),
+              Text(tr('tbl.noItems')),
+              const SizedBox(height: 4),
+              Text(tr('tbl.noItemsToDisplay'),
+                  style: TextStyle(
+                      fontSize: 12, color: Theme.of(context).hintColor)),
+            ]),
           ),
-      ]);
+        )
+      else
+        CodexHorizontalScrollView(
+          child: DataTable(
+            columnSpacing: 16,
+            headingRowHeight: 30,
+            // Mockup .vtable td height = var(--row-h) = 30, fixed.
+            dataRowMinHeight: 30,
+            dataRowMaxHeight: 30,
+            // Mockup shows no checkbox column — selection is by row click.
+            showCheckboxColumn: false,
+            onSelectAll: (v) => setState(() {
+              _checked.clear();
+              if (v == true) _checked.addAll(rows.map((r) => r.ddbJson));
+            }),
+            columns: [
+              // v2.3 flat table leads with a 34px right-aligned line-number
+              // gutter (mockup .vtable .ln); the gutter header stays empty.
+              if (_flat) const DataColumn(label: SizedBox(width: 34)),
+              for (final c in cols)
+                DataColumn(
+                  label: _colHeader(c),
+                  onSort: (_, __) => setState(() {
+                    if (_sortCol == c) {
+                      _sortAsc = !_sortAsc;
+                    } else {
+                      _sortCol = c;
+                      _sortAsc = true;
+                    }
+                  }),
+                ),
+            ],
+            rows: [
+              for (var i = 0; i < rows.length; i++)
+                _dataRow(t, rows[i], i, cols),
+            ],
+          ),
+        ),
+    ]);
     if (_flat) {
       // v2.3 valuepane: borderless flat surface (the endpoint Browser's own
       // pane border is the frame) instead of the rounded card.
@@ -919,13 +1074,18 @@ class TablePageViewState extends State<TablePageView>
             decoration: BoxDecoration(
               border: Border(
                   left: BorderSide(
-                      color: selected ? tok.accent : Colors.transparent, width: 2)),
+                      color: selected ? tok.accent : Colors.transparent,
+                      width: 2)),
             ),
             alignment: Alignment.centerRight,
             padding: const EdgeInsets.only(right: 6),
             child: Text('${i + 1}',
                 textAlign: TextAlign.right,
-                style: Ts.style(size: Ts.xs, color: tok.text3, monoFont: true, tabularNums: true)),
+                style: Ts.style(
+                    size: Ts.xs,
+                    color: tok.text3,
+                    monoFont: true,
+                    tabularNums: true)),
           )),
         for (final c in cols)
           c == t?.pk.name
@@ -955,106 +1115,124 @@ class TablePageViewState extends State<TablePageView>
     return LayoutBuilder(builder: (context, constraints) {
       final compact = constraints.maxWidth < 800;
       return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-        color: tok.panel2,
-        border: Border(bottom: BorderSide(color: tok.hairline)),
-      ),
-      child: Row(children: [
-        // Mockup .vp-title: the table name is a small uppercase eyebrow
-        // (11/600/text-3), NOT a large prominent heading.
-        Flexible(
-          child: Text(_effTable.toUpperCase(),
-              overflow: TextOverflow.ellipsis,
-              style: Ts.style(
-                  size: Ts.xs, weight: FontWeight.w600, letterSpacing: .8, color: tok.text3)),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: tok.panel2,
+          border: Border(bottom: BorderSide(color: tok.hairline)),
         ),
-        if (t != null) ...[
-          const SizedBox(width: 14),
-          // Mockup .empty-note: "PK <b>user#</b> · SK <b>profile</b>" — sans
-          // (the PK/SK values stay non-mono, the strong is just 600 text).
-          // Plain Texts instead of TextSpan children: the capture channel
-          // rasterizes rich runs as .notdef blocks (CP 9.x).
-          Row(mainAxisSize: MainAxisSize.min, children: [
-            Text('PK ', style: Ts.style(size: Ts.md, color: tok.text3)),
-            Text(t.pk.name,
-                style: Ts.style(size: Ts.md, weight: FontWeight.w600, color: tok.text)),
-            if (t.sk != null) ...[
-              Text(' · SK ', style: Ts.style(size: Ts.md, color: tok.text3)),
-              Text(t.sk!.name,
-                  style: Ts.style(size: Ts.md, weight: FontWeight.w600, color: tok.text)),
-            ],
-          ]),
-        ],
-        const SizedBox(width: 16),
-        SizedBox(
-          width: compact ? 132 : 200,
-          height: 26,
-          child: TextField(
-            controller: _scanFilter,
-            onChanged: (_) => setState(() {}),
-            style: Ts.style(size: Ts.sm, monoFont: true, letterSpacing: .6),
-            decoration: InputDecoration(
-              isDense: true,
-              // No i18n key for this one — the design's own placeholder.
-              hintText: 'SCAN FILTER…',
-              hintStyle: Ts.style(size: Ts.sm, color: tok.text3, monoFont: true, letterSpacing: .6),
-              prefixIcon: Icon(Icons.search, size: 14, color: tok.text3),
-              prefixIconConstraints: const BoxConstraints(minWidth: 28, minHeight: 26),
-              contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
-              border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(Dim.radiusS),
-                  borderSide: BorderSide(color: tok.border)),
-              enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(Dim.radiusS),
-                  borderSide: BorderSide(color: tok.border)),
+        child: Row(children: [
+          // Mockup .vp-title: the table name is a small uppercase eyebrow
+          // (11/600/text-3), NOT a large prominent heading.
+          Flexible(
+            child: Text(_effTable.toUpperCase(),
+                overflow: TextOverflow.ellipsis,
+                style: Ts.style(
+                    size: Ts.xs,
+                    weight: FontWeight.w600,
+                    letterSpacing: .8,
+                    color: tok.text3)),
+          ),
+          if (!compact && t != null) ...[
+            const SizedBox(width: 14),
+            // Mockup .empty-note: "PK <b>user#</b> · SK <b>profile</b>" — sans
+            // (the PK/SK values stay non-mono, the strong is just 600 text).
+            // Plain Texts instead of TextSpan children: the capture channel
+            // rasterizes rich runs as .notdef blocks (CP 9.x).
+            Row(mainAxisSize: MainAxisSize.min, children: [
+              Text('PK ', style: Ts.style(size: Ts.md, color: tok.text3)),
+              Text(t.pk.name,
+                  style: Ts.style(
+                      size: Ts.md, weight: FontWeight.w600, color: tok.text)),
+              if (t.sk != null) ...[
+                Text(' · SK ', style: Ts.style(size: Ts.md, color: tok.text3)),
+                Text(t.sk!.name,
+                    style: Ts.style(
+                        size: Ts.md, weight: FontWeight.w600, color: tok.text)),
+              ],
+            ]),
+          ],
+          const SizedBox(width: 16),
+          SizedBox(
+            width: compact ? 132 : 200,
+            height: 26,
+            child: TextField(
+              controller: _scanFilter,
+              onChanged: (_) => setState(() {}),
+              style: Ts.style(size: Ts.sm, monoFont: true, letterSpacing: .6),
+              decoration: InputDecoration(
+                isDense: true,
+                // No i18n key for this one — the design's own placeholder.
+                hintText: 'SCAN FILTER…',
+                hintStyle: Ts.style(
+                    size: Ts.sm,
+                    color: tok.text3,
+                    monoFont: true,
+                    letterSpacing: .6),
+                prefixIcon: Icon(Icons.search, size: 14, color: tok.text3),
+                prefixIconConstraints:
+                    const BoxConstraints(minWidth: 28, minHeight: 26),
+                contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+                border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(Dim.radiusS),
+                    borderSide: BorderSide(color: tok.border)),
+                enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(Dim.radiusS),
+                    borderSide: BorderSide(color: tok.border)),
+              ),
             ),
           ),
-        ),
-        IconButton(
-          // The advanced Scan/Query card (projection / key conditions / typed
-          // filters) — folded away in flat mode, one tap back.
-          tooltip: tr('tbl.scanOrQueryItems'),
-          visualDensity: VisualDensity.compact,
-          isSelected: _panelOpen,
-          icon: const Icon(Icons.tune, size: 17),
-          onPressed: () => setState(() => _panelOpen = !_panelOpen),
-        ),
-        const Spacer(),
-        Text('${p.returned}',
-            style: Ts.style(size: Ts.md, weight: FontWeight.w600, color: tok.text2, tabularNums: true)),
-        IconButton(
-          tooltip: tr('tbl.refresh'),
-          visualDensity: VisualDensity.compact,
-          onPressed: _running ? null : () => _run(),
-          icon: const Icon(Icons.refresh, size: 17),
-        ),
-        IconButton(
-          visualDensity: VisualDensity.compact,
-          onPressed: _pageIdx == 0 || _running ? null : _prevPage,
-          icon: const Icon(Icons.chevron_left, size: 20),
-        ),
-        Text('${_pageIdx + 1}', style: Ts.style(size: Ts.md, tabularNums: true)),
-        IconButton(
-          visualDensity: VisualDensity.compact,
-          onPressed: p.hasNext && !_running ? _nextPage : null,
-          icon: const Icon(Icons.chevron_right, size: 20),
-        ),
-        IconButton(
-          tooltip: tr('tbl.preferences'),
-          visualDensity: VisualDensity.compact,
-          onPressed: _openPreferences,
-          icon: const Icon(Icons.settings, size: 17),
-        ),
-        if (_canWriteItems) ...[
-          const SizedBox(width: 4),
-          _selectionMenu(),
-          const SizedBox(width: 6),
-          _ghostButton(Icons.add, tr('tbl.createItem'),
-              () => _openEditor(from: null, isNew: true)),
-        ],
-      ]),
-    );
+          _semanticIconButton(
+            // The advanced Scan/Query card (projection / key conditions / typed
+            // filters) — folded away in flat mode, one tap back.
+            label: tr('tbl.scanOrQueryItems'),
+            visualDensity: VisualDensity.compact,
+            selected: _panelOpen,
+            icon: const Icon(Icons.tune, size: 17),
+            onPressed: () => setState(() => _panelOpen = !_panelOpen),
+          ),
+          const Spacer(),
+          Text('${p.returned}',
+              style: Ts.style(
+                  size: Ts.md,
+                  weight: FontWeight.w600,
+                  color: tok.text2,
+                  tabularNums: true)),
+          _semanticIconButton(
+            label: tr('tbl.refresh'),
+            visualDensity: VisualDensity.compact,
+            onPressed: _running ? null : () => _run(),
+            icon: const Icon(Icons.refresh, size: 17),
+          ),
+          _semanticIconButton(
+            label: MaterialLocalizations.of(context).previousPageTooltip,
+            visualDensity: VisualDensity.compact,
+            onPressed: _pageIdx == 0 || _running ? null : _prevPage,
+            icon: const Icon(Icons.chevron_left, size: 20),
+          ),
+          Text('${_pageIdx + 1}',
+              style: Ts.style(size: Ts.md, tabularNums: true)),
+          _semanticIconButton(
+            label: MaterialLocalizations.of(context).nextPageTooltip,
+            visualDensity: VisualDensity.compact,
+            onPressed: p.hasNext && !_running ? _nextPage : null,
+            icon: const Icon(Icons.chevron_right, size: 20),
+          ),
+          _semanticIconButton(
+            label: tr('tbl.preferences'),
+            visualDensity: VisualDensity.compact,
+            onPressed: _openPreferences,
+            icon: const Icon(Icons.settings, size: 17),
+          ),
+          if (_canWriteItems) ...[
+            const SizedBox(width: 4),
+            _selectionMenu(),
+            const SizedBox(width: 6),
+            _ghostButton(Icons.add, tr('tbl.createItem'),
+                () => _openEditor(from: null, isNew: true)),
+          ],
+        ]),
+      );
     });
   }
 
@@ -1067,11 +1245,13 @@ class TablePageViewState extends State<TablePageView>
       child: OutlinedButton.icon(
         onPressed: onPressed,
         icon: Icon(icon, size: 14),
-        label: Text(label, style: Ts.style(size: Ts.md, weight: FontWeight.w500)),
+        label:
+            Text(label, style: Ts.style(size: Ts.md, weight: FontWeight.w500)),
         style: OutlinedButton.styleFrom(
           foregroundColor: tok.text2,
           side: BorderSide(color: tok.border),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(Dim.radiusS)),
+          shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(Dim.radiusS)),
           padding: const EdgeInsets.symmetric(horizontal: 10),
         ),
       ),
@@ -1093,11 +1273,15 @@ class TablePageViewState extends State<TablePageView>
       ),
       menuChildren: [
         MenuItemButton(
-          onPressed: selCount == 1 ? () => _openEditor(from: _selectedItem(rows), isNew: false) : null,
+          onPressed: selCount == 1
+              ? () => _openEditor(from: _selectedItem(rows), isNew: false)
+              : null,
           child: Text(tr('tbl.editItem')),
         ),
         MenuItemButton(
-          onPressed: selCount == 1 ? () => _openEditor(from: _selectedItem(rows), isNew: true) : null,
+          onPressed: selCount == 1
+              ? () => _openEditor(from: _selectedItem(rows), isNew: true)
+              : null,
           child: Text(tr('tbl.duplicateItem')),
         ),
         MenuItemButton(
@@ -1114,52 +1298,56 @@ class TablePageViewState extends State<TablePageView>
   }
 
   // The classic (instance Browse) toolbar — the AWS Explore-items layout.
-  Widget _toolbar(TableTarget? t, TablePage p, List<TableItem> rows, int selCount) {
+  Widget _toolbar(
+      TableTarget? t, TablePage p, List<TableItem> rows, int selCount) {
     final scheme = Theme.of(context).colorScheme;
     return Row(children: [
-          Expanded(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text('${tr('tbl.itemsReturned')} (${p.returned})',
-                  style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600)),
-              Text(
-                '${t != null && !t.isTable ? 'Index ${t.name} · ' : ''}'
-                'Items scanned: ${p.scanned} · ${(p.efficiency * 100).round()}% · ${p.timeMs} ms'
-                '${selCount > 0 ? ' · $selCount selected' : ''}',
-                style: TextStyle(fontSize: 11.5, color: scheme.onSurfaceVariant),
-              ),
-            ]),
+      Expanded(
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('${tr('tbl.itemsReturned')} (${p.returned})',
+              style:
+                  const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600)),
+          Text(
+            '${t != null && !t.isTable ? 'Index ${t.name} · ' : ''}'
+            'Items scanned: ${p.scanned} · ${(p.efficiency * 100).round()}% · ${p.timeMs} ms'
+            '${selCount > 0 ? ' · $selCount selected' : ''}',
+            style: TextStyle(fontSize: 11.5, color: scheme.onSurfaceVariant),
           ),
-          IconButton(
-            tooltip: tr('tbl.refresh'),
-            onPressed: _running ? null : () => _run(),
-            icon: const Icon(Icons.refresh, size: 18),
-          ),
-          IconButton(
-            visualDensity: VisualDensity.compact,
-            onPressed: _pageIdx == 0 || _running ? null : _prevPage,
-            icon: const Icon(Icons.chevron_left, size: 20),
-          ),
-          Text('${_pageIdx + 1}'),
-          IconButton(
-            visualDensity: VisualDensity.compact,
-            onPressed: p.hasNext && !_running ? _nextPage : null,
-            icon: const Icon(Icons.chevron_right, size: 20),
-          ),
-          IconButton(
-            tooltip: tr('tbl.preferences'),
-            onPressed: _openPreferences,
-            icon: const Icon(Icons.settings, size: 18),
-          ),
-          if (_canWriteItems) ...[
-            const SizedBox(width: 6),
-            _selectionMenu(),
-            const SizedBox(width: 8),
-            FilledButton(
-              onPressed: () => _openEditor(from: null, isNew: true),
-              child: Text(tr('tbl.createItem')),
-            ),
-          ],
-        ]);
+        ]),
+      ),
+      _semanticIconButton(
+        label: tr('tbl.refresh'),
+        onPressed: _running ? null : () => _run(),
+        icon: const Icon(Icons.refresh, size: 18),
+      ),
+      _semanticIconButton(
+        label: MaterialLocalizations.of(context).previousPageTooltip,
+        visualDensity: VisualDensity.compact,
+        onPressed: _pageIdx == 0 || _running ? null : _prevPage,
+        icon: const Icon(Icons.chevron_left, size: 20),
+      ),
+      Text('${_pageIdx + 1}'),
+      _semanticIconButton(
+        label: MaterialLocalizations.of(context).nextPageTooltip,
+        visualDensity: VisualDensity.compact,
+        onPressed: p.hasNext && !_running ? _nextPage : null,
+        icon: const Icon(Icons.chevron_right, size: 20),
+      ),
+      _semanticIconButton(
+        label: tr('tbl.preferences'),
+        onPressed: _openPreferences,
+        icon: const Icon(Icons.settings, size: 18),
+      ),
+      if (_canWriteItems) ...[
+        const SizedBox(width: 6),
+        _selectionMenu(),
+        const SizedBox(width: 8),
+        FilledButton(
+          onPressed: () => _openEditor(from: null, isNew: true),
+          child: Text(tr('tbl.createItem')),
+        ),
+      ],
+    ]);
   }
 
   // The partition-key cell — rendered as a link (the DataCell.onTap opens it).
@@ -1174,7 +1362,11 @@ class TablePageViewState extends State<TablePageView>
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
         style: Ts.style(
-            size: Ts.md, weight: FontWeight.w600, monoFont: true, tabularNums: true, color: tok.text),
+            size: Ts.md,
+            weight: FontWeight.w600,
+            monoFont: true,
+            tabularNums: true,
+            color: tok.text),
       ),
     );
   }
@@ -1193,9 +1385,13 @@ class TablePageViewState extends State<TablePageView>
     return Row(mainAxisSize: MainAxisSize.min, children: [
       Text(c.toUpperCase(),
           style: Ts.style(
-              size: 10.5, weight: FontWeight.w600, letterSpacing: .7, color: tok.text3)),
+              size: 10.5,
+              weight: FontWeight.w600,
+              letterSpacing: .7,
+              color: tok.text3)),
       if (_sortCol == c)
-        Icon(_sortAsc ? Icons.arrow_upward : Icons.arrow_downward, size: 12, color: tok.text3),
+        Icon(_sortAsc ? Icons.arrow_upward : Icons.arrow_downward,
+            size: 12, color: tok.text3),
     ]);
   }
 
@@ -1208,7 +1404,11 @@ class TablePageViewState extends State<TablePageView>
       child: Text(cell.repr,
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
-          style: Ts.style(size: Ts.md, monoFont: true, tabularNums: true, color: tok.text2)),
+          style: Ts.style(
+              size: Ts.md,
+              monoFont: true,
+              tabularNums: true,
+              color: tok.text2)),
     );
     if (cell.isBinary && cell.printable && cell.b64 != null) {
       return Tooltip(message: 'base64: ${cell.b64}', child: text);
@@ -1242,46 +1442,63 @@ class TablePageViewState extends State<TablePageView>
             title: Text(tr('tbl.preferences')),
             content: SizedBox(
               width: 460,
-              child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              child:
+                  Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Expanded(
-                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
-                    Text(tr('tbl.pageSize'), style: const TextStyle(fontWeight: FontWeight.w600)),
-                    RadioGroup<int>(
-                      groupValue: size,
-                      onChanged: (v) => setD(() => size = v ?? size),
-                      child: Column(mainAxisSize: MainAxisSize.min, children: [
-                        for (final s in _pageSizes)
-                          RadioListTile<int>(
-                            value: s,
-                            title: Text('$s ${tr('tbl.itemsWord')}'),
+                  child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(tr('tbl.pageSize'),
+                            style:
+                                const TextStyle(fontWeight: FontWeight.w600)),
+                        RadioGroup<int>(
+                          groupValue: size,
+                          onChanged: (v) => setD(() => size = v ?? size),
+                          child:
+                              Column(mainAxisSize: MainAxisSize.min, children: [
+                            for (final s in _pageSizes)
+                              RadioListTile<int>(
+                                value: s,
+                                title: Text('$s ${tr('tbl.itemsWord')}'),
+                                dense: true,
+                                contentPadding: EdgeInsets.zero,
+                              ),
+                          ]),
+                        ),
+                      ]),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Row(children: [
+                          TextButton(
+                              onPressed: () => setD(() => hidden.clear()),
+                              child: Text(tr('tbl.selectAll'))),
+                          TextButton(
+                              onPressed: () => setD(() => hidden.addAll(cols)),
+                              child: Text(tr('tbl.deselectAll'))),
+                        ]),
+                        for (final c in cols)
+                          SwitchListTile(
+                            value: !hidden.contains(c),
+                            onChanged: (v) => setD(
+                                () => v ? hidden.remove(c) : hidden.add(c)),
+                            title: Text(c, overflow: TextOverflow.ellipsis),
                             dense: true,
                             contentPadding: EdgeInsets.zero,
                           ),
                       ]),
-                    ),
-                  ]),
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
-                    Row(children: [
-                      TextButton(onPressed: () => setD(() => hidden.clear()), child: Text(tr('tbl.selectAll'))),
-                      TextButton(onPressed: () => setD(() => hidden.addAll(cols)), child: Text(tr('tbl.deselectAll'))),
-                    ]),
-                    for (final c in cols)
-                      SwitchListTile(
-                        value: !hidden.contains(c),
-                        onChanged: (v) => setD(() => v ? hidden.remove(c) : hidden.add(c)),
-                        title: Text(c, overflow: TextOverflow.ellipsis),
-                        dense: true,
-                        contentPadding: EdgeInsets.zero,
-                      ),
-                  ]),
                 ),
               ]),
             ),
             actions: [
-              TextButton(onPressed: () => Navigator.pop(ctx), child: Text(tr('tbl.cancel'))),
+              TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: Text(tr('tbl.cancel'))),
               FilledButton(
                 onPressed: () {
                   Navigator.pop(ctx);
@@ -1309,7 +1526,8 @@ class TablePageViewState extends State<TablePageView>
   /// item via GetItem — a Save is a PutItem full-replace, so editing the
   /// (possibly projection-truncated) scan result would silently drop the
   /// attributes the scan didn't return.
-  Future<void> _openEditor({required TableItem? from, required bool isNew}) async {
+  Future<void> _openEditor(
+      {required TableItem? from, required bool isNew}) async {
     final t = _target;
     if (t == null || !_canWriteItems) return;
     var initial = <String, dynamic>{};
@@ -1323,7 +1541,8 @@ class TablePageViewState extends State<TablePageView>
       if (res['ok'] == true && res['item'] is Map) {
         initial = (res['item'] as Map).cast<String, dynamic>();
       } else {
-        _toast('${tr('tbl.couldntFetchItem')}: ${res['error'] ?? 'error'}', error: true);
+        _toast('${tr('tbl.couldntFetchItem')}: ${res['error'] ?? 'error'}',
+            error: true);
         return;
       }
     }
@@ -1338,7 +1557,9 @@ class TablePageViewState extends State<TablePageView>
         onSave: (av) async {
           if (!await _confirmRawWrite('Write')) return ''; // '' = cancelled
           final res = widget.core.tablePutItem(_effCfg, av);
-          return res['ok'] == true ? null : '${res['error'] ?? tr('tbl.saveFailed')}';
+          return res['ok'] == true
+              ? null
+              : '${res['error'] ?? tr('tbl.saveFailed')}';
         },
       ),
     ));
@@ -1351,7 +1572,8 @@ class TablePageViewState extends State<TablePageView>
   void _showItemViewer(TableItem r) {
     String pretty;
     try {
-      pretty = const JsonEncoder.withIndent('  ').convert(jsonDecode(r.ddbJson));
+      pretty =
+          const JsonEncoder.withIndent('  ').convert(jsonDecode(r.ddbJson));
     } catch (_) {
       pretty = r.ddbJson;
     }
@@ -1360,12 +1582,13 @@ class TablePageViewState extends State<TablePageView>
       builder: (ctx) => AlertDialog(
         title: Row(children: [
           Expanded(child: Text(tr('tbl.itemDdbJson'))),
-          IconButton(
-            tooltip: tr('tbl.copy'),
+          _semanticIconButton(
+            label: tr('tbl.copy'),
             icon: const Icon(Icons.copy, size: 18),
             onPressed: () {
               Clipboard.setData(ClipboardData(text: pretty));
-              ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(tr('tbl.copied'))));
+              ScaffoldMessenger.of(context)
+                  .showSnackBar(SnackBar(content: Text(tr('tbl.copied'))));
             },
           ),
         ]),
@@ -1373,10 +1596,14 @@ class TablePageViewState extends State<TablePageView>
           width: 560,
           child: SingleChildScrollView(
             child: SelectableText(pretty,
-                style: const TextStyle(fontFamily: 'monospace', fontSize: 12.5)),
+                style:
+                    const TextStyle(fontFamily: 'monospace', fontSize: 12.5)),
           ),
         ),
-        actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: Text(tr('tbl.close')))],
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx), child: Text(tr('tbl.close')))
+        ],
       ),
     );
   }
@@ -1418,7 +1645,8 @@ class TablePageViewState extends State<TablePageView>
     final go = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text('${tr('tbl.delete')} ${keys.length} ${tr('tbl.itemsParen')}?'),
+        title:
+            Text('${tr('tbl.delete')} ${keys.length} ${tr('tbl.itemsParen')}?'),
         content: SizedBox(
           width: 440,
           child: Text(
@@ -1428,7 +1656,9 @@ class TablePageViewState extends State<TablePageView>
           ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(tr('tbl.cancel'))),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: Text(tr('tbl.cancel'))),
           FilledButton(
             style: FilledButton.styleFrom(backgroundColor: scheme.error),
             onPressed: () => Navigator.pop(ctx, true),
@@ -1444,9 +1674,11 @@ class TablePageViewState extends State<TablePageView>
       if (res['ok'] != true) failed++;
     }
     if (!mounted) return;
-    _toast(failed == 0
-        ? '${tr('tbl.deleted')} ${keys.length} ${tr('tbl.itemsParen')}'
-        : '${tr('tbl.deleted')} ${keys.length - failed}, $failed ${tr('tbl.failed')}', error: failed > 0);
+    _toast(
+        failed == 0
+            ? '${tr('tbl.deleted')} ${keys.length} ${tr('tbl.itemsParen')}'
+            : '${tr('tbl.deleted')} ${keys.length - failed}, $failed ${tr('tbl.failed')}',
+        error: failed > 0);
     _run(resetPaging: false);
   }
 
@@ -1465,7 +1697,8 @@ class TablePageViewState extends State<TablePageView>
       final ts = DateTime.now().millisecondsSinceEpoch;
       final path = '$home/Downloads/redimos-$_effTable-$ts.csv';
       await File(path).writeAsString(csv);
-      _toast('${tr('tbl.exported')} ${rows.length} ${tr('tbl.rowsSuffix')} → $path');
+      _toast(
+          '${tr('tbl.exported')} ${rows.length} ${tr('tbl.rowsSuffix')} → $path');
     } catch (_) {
       await Clipboard.setData(ClipboardData(text: csv));
       _toast(tr('tbl.csvClipboardFallback'));
@@ -1484,7 +1717,9 @@ class TablePageViewState extends State<TablePageView>
           child: Text(tr('tbl.rawWriteBody')),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(tr('tbl.cancel'))),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: Text(tr('tbl.cancel'))),
           FilledButton(
             style: FilledButton.styleFrom(backgroundColor: scheme.error),
             onPressed: () => Navigator.pop(ctx, true),
@@ -1507,7 +1742,8 @@ class TablePageViewState extends State<TablePageView>
 
   Widget _labeled(String label, Widget field) =>
       Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(label, style: TextStyle(fontSize: 11, color: Theme.of(context).hintColor)),
+        Text(label,
+            style: TextStyle(fontSize: 11, color: Theme.of(context).hintColor)),
         const SizedBox(height: 3),
         field,
       ]);
@@ -1515,21 +1751,5 @@ class TablePageViewState extends State<TablePageView>
   Widget _readonlyAttr(String name) => InputDecorator(
         decoration: _dec(),
         child: Text(name.isEmpty ? '—' : name),
-      );
-
-  Widget _center(IconData icon, String title, String subtitle, {Widget? action}) => Center(
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          Icon(icon, size: 40, color: Colors.grey),
-          const SizedBox(height: 12),
-          Text(title, style: const TextStyle(fontSize: 14)),
-          const SizedBox(height: 6),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 40),
-            child: Text(subtitle,
-                textAlign: TextAlign.center,
-                style: const TextStyle(fontSize: 12, color: Colors.grey)),
-          ),
-          if (action != null) ...[const SizedBox(height: 16), action],
-        ]),
       );
 }

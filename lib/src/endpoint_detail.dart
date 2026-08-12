@@ -22,6 +22,9 @@ import 'models.dart';
 import 'native.dart';
 import 'partiql_page.dart';
 import 'playground_page.dart';
+import 'ui_primitives.dart';
+import 'ui_status.dart';
+import 'ui_surfaces.dart';
 import 'ui_tokens.dart';
 
 class EndpointDetailView extends StatefulWidget {
@@ -123,7 +126,17 @@ class _EndpointDetailViewState extends State<EndpointDetailView> {
     // Keep every screen's state alive (scroll position, probe results, editor
     // contents) across tab switches — an IndexedStack does that without the
     // TabBarView the chrome used to own.
-    return IndexedStack(index: i, children: screens);
+    return IndexedStack(
+      index: i,
+      children: [
+        for (var screenIndex = 0; screenIndex < screens.length; screenIndex++)
+          ExcludeFocus(
+            key: ValueKey('endpoint-screen-$screenIndex-focus'),
+            excluding: screenIndex != i,
+            child: screens[screenIndex],
+          ),
+      ],
+    );
   }
 }
 
@@ -215,11 +228,13 @@ class _EndpointOverviewPaneState extends State<EndpointOverviewPane>
     final e = widget.endpoint;
     final t = AppTokens.of(context);
     return SingleChildScrollView(
+      key: const ValueKey('endpoint-overview-scroll'),
       // Mockup .ov-wrap: 18px 22px padding, 14px column gap.
       padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 18),
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         // v2.3: warning/note banners pinned to the TOP of the screen.
-        if (_isAws) _noteBanner(Icons.lock_outline, tr('ep.ovReadOnlyNote'), t.warning),
+        if (_isAws)
+          _noteBanner(Icons.lock_outline, tr('ep.ovReadOnlyNote'), t.warning),
         if (_isAws) const SizedBox(height: 10),
         // Honesty guard: "an endpoint is storage, not a managed process" is
         // false for the engine-bound endpoint — its process Monitor/Logs live
@@ -233,7 +248,9 @@ class _EndpointOverviewPaneState extends State<EndpointOverviewPane>
             t.warning),
         const SizedBox(height: 14),
         // Backend identity card (mockup .ov-card: head band + ruled kv rows).
-        _card(t,
+        _card(
+          t,
+          key: const ValueKey('endpoint-overview-backend-card'),
           head: Row(children: [
             _cardTitle(t, tr('ep.ovBackend')),
             const Spacer(),
@@ -249,7 +266,8 @@ class _EndpointOverviewPaneState extends State<EndpointOverviewPane>
             if (e.accessKeyId.trim().isNotEmpty)
               _kv(t, 'Credential', 'AK •••${_tail(e.accessKeyId)}'),
             _kv(t, 'Tables', _tableCount == null ? '—' : '$_tableCount'),
-            _kv(t, 'Items', '—'), // R5.x: item counts need a per-table scan — not polled.
+            _kv(t, 'Items',
+                '—'), // R5.x: item counts need a per-table scan — not polled.
             // Mockup renders Status as a dot + label in the value cell.
             _reachRow(t, 'Status', _reachStatusWidget(t)),
           ],
@@ -257,29 +275,48 @@ class _EndpointOverviewPaneState extends State<EndpointOverviewPane>
         const SizedBox(height: 14),
         // Reachability card: four rows (Status / Tables / Latency / Error) +
         // a Recheck button in the head band.
-        _card(t,
+        _card(
+          t,
+          key: const ValueKey('endpoint-overview-reachability-card'),
           head: Row(children: [
             _cardTitle(t, tr('ep.ovReachability')),
             const Spacer(),
-            _cardAction(t, label: tr('ep.ovRecheck'), onTap: _probing ? null : _probe),
+            _cardAction(t,
+                label: tr('ep.ovRecheck'), onTap: _probing ? null : _probe),
           ]),
           rows: [
             _reachRow(t, tr('ep.ovReachability'), _reachStatusWidget(t)),
-            _reachRow(t, tr('ep.ovTablesCount'),
+            _reachRow(
+                t,
+                tr('ep.ovTablesCount'),
                 Text(_tableCount == null ? '—' : '$_tableCount',
                     style: Ts.style(
-                        size: Ts.md, weight: FontWeight.w600, color: t.text,
-                        monoFont: true, tabularNums: true))),
-            _reachRow(t, 'Latency',
+                        size: Ts.md,
+                        weight: FontWeight.w600,
+                        color: t.text,
+                        monoFont: true,
+                        tabularNums: true))),
+            _reachRow(
+                t,
+                'Latency',
                 Text(_latencyMs == null ? '—' : '$_latencyMs ms',
                     style: Ts.style(
-                        size: Ts.md, weight: FontWeight.w600, color: t.text,
-                        monoFont: true, tabularNums: true))),
+                        size: Ts.md,
+                        weight: FontWeight.w600,
+                        color: t.text,
+                        monoFont: true,
+                        tabularNums: true))),
             if (_error != null)
-              _reachRow(t, 'Error',
+              _reachRow(
+                  t,
+                  'Error',
                   SelectableText(_error!,
-                      style: Ts.style(size: Ts.md, weight: FontWeight.w600, color: t.danger,
-                          monoFont: true, tabularNums: true))),
+                      style: Ts.style(
+                          size: Ts.md,
+                          weight: FontWeight.w600,
+                          color: t.danger,
+                          monoFont: true,
+                          tabularNums: true))),
           ],
         ),
       ]),
@@ -290,24 +327,38 @@ class _EndpointOverviewPaneState extends State<EndpointOverviewPane>
   // exposing it (the AWS console shows the same tail).
   String _tail(String s) {
     final trimmed = s.trim();
-    return trimmed.length <= 4 ? trimmed : trimmed.substring(trimmed.length - 4);
+    return trimmed.length <= 4
+        ? trimmed
+        : trimmed.substring(trimmed.length - 4);
   }
 
   Widget _reachStatusWidget(AppTokens t) {
     if (_probing) {
       return Row(mainAxisSize: MainAxisSize.min, children: [
-        SizedBox(width: 13, height: 13, child: CircularProgressIndicator(strokeWidth: 2, color: t.text3)),
+        SizedBox.square(
+          dimension: 13,
+          child: CircularProgressIndicator(
+            strokeWidth: 2,
+            color: t.text3,
+          ),
+        ),
         const SizedBox(width: 8),
-        Text(tr('ep.ovChecking'), style: Ts.style(size: Ts.md, weight: FontWeight.w600, color: t.text3)),
+        Text(
+          tr('ep.ovChecking'),
+          style: Ts.style(
+            size: Ts.md,
+            weight: FontWeight.w600,
+            color: t.text3,
+          ),
+        ),
       ]);
     }
-    final color = _reachable ? t.success : t.danger;
-    return Row(mainAxisSize: MainAxisSize.min, children: [
-      Container(width: 8, height: 8, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
-      const SizedBox(width: 7),
-      Text(_reachable ? tr('ep.ovReachable') : tr('ep.ovUnreachable'),
-          style: Ts.style(size: Ts.md, weight: FontWeight.w600, color: color)),
-    ]);
+    final label = _reachable ? tr('ep.ovReachable') : tr('ep.ovUnreachable');
+    return CodexStatusIndicator(
+      status: _reachable ? CodexStatus.success : CodexStatus.error,
+      label: label,
+      semanticLabel: label,
+    );
   }
 
   String _backendLabel() {
@@ -331,7 +382,9 @@ class _EndpointOverviewPaneState extends State<EndpointOverviewPane>
           const SizedBox(width: 8),
           Expanded(
             // Mockup .note-banner body weight 500.
-            child: Text(text, style: const TextStyle(fontSize: 12, height: 1.35, fontWeight: FontWeight.w500)),
+            child: Text(text,
+                style: const TextStyle(
+                    fontSize: 12, height: 1.35, fontWeight: FontWeight.w500)),
           ),
         ]),
       );
@@ -348,7 +401,11 @@ class _EndpointOverviewPaneState extends State<EndpointOverviewPane>
           Expanded(
             child: SelectableText(v,
                 style: Ts.style(
-                    size: Ts.md, weight: FontWeight.w600, color: t.text, monoFont: true, tabularNums: true)),
+                    size: Ts.md,
+                    weight: FontWeight.w600,
+                    color: t.text,
+                    monoFont: true,
+                    tabularNums: true)),
           ),
         ],
       );
@@ -366,85 +423,73 @@ class _EndpointOverviewPaneState extends State<EndpointOverviewPane>
         ],
       );
 
-  // Mockup .ov-card: border + radius + elev-2 + top highlight, with a two-tone
-  // header band (panel-2 bg + hairline bottom border) capping the card. Rows
-  // are separated by hairline rules (mockup .kv-row border-bottom).
-  Widget _card(AppTokens t, {required Widget head, required List<Widget> rows}) {
-    final brightness = Theme.of(context).brightness;
-    return Stack(children: [
-      Container(
-        decoration: BoxDecoration(
-          color: t.panel,
-          borderRadius: BorderRadius.circular(Dim.radiusM),
-          border: Border.all(color: t.border),
-          boxShadow: Depth.elev2(brightness),
-        ),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(Dim.radiusM - 1),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-            // Header band (panel-2 + hairline bottom border).
-            Container(
-              decoration: BoxDecoration(
-                color: t.panel2,
-                border: Border(bottom: BorderSide(color: t.hairline)),
+  Widget _card(
+    AppTokens t, {
+    Key? key,
+    required Widget head,
+    required List<Widget> rows,
+  }) =>
+      CodexSurface(
+        key: key,
+        variant: CodexSurfaceVariant.elevated,
+        padding: EdgeInsets.zero,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            ColoredBox(
+              color: t.panel2,
+              child: Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                child: head,
               ),
-              // Mockup .ov-head band: 10px vertical padding.
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-              child: head,
             ),
-            // Ruled kv body (mockup .kv-row: 9px 14px padding, hairline between).
+            const CodexDivider(),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 14),
-              child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                for (var i = 0; i < rows.length; i++) ...[
-                  Padding(padding: const EdgeInsets.symmetric(vertical: 9), child: rows[i]),
-                  if (i < rows.length - 1) Divider(height: 1, color: t.hairline),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  for (var i = 0; i < rows.length; i++) ...[
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 9),
+                      child: rows[i],
+                    ),
+                    if (i < rows.length - 1) const CodexDivider(),
+                  ],
                 ],
-              ]),
+              ),
             ),
-          ]),
+          ],
         ),
-      ),
-      // 1px top inner highlight.
-      Positioned(
-        left: 1, right: 1, top: 0,
-        child: IgnorePointer(
-          child: Container(
-            height: 1,
-            decoration: BoxDecoration(
-              color: t.highlight,
-              borderRadius: const BorderRadius.vertical(top: Radius.circular(Dim.radiusM - 1)),
-            ),
+      );
+
+  Widget _cardTitle(AppTokens t, String label) => Text(
+        label.toUpperCase(),
+        style: Ts.style(
+          size: Ts.xs,
+          letterSpacing: 0.9,
+          weight: FontWeight.w700,
+          color: t.text3,
+        ),
+      );
+
+  Widget _cardAction(
+    AppTokens t, {
+    required String label,
+    VoidCallback? onTap,
+  }) =>
+      CodexButton(
+        variant: CodexButtonVariant.secondary,
+        semanticLabel: label,
+        onPressed: onTap,
+        label: Text(
+          label,
+          style: Ts.style(
+            size: Ts.md,
+            weight: FontWeight.w500,
+            color: onTap == null ? t.text3 : t.text2,
           ),
         ),
-      ),
-    ]);
-  }
-
-  // Mockup .ov-head title: 11/700 uppercase, .9px tracking, text-3.
-  Widget _cardTitle(AppTokens t, String label) => Text(label.toUpperCase(),
-      style: Ts.style(size: Ts.xs, letterSpacing: 0.9, weight: FontWeight.w700, color: t.text3));
-
-  // Mockup .ov-head .abtn: a 26px bordered box with 12/500 text-2 label — no
-  // icon in the HTML render, unlike the old accent icon+text affordance.
-  Widget _cardAction(AppTokens t, {required String label, VoidCallback? onTap}) {
-    final enabled = onTap != null;
-    final color = enabled ? t.text2 : t.text3;
-    return InkWell(
-      borderRadius: BorderRadius.circular(Dim.radiusS),
-      onTap: onTap,
-      child: Container(
-        height: 26,
-        padding: const EdgeInsets.symmetric(horizontal: 11),
-        decoration: BoxDecoration(
-          color: t.panel,
-          border: Border.all(color: t.border),
-          borderRadius: BorderRadius.circular(Dim.radiusS),
-        ),
-        alignment: Alignment.center,
-        child: Text(label,
-            style: Ts.style(size: Ts.md, weight: FontWeight.w500, color: color)),
-      ),
-    );
-  }
+      );
 }
