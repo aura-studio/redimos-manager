@@ -1,0 +1,673 @@
+{
+  "schemaVersion": 1,
+  "referenceVersion": "codex-v1",
+  "viewport": {
+    "logicalWidth": 1280,
+    "logicalHeight": 800,
+    "dpr": 2
+  },
+  "renderingEnvironment": {
+    "platform": "macOS",
+    "flutter": "pending-capture",
+    "fontMode": "bundled"
+  },
+  "screens": [
+    {
+      "id": "inst-browse",
+      "theme": "light",
+      "file": "references/inst-browse-light.png",
+      "source": "user-approved-codex-comparison+approved-warm-neutral-palette+preserved-redimos-information-architecture",
+      "approval": "candidate",
+      "regions": [
+        {
+          "id": "railSidebar",
+          "x": 0,
+          "y": 0,
+          "width": 344,
+          "height": 800
+        },
+        {
+          "id": "topBars",
+          "x": 344,
+          "y": 0,
+          "width": 936,
+          "height": 92
+        },
+        {
+          "id": "detail",
+          "x": 344,
+          "y": 92,
+          "width": 936,
+          "height": 684
+        },
+        {
+          "id": "statusbar",
+          "x": 344,
+          "y": 776,
+          "width": 936,
+          "height": 24
+        }
+      ]
+    },
+    {
+      "id": "inst-browse",
+      "theme": "dark",
+      "file": "references/inst-browse-dark.png",
+      "source": "user-approved-codex-comparison+approved-warm-neutral-palette+preserved-redimos-information-architecture",
+      "approval": "candidate",
+      "regions": [
+        {
+          "id": "railSidebar",
+          "x": 0,
+          "y": 0,
+          "width": 344,
+          "height": 800
+        },
+        {
+          "id": "topBars",
+          "x": 344,
+          "y": 0,
+          "width": 936,
+          "height": 92
+        },
+        {
+          "id": "detail",
+          "x": 344,
+          "y": 92,
+          "width": 936,
+          "height": 684
+        },
+        {
+          "id": "statusbar",
+          "x": 344,
+          "y": 776,
+          "width": 936,
+          "height": 24
+        }
+      ]
+    },
+    {
+      "id": "inst-console",
+      "theme": "light",
+      "file": "references/inst-console-light.png",
+      "source": "user-approved-codex-comparison+approved-warm-neutral-palette+preserved-redimos-information-architecture",
+      "approval": "candidate",
+      "regions": [
+        {
+          "id": "railSidebar",
+          "x": 0,
+          "y": 0,
+          "width": 344,
+          "height": 800
+        },
+        {
+          "id": "topBars",
+          "x": 344,
+          "y": 0,
+          "width": 936,
+          "height": 92
+        },
+        {
+          "id": "detail",
+          "x": 344,
+          "y": 92,
+          "width": 936,
+          "height": 684
+        },
+        {
+          "id": "statusbar",
+          "x": 344,
+          "y": 776,
+          "width": 936,
+          "height": 24
+        }
+      ]
+    },
+    {
+      "id": "inst-console",
+      "theme": "dark",
+      "file": "references/inst-console-dark.png",
+      "source": "user-approved-codex-comparison+approved-warm-neutral-palette+preserved-redimos-information-architecture",
+      "approval": "candidate",
+      "regions": [
+        {
+          "id": "railSidebar",
+          "x": 0,
+          "y": 0,
+          "width": 344,
+          "height": 800
+        },
+        {
+          "id": "topBars",
+          "x": 344,
+          "y": 0,
+          "width": 936,
+          "height": 92
+        },
+        {
+          "id": "detail",
+          "x": 344,
+          "y": 92,
+          "width": 936,
+          "height": 684
+        },
+        {
+          "id": "statusbar",
+          "x": 344,
+          "y": 776,
+          "width": 936,
+          "height": 24
+        }
+      ]
+    },
+    {
+      "id": "inst-monitor",
+      "theme": "light",
+      "file": "references/inst-monitor-light.png",
+      "source": "user-approved-codex-comparison+approved-warm-neutral-palette+preserved-redimos-information-architecture",
+      "approval": "candidate",
+      "regions": [
+        {
+          "id": "railSidebar",
+          "x": 0,
+          "y": 0,
+          "width": 344,
+          "height": 800
+        },
+        {
+          "id": "topBars",
+          "x": 344,
+          "y": 0,
+          "width": 936,
+          "height": 92
+        },
+        {
+          "id": "detail",
+          "x": 344,
+          "y": 92,
+          "width": 936,
+          "height": 684
+        },
+        {
+          "id": "statusbar",
+          "x": 344,
+          "y": 776,
+          "width": 936,
+          "height": 24
+        }
+      ]
+    },
+    {
+      "id": "inst-monitor",
+      "theme": "dark",
+      "file": "references/inst-monitor-dark.png",
+      "source": "user-approved-codex-comparison+approved-warm-neutral-palette+preserved-redimos-information-architecture",
+      "approval": "candidate",
+      "regions": [
+        {
+          "id": "railSidebar",
+          "x": 0,
+          "y": 0,
+          "width": 344,
+          "height": 800
+        },
+        {
+          "id": "topBars",
+          "x": 344,
+          "y": 0,
+          "width": 936,
+          "height": 92
+        },
+        {
+          "id": "detail",
+          "x": 344,
+          "y": 92,
+          "width": 936,
+          "height": 684
+        },
+        {
+          "id": "statusbar",
+          "x": 344,
+          "y": 776,
+          "width": 936,
+          "height": 24
+        }
+      ]
+    },
+    {
+      "id": "inst-logs",
+      "theme": "light",
+      "file": "references/inst-logs-light.png",
+      "source": "user-approved-codex-comparison+approved-warm-neutral-palette+preserved-redimos-information-architecture",
+      "approval": "candidate",
+      "regions": [
+        {
+          "id": "railSidebar",
+          "x": 0,
+          "y": 0,
+          "width": 344,
+          "height": 800
+        },
+        {
+          "id": "topBars",
+          "x": 344,
+          "y": 0,
+          "width": 936,
+          "height": 92
+        },
+        {
+          "id": "detail",
+          "x": 344,
+          "y": 92,
+          "width": 936,
+          "height": 684
+        },
+        {
+          "id": "statusbar",
+          "x": 344,
+          "y": 776,
+          "width": 936,
+          "height": 24
+        }
+      ]
+    },
+    {
+      "id": "inst-logs",
+      "theme": "dark",
+      "file": "references/inst-logs-dark.png",
+      "source": "user-approved-codex-comparison+approved-warm-neutral-palette+preserved-redimos-information-architecture",
+      "approval": "candidate",
+      "regions": [
+        {
+          "id": "railSidebar",
+          "x": 0,
+          "y": 0,
+          "width": 344,
+          "height": 800
+        },
+        {
+          "id": "topBars",
+          "x": 344,
+          "y": 0,
+          "width": 936,
+          "height": 92
+        },
+        {
+          "id": "detail",
+          "x": 344,
+          "y": 92,
+          "width": 936,
+          "height": 684
+        },
+        {
+          "id": "statusbar",
+          "x": 344,
+          "y": 776,
+          "width": 936,
+          "height": 24
+        }
+      ]
+    },
+    {
+      "id": "inst-playground",
+      "theme": "light",
+      "file": "references/inst-playground-light.png",
+      "source": "user-approved-codex-comparison+approved-warm-neutral-palette+preserved-redimos-information-architecture",
+      "approval": "candidate",
+      "regions": [
+        {
+          "id": "railSidebar",
+          "x": 0,
+          "y": 0,
+          "width": 344,
+          "height": 800
+        },
+        {
+          "id": "topBars",
+          "x": 344,
+          "y": 0,
+          "width": 936,
+          "height": 92
+        },
+        {
+          "id": "detail",
+          "x": 344,
+          "y": 92,
+          "width": 936,
+          "height": 684
+        },
+        {
+          "id": "statusbar",
+          "x": 344,
+          "y": 776,
+          "width": 936,
+          "height": 24
+        }
+      ]
+    },
+    {
+      "id": "inst-playground",
+      "theme": "dark",
+      "file": "references/inst-playground-dark.png",
+      "source": "user-approved-codex-comparison+approved-warm-neutral-palette+preserved-redimos-information-architecture",
+      "approval": "candidate",
+      "regions": [
+        {
+          "id": "railSidebar",
+          "x": 0,
+          "y": 0,
+          "width": 344,
+          "height": 800
+        },
+        {
+          "id": "topBars",
+          "x": 344,
+          "y": 0,
+          "width": 936,
+          "height": 92
+        },
+        {
+          "id": "detail",
+          "x": 344,
+          "y": 92,
+          "width": 936,
+          "height": 684
+        },
+        {
+          "id": "statusbar",
+          "x": 344,
+          "y": 776,
+          "width": 936,
+          "height": 24
+        }
+      ]
+    },
+    {
+      "id": "inst-config",
+      "theme": "light",
+      "file": "references/inst-config-light.png",
+      "source": "user-approved-codex-comparison+approved-warm-neutral-palette+preserved-redimos-information-architecture",
+      "approval": "candidate",
+      "regions": [
+        {
+          "id": "railSidebar",
+          "x": 0,
+          "y": 0,
+          "width": 344,
+          "height": 800
+        },
+        {
+          "id": "topBars",
+          "x": 344,
+          "y": 0,
+          "width": 936,
+          "height": 92
+        },
+        {
+          "id": "detail",
+          "x": 344,
+          "y": 92,
+          "width": 936,
+          "height": 684
+        },
+        {
+          "id": "statusbar",
+          "x": 344,
+          "y": 776,
+          "width": 936,
+          "height": 24
+        }
+      ]
+    },
+    {
+      "id": "inst-config",
+      "theme": "dark",
+      "file": "references/inst-config-dark.png",
+      "source": "user-approved-codex-comparison+approved-warm-neutral-palette+preserved-redimos-information-architecture",
+      "approval": "candidate",
+      "regions": [
+        {
+          "id": "railSidebar",
+          "x": 0,
+          "y": 0,
+          "width": 344,
+          "height": 800
+        },
+        {
+          "id": "topBars",
+          "x": 344,
+          "y": 0,
+          "width": 936,
+          "height": 92
+        },
+        {
+          "id": "detail",
+          "x": 344,
+          "y": 92,
+          "width": 936,
+          "height": 684
+        },
+        {
+          "id": "statusbar",
+          "x": 344,
+          "y": 776,
+          "width": 936,
+          "height": 24
+        }
+      ]
+    },
+    {
+      "id": "ep-overview",
+      "theme": "light",
+      "file": "references/ep-overview-light.png",
+      "source": "user-approved-codex-comparison+approved-warm-neutral-palette+preserved-redimos-information-architecture",
+      "approval": "candidate",
+      "regions": [
+        {
+          "id": "railSidebar",
+          "x": 0,
+          "y": 0,
+          "width": 344,
+          "height": 800
+        },
+        {
+          "id": "topBars",
+          "x": 344,
+          "y": 0,
+          "width": 936,
+          "height": 92
+        },
+        {
+          "id": "detail",
+          "x": 344,
+          "y": 92,
+          "width": 936,
+          "height": 684
+        },
+        {
+          "id": "statusbar",
+          "x": 344,
+          "y": 776,
+          "width": 936,
+          "height": 24
+        }
+      ]
+    },
+    {
+      "id": "ep-overview",
+      "theme": "dark",
+      "file": "references/ep-overview-dark.png",
+      "source": "user-approved-codex-comparison+approved-warm-neutral-palette+preserved-redimos-information-architecture",
+      "approval": "candidate",
+      "regions": [
+        {
+          "id": "railSidebar",
+          "x": 0,
+          "y": 0,
+          "width": 344,
+          "height": 800
+        },
+        {
+          "id": "topBars",
+          "x": 344,
+          "y": 0,
+          "width": 936,
+          "height": 92
+        },
+        {
+          "id": "detail",
+          "x": 344,
+          "y": 92,
+          "width": 936,
+          "height": 684
+        },
+        {
+          "id": "statusbar",
+          "x": 344,
+          "y": 776,
+          "width": 936,
+          "height": 24
+        }
+      ]
+    },
+    {
+      "id": "ep-browser",
+      "theme": "light",
+      "file": "references/ep-browser-light.png",
+      "source": "user-approved-codex-comparison+approved-warm-neutral-palette+preserved-redimos-information-architecture",
+      "approval": "candidate",
+      "regions": [
+        {
+          "id": "railSidebar",
+          "x": 0,
+          "y": 0,
+          "width": 344,
+          "height": 800
+        },
+        {
+          "id": "topBars",
+          "x": 344,
+          "y": 0,
+          "width": 936,
+          "height": 92
+        },
+        {
+          "id": "detail",
+          "x": 344,
+          "y": 92,
+          "width": 936,
+          "height": 684
+        },
+        {
+          "id": "statusbar",
+          "x": 344,
+          "y": 776,
+          "width": 936,
+          "height": 24
+        }
+      ]
+    },
+    {
+      "id": "ep-browser",
+      "theme": "dark",
+      "file": "references/ep-browser-dark.png",
+      "source": "user-approved-codex-comparison+approved-warm-neutral-palette+preserved-redimos-information-architecture",
+      "approval": "candidate",
+      "regions": [
+        {
+          "id": "railSidebar",
+          "x": 0,
+          "y": 0,
+          "width": 344,
+          "height": 800
+        },
+        {
+          "id": "topBars",
+          "x": 344,
+          "y": 0,
+          "width": 936,
+          "height": 92
+        },
+        {
+          "id": "detail",
+          "x": 344,
+          "y": 92,
+          "width": 936,
+          "height": 684
+        },
+        {
+          "id": "statusbar",
+          "x": 344,
+          "y": 776,
+          "width": 936,
+          "height": 24
+        }
+      ]
+    }
+  ],
+  "captureRuns": [
+    {
+      "runNumber": 2,
+      "directory": "captures/run-2",
+      "metadata": "captures/run-2/capture-metadata.json",
+      "purpose": "noise-floor"
+    },
+    {
+      "runNumber": 3,
+      "directory": "captures/run-3",
+      "metadata": "captures/run-3/capture-metadata.json",
+      "purpose": "noise-floor"
+    },
+    {
+      "runNumber": 4,
+      "directory": "captures/run-4",
+      "metadata": "captures/run-4/capture-metadata.json",
+      "purpose": "noise-floor"
+    }
+  ],
+  "noiseMeasurement": {
+    "status": "measured",
+    "runNumbers": [
+      2,
+      3,
+      4
+    ],
+    "report": "reports/noise-floor-runs-2-4.json",
+    "reportSha256": "f380a119009c47f3ce1335dd471340385356fbdbe690aadc70354d8a7bd5ee69",
+    "thresholdPolicy": "strictly-greater-than-measured-noise",
+    "thresholdApproval": "pending",
+    "legacyV23ThresholdImported": false,
+    "rationale": "Maximum pairwise deviation measured across explicitly listed same-build Codex runs 2, 3, and 4; any future threshold must bind this report and remain strictly above every measured noise floor."
+  },
+  "history": [
+    {
+      "reason": "Initialize 8x2 Codex reference candidate slots without approving baseline images",
+      "affected": [
+        "all"
+      ],
+      "renderingEnvironment": {
+        "platform": "macOS",
+        "flutter": "pending-capture",
+        "fontMode": "bundled"
+      },
+      "approval": "candidate",
+      "recordedAt": "2026-08-12T11:54:37.042Z"
+    },
+    {
+      "reason": "Record maximum pairwise noise from immutable same-provenance runs 2, 3, and 4 without approving references or thresholds",
+      "affected": [
+        "all"
+      ],
+      "renderingEnvironment": {
+        "platform": "darwin 24.6.0",
+        "flutter": "Flutter 3.44.5 • channel stable • https://github.com/flutter/flutter.git",
+        "fontMode": "bundled"
+      },
+      "approval": "candidate",
+      "fixtureRevision": "47ab5266d9050f3ee4fdfd44d40095936fbabbc88e324b0eaf30a1354986a152",
+      "buildRevision": "fa7a7c2a87cdd7b61be46d183e94f2eb9c80b810b6a708cabd5b32d1a79924fa",
+      "fontRevision": "7838b1a9b60a7f3a069f798ca81a9585e1862969376445ef7debf4cd14c519ea",
+      "recordedAt": "2026-08-12T13:40:51.000Z"
+    }
+  ]
+}

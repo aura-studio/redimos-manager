@@ -1,0 +1,8 @@
+archive: v2.3 pre-Codex visual evidence
+source-branch: feat/v1.2
+source-revision: 90907570258e9e307f8cbb301fc96b2a30cff1fa
+viewport-logical: 1280x800
+capture-dpr: 2
+capture-physical: 2560x1600
+contents: 16 goldens, 8 Flutter captures, 8 mockup captures, 40 diff diagnostics, 4 reports
+policy: historical evidence only; excluded from active reference discovery and comparison
