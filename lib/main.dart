@@ -16,6 +16,9 @@ import 'src/models.dart';
 import 'src/monitor_widgets.dart';
 import 'src/native.dart';
 import 'src/playground_page.dart';
+import 'src/service_configure.dart';
+import 'src/service_detail.dart';
+import 'src/services_state.dart';
 import 'src/ui_states.dart';
 import 'src/ui_surfaces.dart';
 import 'src/ui_theme.dart';
@@ -134,12 +137,12 @@ class _HomePageState extends State<HomePage>
   final Map<String, List<double>> _memHist = {};
   final Map<String, List<double>> _opsHist =
       {}; // redimos ops/s (from /metrics)
-  // The Local DynamoDB child's own CPU / memory history (singleton).
-  final List<double> _ddbCpuHist = [];
-  final List<double> _ddbMemHist = [];
-  final List<double> _ddbDiskHist = []; // disk I/O bytes/sec
 
-  LocalDdbInfo? _ddb; // Local DynamoDB snapshot, refreshed with the status poll
+  // Stage 11: central multi-Service state (list / selection / tab / per-ID
+  // history), refreshed by the SAME 1.5 s timer as the instance status — one
+  // poller for everything, never one timer per Service (requirement 12.5).
+  // The rail / sidebar / detail tabs land on top of it in stages 12–14.
+  ServicesState? _svcState;
 
   AppLifecycleListener? _lifecycle;
 
@@ -159,6 +162,12 @@ class _HomePageState extends State<HomePage>
     }
     try {
       _core = NativeCore();
+      _svcState = ServicesState(_core!);
+      // Selection / tab / history changes rebuild the chrome and detail; the
+      // poller's refresh() lands through the same notify (stage 12).
+      _svcState!.addListener(() {
+        if (mounted) setState(() {});
+      });
       _reload();
       _poll =
           Timer.periodic(const Duration(milliseconds: 1500), (_) => _refresh());
@@ -178,6 +187,7 @@ class _HomePageState extends State<HomePage>
   @override
   void dispose() {
     _tabs.dispose();
+    _svcState?.dispose();
     _lifecycle?.dispose();
     _poll?.cancel();
     super.dispose();
@@ -188,7 +198,12 @@ class _HomePageState extends State<HomePage>
     setState(() {
       _configs = data.configs;
       _endpoints = data.endpoints;
-      _stopAllSnapshot = data.stopAllSnapshot;
+      // Stage 12: the typed V2 snapshot carries both ID namespaces; fall back
+      // to the legacy flat list only for stores written before it existed.
+      final v2 = data.stopAllSnapshotV2;
+      _stopAllSnapshot = v2.isEmpty
+          ? data.stopAllSnapshot
+          : [...v2.instances, ...v2.services];
       if (_selectedId == null &&
           _selEndpointId == null &&
           _configs.isNotEmpty) {
@@ -209,6 +224,11 @@ class _HomePageState extends State<HomePage>
 
   void _refresh() {
     if (_core == null) return;
+    // Stage 11: the same tick also refreshes the full Service snapshot (12.5).
+    // Fire-and-forget: its generation guard drops the reply if a newer refresh
+    // or the dispose overtakes it (12.4).
+    final svc = _svcState;
+    if (svc != null) unawaited(svc.refresh());
     final st = _core!.status();
     for (final s in st.values) {
       if (!s.isRunning) continue;
@@ -219,49 +239,9 @@ class _HomePageState extends State<HomePage>
       if (_memHist[s.id]!.length > _histCap) _memHist[s.id]!.removeAt(0);
       if (_opsHist[s.id]!.length > _histCap) _opsHist[s.id]!.removeAt(0);
     }
-    LocalDdbInfo? ddb;
-    try {
-      ddb = _core!.ddbGet();
-    } catch (_) {}
-    if (ddb != null && ddb.status == 'running') {
-      _ddbCpuHist.add(ddb.cpuPercent);
-      _ddbMemHist.add(ddb.memBytes / (1024 * 1024));
-      _ddbDiskHist.add(ddb.diskPerSec);
-      if (_ddbCpuHist.length > _histCap) _ddbCpuHist.removeAt(0);
-      if (_ddbMemHist.length > _histCap) _ddbMemHist.removeAt(0);
-      if (_ddbDiskHist.length > _histCap) _ddbDiskHist.removeAt(0);
-    }
     setState(() {
       _status = st;
-      if (ddb != null) _ddb = ddb;
     });
-  }
-
-  // The managed Local DynamoDB engine a kind=local endpoint IS bound to: its
-  // endpoint URL names the engine's port on localhost. Candidate ports: the
-  // configured one (where the engine starts) plus, WHILE RUNNING, the live
-  // port — rm_ddb_set persists a new port without restarting, so a running
-  // engine may still sit on the old one; a STOPPED engine's stale live port
-  // must not bind an unrelated endpoint that happens to use it. Matches are
-  // port-bounded ("localhost:8079" never grabs ":80790"). Same substring
-  // lineage as the instance-side _usesLocalDdb before the 2026-08-05
-  // separation; the native twin configUsesLocalDdb (localddb.go) stays — it
-  // drives cascade restarts. Keys off kind + ports (stable across engine
-  // stop/start), so an open endpoint page's tab count never flaps with
-  // engine lifecycle.
-  LocalDdbInfo? _ddbForEndpoint(DdbEndpoint e) {
-    final ddb = _ddb;
-    if (ddb == null || e.kind != 'local') return null;
-    final ep = e.endpoint.toLowerCase();
-    if (ep.isEmpty) return null;
-    final ports = <int>{ddb.config.port, if (ddb.status == 'running') ddb.port};
-    for (final p in ports) {
-      if (p <= 0) continue;
-      if (RegExp('(localhost|127\\.0\\.0\\.1):$p(?![0-9])').hasMatch(ep)) {
-        return ddb;
-      }
-    }
-    return null;
   }
 
   RedimosConfig? get _selected {
@@ -468,7 +448,10 @@ class _HomePageState extends State<HomePage>
   @override
   Widget build(BuildContext context) {
     if (_loadError != null) return _errorScaffold();
-    final isEp = _selEndpointId != null;
+    // Stage 12: the ACTIVE entity kind (rail) routes the chrome and detail —
+    // each kind keeps its own selection, so switching never loses one (12.6).
+    final isSvc = _entityKind == EntityKind.service;
+    final isEp = !isSvc && _entityKind == EntityKind.endpoint;
     // CP 9.x: the chrome (rail / entity sidebar / top bar / mid bar / status
     // bar) lives in src/home_chrome.dart so the pixel-capture channel can wrap
     // the very same widgets around its content screens.
@@ -483,22 +466,31 @@ class _HomePageState extends State<HomePage>
           selectedEndpointId: _selEndpointId,
           hoveredCardId: _hoveredCardId,
           entityQuery: _entityQuery,
-          tabLabels: isEp ? _epTabLabels() : _instanceTabLabels(),
-          tabIndex: isEp ? _epScreenIndex : _tabs.index,
+          tabLabels:
+              isSvc ? _serviceTabLabels() : isEp ? _epTabLabels() : _instanceTabLabels(),
+          tabIndex: isSvc
+              ? (_svcState?.selectedTab ?? 0)
+              : isEp
+                  ? _epScreenIndex
+                  : _tabs.index,
           stopAllSnapshot: _stopAllSnapshot,
-          ddb: _ddb,
           themeMode: appThemeMode.value,
           lang: appLang.value,
+          services: _svcState?.services ?? const [],
+          selectedServiceId: _svcState?.selectedId,
         ),
         cb: ChromeCallbacks(
           onEntityKind: (k) => setState(() => _entityKind = k),
           onSelectConfig: _selectInstance,
           onSelectEndpoint: _selectEndpoint,
+          onSelectService: _selectService,
           onHoverCard: (h) => setState(() => _hoveredCardId = h),
           onQueryChanged: (v) => setState(() => _entityQuery = v),
           onNewConfig: _newConfig,
+          onNewService: _newService,
           onMidTab: (i) => _onMidTab(i, isEp),
           onStartStop: _startStop,
+          onServiceStartStop: _serviceStartStop,
           onStopAll: _stopAll,
           onRestoreAll: _restoreAll,
           onThemeMode: (m) {
@@ -509,9 +501,7 @@ class _HomePageState extends State<HomePage>
             appLang.value = l;
             saveAppLang(l);
           },
-          onDdbMutated: _refresh,
         ),
-        core: _core!,
         midBarCta: _midBarCta(),
         child: _detail(),
       ),
@@ -519,6 +509,10 @@ class _HomePageState extends State<HomePage>
   }
 
   void _onMidTab(int i, bool isEp) {
+    if (_entityKind == EntityKind.service) {
+      _svcState?.selectedTab = i; // notifies → listener rebuilds
+      return;
+    }
     if (isEp) {
       setState(() => _epScreenIndex = i);
     } else {
@@ -529,8 +523,11 @@ class _HomePageState extends State<HomePage>
 
   Widget _midBarCta() {
     // Context CTA in the end group. Wired screens get a live action; the rest
-    // reserve the slot (per-screen wiring lands in T4–T13).
-    final isEp = _selEndpointId != null;
+    // reserve the slot (per-screen wiring lands in T4–T13). Stage 12: route by
+    // the ACTIVE entity kind — the Service area has no CTA yet (stage 13 adds
+    // the Configure action bar inside its own screen instead).
+    if (_entityKind == EntityKind.service) return const SizedBox(width: 8);
+    final isEp = _entityKind == EntityKind.endpoint;
     final idx = isEp ? _epScreenIndex : _tabs.index;
     if (!isEp && idx == 0) {
       // Browse → New Key
@@ -591,18 +588,25 @@ class _HomePageState extends State<HomePage>
   List<String> _instanceTabLabels() =>
       [for (final k in _instanceTabKeys) tr(k)];
 
-  List<String> _epTabLabels() {
-    final showDdb =
-        _selEndpoint != null && _ddbForEndpoint(_selEndpoint!) != null;
-    final labels = [
-      tr('tab.overview'),
-      tr('tab.browser'),
-      tr('tab.partiql'),
-      tr('tab.playground')
-    ];
-    if (showDdb) labels.addAll([tr('tab.monitor'), tr('tab.logs')]);
-    return labels;
-  }
+  // Stage 15 (3.1–3.4): the endpoint screens are exactly these four client-
+  // side tabs, always — no engine-derived Monitor/Logs extras.
+  static const _epTabKeys = [
+    'tab.overview',
+    'tab.browser',
+    'tab.partiql',
+    'tab.playground'
+  ];
+  List<String> _epTabLabels() => [for (final k in _epTabKeys) tr(k)];
+
+  // Stage 12: the Service detail's four fixed screens (stage 14 fills them).
+  static const _serviceTabKeys = [
+    'tab.overview',
+    'tab.monitor',
+    'tab.logs',
+    'tab.configure'
+  ];
+  List<String> _serviceTabLabels() =>
+      [for (final k in _serviceTabKeys) tr(k)];
 
   DdbEndpoint? get _selEndpoint {
     for (final e in _endpoints) {
@@ -635,17 +639,24 @@ class _HomePageState extends State<HomePage>
   }
 
   void _stopAll() {
-    final snap = _core?.stopAll() ?? [];
-    setState(() => _stopAllSnapshot = snap);
+    final res = _core?.stopAll();
+    // Stage 7/12: the typed snapshot names BOTH ID namespaces, so the Restore
+    // affordance survives for Services too (never confuses the two kinds).
+    final snap = res?.snapshot;
+    final ids = [
+      ...?snap?.instances,
+      ...?snap?.services,
+    ];
+    setState(() => _stopAllSnapshot = ids);
     _refresh();
-    if (snap.isNotEmpty) {
+    if (ids.isNotEmpty) {
       _toast(
-          '${tr('home.stopped')} ${snap.length} ${tr('home.configsSuffix')} — ${tr('home.tapToRestore')}');
+          '${tr('home.stopped')} ${ids.length} ${tr('home.configsSuffix')} — ${tr('home.tapToRestore')}');
     }
   }
 
   void _restoreAll() {
-    final started = _core?.restoreAll() ?? [];
+    final started = _core?.restoreAll().restored ?? [];
     setState(() => _stopAllSnapshot = []);
     _refresh();
     _toast(
@@ -653,39 +664,94 @@ class _HomePageState extends State<HomePage>
   }
 
   void _selectEndpoint(String id) {
+    // Stage 12: switching kinds no longer clears the other kind's selection —
+    // each entity keeps its own selected ID (12.6). The kind is what routes.
     setState(() {
+      if (id != _selEndpointId) {
+        _epScreenIndex = 0; // fresh pick resets the endpoint's MidBar screen
+      }
       _selEndpointId = id;
-      _selectedId = null;
-      _epScreenIndex = 0; // reset the endpoint's MidBar screen on a fresh pick
+      _entityKind = EntityKind.endpoint;
     });
   }
 
   String _entityQuery = '';
 
   Future<void> _selectInstance(RedimosConfig c) async {
-    if (c.id == _selectedId) return;
+    if (c.id == _selectedId && _entityKind == EntityKind.instance) return;
     if (await _confirmLeaveEditor()) {
       setState(() {
         _selectedId = c.id;
-        _selEndpointId = null;
+        _entityKind = EntityKind.instance;
       });
     }
   }
 
-  // Right pane for a selected endpoint: its own tab set (Tables · Explorer ·
+  // Stage 12: Service selection lives entirely in ServicesState (ID-keyed);
+  // HomePage only flips the active kind so chrome + detail re-route.
+  void _selectService(String id) {
+    _svcState?.select(id);
+    setState(() => _entityKind = EntityKind.service);
+  }
+
+  // Stage 13: create persists a default Service through the core, selects it,
+  // and lands directly on its Configure tab so the user can finish the setup
+  // (name / engine / port / storage) in place — no modal detour.
+  void _newService() {
+    final core = _core;
+    final svc = _svcState;
+    if (core == null || svc == null) return;
+    try {
+      final usedPorts =
+          svc.services.map((s) => s.config.port).toSet();
+      var port = 8000;
+      while (usedPorts.contains(port)) {
+        port++;
+      }
+      final saved = core.serviceSave(ServiceConfig(
+        name: 'new-service',
+        engine: ServiceEngine.java,
+        port: port,
+      ));
+      unawaited(svc.refresh());
+      _selectService(saved.id);
+      svc.selectedTab = 3; // land on Configure (9.5)
+    } on ServiceApiException catch (e) {
+      _toast('${tr('home.saveFailed')}: ${e.code}');
+    } catch (e) {
+      _toast('${tr('home.saveFailed')}: $e');
+    }
+  }
+
+  // Card-level start/stop (mirror of the instance cards): toggle by live
+  // state, then let the next snapshot paint the truth.
+  Future<void> _serviceStartStop(ServiceInfo s) async {
+    final core = _core;
+    final svc = _svcState;
+    if (core == null || svc == null) return;
+    try {
+      if (s.runtime.isLive) {
+        core.serviceStop(s.id);
+      } else {
+        core.serviceStart(s.id);
+      }
+    } on ServiceApiException catch (e) {
+      _toast('${s.config.name}: ${e.code}');
+    } catch (e) {
+      _toast('${s.config.name}: $e');
+    }
+    unawaited(svc.refresh());
+  }
+
+  // Right pane for a selected endpoint: its own tab set (Overview · Browser ·
   // PartiQL · Playground) bound directly to the DynamoDB backend — see
-  // EndpointDetailView. A kind=local endpoint that IS the managed Local
-  // DynamoDB engine additionally gets its Monitor/Logs tabs (the engine
-  // telemetry used to be mixed into the instance page — since 2026-08-05 it
-  // lives on this, the entity that owns it).
+  // EndpointDetailView. Stage 15 (3.1–3.4): client-side views only; an engine
+  // process behind the URL belongs to a Service entity and is never inferred
+  // here from host/port text.
   Widget _endpointDetail(DdbEndpoint e) => EndpointDetailView(
         key: ValueKey('endpoint-detail-${e.id}'),
         core: _core!,
         endpoint: e,
-        ddb: _ddbForEndpoint(e),
-        ddbCpuHist: _ddbCpuHist,
-        ddbMemHist: _ddbMemHist,
-        ddbDiskHist: _ddbDiskHist,
         screenIndex: _epScreenIndex,
         onEdit: () => _editEndpoint(e),
         browserKey: _epBrowserKey,
@@ -777,13 +843,14 @@ class _HomePageState extends State<HomePage>
   }
 
   Widget _detail() {
-    // Endpoint selected → its storage views (see _endpointDetail). The chrome
-    // (tabs) lives in the HomePage-level MidBar; this is just the content.
-    if (_selEndpointId != null) {
-      for (final e in _endpoints) {
-        if (e.id == _selEndpointId) return _endpointDetail(e);
-      }
+    // Stage 12: the ACTIVE entity kind routes the detail pane; every kind
+    // keeps its own selection, so switching kinds never loses state (12.6).
+    if (_entityKind == EntityKind.endpoint) {
+      final e = _selEndpoint;
+      if (e != null) return _endpointDetail(e);
+      return Center(child: Text(tr('config.pick')));
     }
+    if (_entityKind == EntityKind.service) return _serviceDetail();
     final c = _selected;
     if (c == null) {
       return Center(child: Text(tr('config.pick')));
@@ -876,6 +943,68 @@ class _HomePageState extends State<HomePage>
           ),
       ],
     );
+  }
+
+  // Stage 14: the four Service detail tabs are all live. Overview carries the
+  // lifecycle actions; Monitor reads the per-ID history ring; Logs requests
+  // through ServicesState's generation guard; Configure hosts the CRUD editor.
+  Widget _serviceDetail() {
+    final svc = _svcState;
+    final s = svc?.selected;
+    if (s == null) return Center(child: Text(tr('service.pick')));
+    return switch (svc!.selectedTab) {
+      0 => ServiceOverviewTab(
+          key: ValueKey('service-overview-${s.id}'),
+          service: s,
+          onStart: () => _serviceLifecycle(s, 'start'),
+          onStop: () => _serviceLifecycle(s, 'stop'),
+          onRestart: () => _serviceLifecycle(s, 'restart'),
+        ),
+      1 => ServiceMonitorTab(
+          key: ValueKey('service-monitor-${s.id}'),
+          service: s,
+          history: svc.historyOf(s.id),
+        ),
+      2 => ServiceLogsTab(
+          key: ValueKey('service-logs-${s.id}'),
+          service: s,
+          state: svc,
+        ),
+      _ => ServiceConfigEditor(
+          key: ValueKey('service-configure-${s.id}'),
+          service: s,
+          peers: svc.services.where((p) => p.id != s.id).toList(),
+          core: _core!,
+          onSaved: (_) => unawaited(svc.refresh()),
+          onDeleted: (id) {
+            svc.onServiceDeleted(id);
+            unawaited(svc.refresh());
+          },
+        ),
+    };
+  }
+
+  // Overview lifecycle actions: typed by op, errors toast in the Service's
+  // context (9.8), and the next snapshot paints the resulting state.
+  void _serviceLifecycle(ServiceInfo s, String op) {
+    final core = _core;
+    final svc = _svcState;
+    if (core == null || svc == null) return;
+    try {
+      switch (op) {
+        case 'start':
+          core.serviceStart(s.id);
+        case 'stop':
+          core.serviceStop(s.id);
+        case 'restart':
+          core.serviceRestart(s.id);
+      }
+    } on ServiceApiException catch (e) {
+      _toast('${s.config.name}: ${e.code}');
+    } catch (e) {
+      _toast('${s.config.name}: $e');
+    }
+    unawaited(svc.refresh());
   }
 }
 

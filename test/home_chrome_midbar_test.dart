@@ -7,7 +7,6 @@ import 'package:redimos_manager/src/models.dart';
 import 'package:redimos_manager/src/ui_theme.dart';
 import 'package:redimos_manager/src/ui_tokens.dart';
 
-import 'fake_core.dart';
 import 'golden_fonts.dart';
 
 final _config = RedimosConfig(
@@ -52,7 +51,6 @@ ChromeState _state({
       tabLabels: tabLabels,
       tabIndex: tabIndex,
       stopAllSnapshot: const [],
-      ddb: null,
       themeMode:
           brightness == Brightness.dark ? ThemeMode.dark : ThemeMode.light,
       lang: AppLang.en,
@@ -71,7 +69,6 @@ ChromeCallbacks _callbacks({ValueChanged<int>? onMidTab}) => ChromeCallbacks(
       onRestoreAll: () {},
       onThemeMode: (_) {},
       onLang: (_) {},
-      onDdbMutated: () {},
     );
 
 Future<void> _pumpMidbar(
@@ -91,7 +88,6 @@ Future<void> _pumpMidbar(
         body: HomeChrome(
           state: state,
           cb: callbacks ?? _callbacks(),
-          core: FakeNativeCore(),
           midBarCta: midBarCta,
           child: const SizedBox.expand(
             key: ValueKey('midbar-detail-pane'),

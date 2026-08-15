@@ -13,7 +13,6 @@ import 'package:redimos_manager/src/models.dart';
 import 'package:redimos_manager/src/ui_theme.dart';
 import 'package:redimos_manager/src/ui_tokens.dart';
 
-import 'fake_core.dart';
 import 'golden_fonts.dart';
 
 const _diagnosticDirectoryVariable = 'REDIMOS_SIDEBAR_DIAGNOSTIC_DIR';
@@ -33,30 +32,31 @@ const _endpoint = DdbEndpoint(
   endpoint: 'http://localhost:8000',
 );
 
-final _stoppedDdb = LocalDdbInfo(
-  config: LocalDdbConfig(),
-  status: 'stopped',
-  pid: 0,
-  uptimeSec: 0,
-  exitMsg: '',
-  restarts: 0,
-  cpuPercent: 0,
-  memBytes: 0,
-  diskPerSec: 0,
-  dockerOk: true,
-  javaOk: true,
-  jarReady: true,
-);
+
+// Stage 12: Service fixtures for the entity sidebar's third branch.
+ServiceInfo _svc(String id, String name,
+        {String engine = 'java', int port = 8000, String state = 'stopped'}) =>
+    ServiceInfo.fromJson({
+      'config': {'id': id, 'name': name, 'engine': engine, 'port': port},
+      'runtime': {
+        'state': state,
+        'ready': state == 'running',
+        'healthy': state == 'running',
+      },
+    });
+
+final _service = _svc('service-1', 'local-ddb');
 
 ChromeState _state({
   required Brightness brightness,
   EntityKind kind = EntityKind.instance,
   String? selectedConfigId,
   String? selectedEndpointId,
+  List<ServiceInfo> services = const [],
+  String? selectedServiceId,
   String? hoveredCardId,
   String entityQuery = '',
   Map<String, InstanceStatus> statuses = const {},
-  LocalDdbInfo? ddb,
 }) =>
     ChromeState(
       entityKind: kind,
@@ -65,12 +65,13 @@ ChromeState _state({
       statuses: statuses,
       selectedConfigId: selectedConfigId,
       selectedEndpointId: selectedEndpointId,
+      services: services,
+      selectedServiceId: selectedServiceId,
       hoveredCardId: hoveredCardId,
       entityQuery: entityQuery,
       tabLabels: const ['Browse'],
       tabIndex: 0,
       stopAllSnapshot: const [],
-      ddb: ddb,
       themeMode:
           brightness == Brightness.dark ? ThemeMode.dark : ThemeMode.light,
       lang: AppLang.en,
@@ -97,7 +98,6 @@ ChromeCallbacks _callbacks({
       onRestoreAll: () {},
       onThemeMode: (_) {},
       onLang: (_) {},
-      onDdbMutated: () {},
     );
 
 Future<void> _pumpSidebar(
@@ -119,7 +119,6 @@ Future<void> _pumpSidebar(
           body: HomeChrome(
             state: state,
             cb: callbacks ?? _callbacks(),
-            core: FakeNativeCore(),
             child: const SizedBox.expand(),
           ),
         ),
@@ -195,7 +194,11 @@ void main() {
       for (final kind in EntityKind.values) {
         final selectedEndpoint =
             kind == EntityKind.endpoint ? _endpoint.id : null;
-        final id = kind == EntityKind.instance ? _config.id : _endpoint.id;
+        final id = switch (kind) {
+          EntityKind.instance => _config.id,
+          EntityKind.endpoint => _endpoint.id,
+          EntityKind.service => _service.id,
+        };
         await _pumpSidebar(
           tester,
           brightness: brightness,
@@ -204,6 +207,9 @@ void main() {
             kind: kind,
             selectedConfigId: kind == EntityKind.instance ? _config.id : null,
             selectedEndpointId: selectedEndpoint,
+            services: kind == EntityKind.service ? [_service] : const [],
+            selectedServiceId:
+                kind == EntityKind.service ? _service.id : null,
           ),
         );
 
@@ -443,49 +449,6 @@ void main() {
     }
   });
 
-  testWidgets('Local DDB expansion snaps once without intermediate reflow',
-      (tester) async {
-    tester.view.physicalSize = const Size(2560, 1600);
-    tester.view.devicePixelRatio = 2;
-    addTearDown(tester.view.reset);
-
-    await _pumpSidebar(
-      tester,
-      brightness: Brightness.dark,
-      state: _state(brightness: Brightness.dark, ddb: _stoppedDdb),
-    );
-
-    List<Rect> geometry() => [
-          tester.getRect(find.byKey(const ValueKey('entity-sidebar'))),
-          tester.getRect(find.byKey(const ValueKey('entity-sidebar-list'))),
-          tester.getRect(find.byKey(const ValueKey('local-ddb-panel'))),
-          tester.getRect(find.byKey(const ValueKey('local-ddb-body'))),
-        ];
-
-    final collapsed = geometry();
-    expect(collapsed.last.height, 0);
-    expect(find.byType(AnimatedSize), findsNothing);
-
-    await tester.tap(find.byKey(const ValueKey('local-ddb-toggle')));
-    await tester.pump();
-    final expanded = geometry();
-    expect(expanded.last.height, greaterThan(0));
-    expect(expanded.first, collapsed.first);
-    expect(expanded[2].bottom, collapsed[2].bottom);
-    expect(expanded[1].bottom, lessThan(collapsed[1].bottom));
-
-    await tester.pump(const Duration(milliseconds: 90));
-    expect(geometry(), expanded);
-    await tester.pump(const Duration(milliseconds: 120));
-    expect(geometry(), expanded);
-
-    await tester.tap(find.byKey(const ValueKey('local-ddb-toggle')));
-    await tester.pump();
-    expect(geometry(), collapsed);
-    await tester.pump(const Duration(milliseconds: 210));
-    expect(geometry(), collapsed);
-    expect(tester.takeException(), isNull);
-  });
 
   testWidgets('sidebar callbacks preserve values and call counts',
       (tester) async {

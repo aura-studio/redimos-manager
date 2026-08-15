@@ -6,9 +6,9 @@ const os = require('os');
 const path = require('path');
 
 const {
+  CAPTURE_SCREENS,
   REQUIRED_PHYSICAL,
   REQUIRED_VIEWPORT,
-  SCREENS,
   THEMES,
   readPngSize,
 } = require('./reference-manifest');
@@ -31,7 +31,9 @@ function sha256File(file) {
 }
 
 function expectedCaptureNames() {
-  return SCREENS.flatMap((screen) =>
+  // Stage 16.2: the capture channel is the full 14-screen set — the 8 golden
+  // screens plus the 6 capture-only Service screens.
+  return CAPTURE_SCREENS.flatMap((screen) =>
     THEMES.map((theme) => `${screen}-${theme}.png`),
   ).sort();
 }
@@ -201,7 +203,7 @@ function finalizeCaptureRun(runDirectory, options = {}) {
     const details = [];
     if (missing.length) details.push(`missing: ${missing.join(', ')}`);
     if (extra.length) details.push(`unexpected: ${extra.join(', ')}`);
-    throw new Error(`Capture set must contain exactly 16 PNGs (${details.join('; ')})`);
+    throw new Error(`Capture set must contain exactly ${expected.length} PNGs (${details.join('; ')})`);
   }
 
   const files = expected.map((name) => {

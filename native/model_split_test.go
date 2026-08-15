@@ -11,13 +11,13 @@ import (
 
 func TestEndpointKind(t *testing.T) {
 	cases := map[string]string{
-		"":                                       "aws",
-		"   ":                                     "aws",
-		"http://localhost:8079":                   "local",
-		"http://127.0.0.1:8000":                   "local",
-		"http://[::1]:8000":                       "local",
+		"":                      "aws",
+		"   ":                   "aws",
+		"http://localhost:8079": "local",
+		"http://127.0.0.1:8000": "local",
+		"http://[::1]:8000":     "local",
 		"https://dynamodb.us-east-1.amazonaws.com": "url",
-		"http://10.0.0.5:8000":                    "url",
+		"http://10.0.0.5:8000":                     "url",
 	}
 	for in, want := range cases {
 		if got := endpointKind(in); got != want {
@@ -129,8 +129,13 @@ func TestLegacyMigration(t *testing.T) {
 	if m.st.Configs[0].Region != "us-east-1" || m.st.Configs[1].Endpoint != "http://localhost:8079" {
 		t.Errorf("legacy load lost backend fields: %+v", m.st.Configs)
 	}
-	if m.st.Settings.RedimosV1Path != "/bin/v1" || !m.st.DdbAutoStart || len(m.st.AutoStart) != 1 {
+	if m.st.Settings.RedimosV1Path != "/bin/v1" || len(m.st.AutoStart) != 1 {
 		t.Errorf("legacy load lost settings/autostart: %+v %+v", m.st.Settings, m.st.AutoStart)
+	}
+	// The legacy singleton lifecycle flag is ignored on load: the Service
+	// collection is the only source of truth for local servers.
+	if m.st.DdbAutoStart {
+		t.Errorf("legacy ddbAutoStart must be ignored on load")
 	}
 
 	// Persist rewrites in the split shape.

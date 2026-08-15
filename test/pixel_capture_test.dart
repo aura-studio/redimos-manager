@@ -2,7 +2,10 @@
 // capture channel for the pixel-diff pipeline (tool/pixel-diff/). Renders the
 // same 8 screens with the same fixtures and pump sequences as
 // golden_screens_test.dart (via screen_fixtures.dart) and writes PNGs for
-// tool/pixel-diff/diff.js. The golden assertions themselves are untouched.
+// tool/pixel-diff/diff.js; stage 16.1 adds 6 Service-entity candidates
+// (empty / Overview running / Overview failed / Monitor / Logs / Configure)
+// that have no golden counterpart — capture-only deterministic fixtures. The
+// golden assertions themselves are untouched.
 //
 // CP 9.x: captures are wrapped in the app's REAL chrome (HomeChrome — rail /
 // entity sidebar / top bar / mid bar / status bar) so the full-frame PNGs can
@@ -12,9 +15,7 @@
 // untouched). Known accepted divergences from the mockups (recorded in
 // out/convergence-plan.md): status bar right side ('db0 · redimos' vs the
 // mockup's SCAN/keys/latency cluster), endpoint card sub-lines (':port ·
-// AWS/host' vs the mockup's 'host:port', no item counts), and the LocalDdbPanel
-// dock row
-// (post-mockup product feature).
+// AWS/host' vs the mockup's 'host:port', no item counts).
 //
 // Why fixed pump sequences instead of pumpAndSettle: LogsPage runs a 1200ms
 // periodic timer, so pumpAndSettle would never settle; the fixture pumps are
@@ -165,6 +166,18 @@ const _captureEpLegacy = DdbEndpoint(
     kind: 'url',
     endpoint: 'redis://10.0.1.7:6379');
 
+/// Second Service card (stage 16.1): a stopped localstack engine, so the
+/// Service sidebar capture shows one live and one cold card side by side.
+ServiceInfo _captureSvcLocalstack() => ServiceInfo.fromJson({
+      'config': {
+        'id': 'svc-2',
+        'name': 'localstack-core',
+        'engine': 'localstack',
+        'port': 4566,
+      },
+      'runtime': {'state': 'stopped'},
+    });
+
 // No-op callbacks: the capture channel never taps the chrome.
 void _noopEntityKind(EntityKind k) {}
 void _noopSelectConfig(RedimosConfig c) {}
@@ -190,7 +203,6 @@ const _captureCb = ChromeCallbacks(
   onRestoreAll: _noop,
   onThemeMode: _noopThemeMode,
   onLang: _noopLang,
-  onDdbMutated: _noop,
 );
 
 List<String> get _instTabLabels => [
@@ -209,9 +221,19 @@ List<String> get _epTabLabels => [
       tr('tab.playground'),
     ];
 
+/// Stage 16.1: mirrors HomePage._serviceTabKeys — the Service detail's four
+/// fixed screens.
+List<String> get _serviceTabLabels => [
+      tr('tab.overview'),
+      tr('tab.monitor'),
+      tr('tab.logs'),
+      tr('tab.configure'),
+    ];
+
 /// Build the chrome wrapper for one capture. Instance screens: the selected
 /// instance card (c1) + its MidBar index. Endpoint screens: the selected
-/// endpoint (e1) + its screen index.
+/// endpoint (e1) + its screen index. Service screens (stage 16.1): the
+/// selected Service card (svc-1) + its tab index.
 Widget Function(Widget) _captureChrome({
   required bool dark,
   required EntityKind kind,
@@ -219,6 +241,8 @@ Widget Function(Widget) _captureChrome({
   required int tabIndex,
   String? selectedConfigId = 'c1',
   String? selectedEndpointId,
+  List<ServiceInfo> services = const [],
+  String? selectedServiceId,
   Widget? midBarCta,
 }) {
   return (content) => HomeChrome(
@@ -234,17 +258,17 @@ Widget Function(Widget) _captureChrome({
           statuses: {'c1': fx.fixtureStatus()},
           selectedConfigId: selectedConfigId,
           selectedEndpointId: selectedEndpointId,
+          services: services,
+          selectedServiceId: selectedServiceId,
           hoveredCardId: null,
           entityQuery: '',
           tabLabels: tabLabels,
           tabIndex: tabIndex,
           stopAllSnapshot: const [],
-          ddb: null, // collapsed dock row (mockups predate this feature)
           themeMode: dark ? ThemeMode.dark : ThemeMode.light,
           lang: AppLang.en,
         ),
         cb: _captureCb,
-        core: fx.fakeCore,
         midBarCta: midBarCta,
         child: content,
       );
@@ -391,6 +415,126 @@ void main() {
           selectedConfigId: null,
           selectedEndpointId: 'e1',
           midBarCta: _cta(Icons.add, 'Item'),
+        ),
+      ),
+    );
+
+    // Stage 16.1: Service entity candidates — empty list, Overview in the
+    // running and failed lifecycle states, Monitor, Logs, Configure.
+    testWidgets(
+      'capture svc-empty $theme',
+      (t) => _capture(
+        t,
+        'svc-empty',
+        dark,
+        fx.pumpSvcEmpty,
+        chrome: _captureChrome(
+          dark: dark,
+          kind: EntityKind.service,
+          tabLabels: _serviceTabLabels,
+          tabIndex: 0,
+          selectedConfigId: null,
+          selectedEndpointId: null,
+        ),
+      ),
+    );
+
+    testWidgets(
+      'capture svc-overview-running $theme',
+      (t) => _capture(
+        t,
+        'svc-overview-running',
+        dark,
+        fx.pumpSvcOverviewRunning,
+        chrome: _captureChrome(
+          dark: dark,
+          kind: EntityKind.service,
+          tabLabels: _serviceTabLabels,
+          tabIndex: 0,
+          selectedConfigId: null,
+          selectedEndpointId: null,
+          services: [fx.fixtureServiceRunning(), _captureSvcLocalstack()],
+          selectedServiceId: 'svc-1',
+        ),
+      ),
+    );
+
+    testWidgets(
+      'capture svc-overview-failed $theme',
+      (t) => _capture(
+        t,
+        'svc-overview-failed',
+        dark,
+        fx.pumpSvcOverviewFailed,
+        chrome: _captureChrome(
+          dark: dark,
+          kind: EntityKind.service,
+          tabLabels: _serviceTabLabels,
+          tabIndex: 0,
+          selectedConfigId: null,
+          selectedEndpointId: null,
+          services: [fx.fixtureServiceFailed(), _captureSvcLocalstack()],
+          selectedServiceId: 'svc-1',
+        ),
+      ),
+    );
+
+    testWidgets(
+      'capture svc-monitor $theme',
+      (t) => _capture(
+        t,
+        'svc-monitor',
+        dark,
+        fx.pumpSvcMonitor,
+        chrome: _captureChrome(
+          dark: dark,
+          kind: EntityKind.service,
+          tabLabels: _serviceTabLabels,
+          tabIndex: 1,
+          selectedConfigId: null,
+          selectedEndpointId: null,
+          services: [fx.fixtureServiceRunning(), _captureSvcLocalstack()],
+          selectedServiceId: 'svc-1',
+        ),
+      ),
+    );
+
+    testWidgets(
+      'capture svc-logs $theme',
+      (t) => _capture(
+        t,
+        'svc-logs',
+        dark,
+        fx.pumpSvcLogs,
+        chrome: _captureChrome(
+          dark: dark,
+          kind: EntityKind.service,
+          tabLabels: _serviceTabLabels,
+          tabIndex: 2,
+          selectedConfigId: null,
+          selectedEndpointId: null,
+          services: [fx.fixtureServiceRunning(), _captureSvcLocalstack()],
+          selectedServiceId: 'svc-1',
+        ),
+      ),
+    );
+
+    testWidgets(
+      'capture svc-configure $theme',
+      (t) => _capture(
+        t,
+        'svc-configure',
+        dark,
+        fx.pumpSvcConfig,
+        chrome: _captureChrome(
+          dark: dark,
+          kind: EntityKind.service,
+          tabLabels: _serviceTabLabels,
+          tabIndex: 3,
+          selectedConfigId: null,
+          selectedEndpointId: null,
+          services: [fx.fixtureServiceRunning(), _captureSvcLocalstack()],
+          selectedServiceId: 'svc-1',
         ),
       ),
     );

@@ -23,7 +23,6 @@ import "C"
 
 import (
 	"archive/zip"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -693,105 +692,16 @@ func (m *manager) ddbStop() error {
 // ---------------------------------------------------------------------------
 
 //export rm_ddb_get
-func rm_ddb_get() *C.char {
-	mgr.mu.Lock()
-	cfg := normalizeDdb(mgr.st.LocalDdb)
-	in := mgr.ddb
-	mgr.mu.Unlock()
-
-	_, dockerOK := dockerBin()
-	_, javaOK := javaBin()
-	javaDir := mgr.ddbJavaDir()
-
-	st := map[string]any{"status": "stopped", "probeOk": false, "latencyMs": 0.0}
-	if in != nil {
-		in.mu.Lock()
-		st = map[string]any{
-			"status":     in.status,
-			"pid":        in.pid,
-			"port":       in.port,
-			"exitMsg":    in.exitMsg,
-			"restarts":   in.restarts,
-			"cpuPercent": in.cpuPercent,
-			"memBytes":   in.memBytes,
-			"diskPerSec": in.diskPerSec,
-			"adopted":    in.adopted,
-			"uptimeSec":  0,
-			// Measured RTT of a synthetic ListTables, NOT a scraped server-side
-			// average like the redimos tiles' avgLatencyMs — the local engines
-			// expose no metrics endpoint. Gated on "running" like the redimos
-			// side: terminate() leaves the last sample in place, so an ungated
-			// read would report a dead child's RTT.
-			"probeOk":   false,
-			"latencyMs": 0.0,
-		}
-		if in.status == "running" {
-			st["uptimeSec"] = int64(time.Since(in.started).Seconds())
-			st["probeOk"] = in.ddbProbeOK
-			st["latencyMs"] = in.ddbLatencyMs
-		}
-		in.mu.Unlock()
-	}
-	return cjson(map[string]any{
-		"config": cfg,
-		"status": st,
-		"detect": map[string]any{
-			"docker":   dockerOK,
-			"java":     javaOK,
-			"jarReady": ddbJarReady(javaDir),
-			"javaDir":  javaDir,
-		},
-	})
-}
+func rm_ddb_get() *C.char { return cjson(legacyUnsupported()) }
 
 //export rm_ddb_set
-func rm_ddb_set(in *C.char) *C.char {
-	var cfg LocalDdbConfig
-	if err := json.Unmarshal([]byte(C.GoString(in)), &cfg); err != nil {
-		return errJSON(err)
-	}
-	switch cfg.Engine {
-	case "java", "docker", "localstack":
-	default:
-		return errJSON(fmt.Errorf("engine must be java|docker|localstack"))
-	}
-	if cfg.Port < 0 || cfg.Port > 65535 {
-		return errJSON(fmt.Errorf("port must be 0..65535"))
-	}
-	mgr.mu.Lock()
-	mgr.st.LocalDdb = cfg
-	err := mgr.persist()
-	mgr.mu.Unlock()
-	if err != nil {
-		return errJSON(err)
-	}
-	return okJSON(nil)
-}
+func rm_ddb_set(in *C.char) *C.char { return cjson(legacyUnsupported()) }
 
 //export rm_ddb_start
-func rm_ddb_start() *C.char {
-	if err := mgr.ddbStart(); err != nil {
-		return errJSON(err)
-	}
-	// User-initiated (re)start: once the backend is ready, restart the redimos
-	// instances that depend on it so they reconnect instead of being stuck on
-	// "backend error". (autoStartAll's boot restore calls ddbStart directly and
-	// deliberately skips this — nothing is running yet to reconnect.)
-	mgr.mu.Lock()
-	port := normalizeDdb(mgr.st.LocalDdb).Port
-	mgr.mu.Unlock()
-	go mgr.afterDdbReady(port, mgr.restartLocalDdbDependents)
-	return okJSON(nil)
-}
+func rm_ddb_start() *C.char { return cjson(legacyUnsupported()) }
 
 //export rm_ddb_stop
-func rm_ddb_stop() *C.char {
-	mgr.rememberDdbAutoStart(false) // USER stop → don't restore Local DynamoDB next launch
-	if err := mgr.ddbStop(); err != nil {
-		return errJSON(err)
-	}
-	return okJSON(nil)
-}
+func rm_ddb_stop() *C.char { return cjson(legacyUnsupported()) }
 
 // rm_shutdown terminates every managed child — redimos instances and the Local
 // DynamoDB backend — so nothing is left orphaned when the app quits. Called from
@@ -811,12 +721,4 @@ func rm_shutdown() *C.char {
 }
 
 //export rm_ddb_logs
-func rm_ddb_logs() *C.char {
-	mgr.mu.Lock()
-	in := mgr.ddb
-	mgr.mu.Unlock()
-	if in == nil {
-		return cjson(map[string]any{"lines": []string{}})
-	}
-	return cjson(map[string]any{"lines": in.snapshotLogs()})
-}
+func rm_ddb_logs() *C.char { return cjson(legacyUnsupported()) }

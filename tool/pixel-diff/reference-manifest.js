@@ -14,6 +14,19 @@ const SCREENS = Object.freeze([
   'ep-overview',
   'ep-browser',
 ]);
+// Stage 16.2: capture-only Service-entity screens. They participate in the
+// capture channel and noise-floor measurement but OWN NO reference baseline:
+// they can only ever be candidates, so the acceptance baseline below stays
+// exactly SCREENS × THEMES.
+const SERVICE_SCREENS = Object.freeze([
+  'svc-empty',
+  'svc-overview-running',
+  'svc-overview-failed',
+  'svc-monitor',
+  'svc-logs',
+  'svc-configure',
+]);
+const CAPTURE_SCREENS = Object.freeze([...SCREENS, ...SERVICE_SCREENS]);
 const THEMES = Object.freeze(['light', 'dark']);
 const APPROVALS = Object.freeze(['candidate', 'approved', 'rejected']);
 const REQUIRED_VIEWPORT = Object.freeze({
@@ -362,8 +375,8 @@ function validateReferenceManifest(manifest, options = {}) {
         return;
       }
       hasKeys(entry, ['id', 'theme', 'file', 'source', 'approval', 'regions'], fieldPath, issues);
-      if (!SCREENS.includes(entry.id)) {
-        issues.push(issue('invalid-screen', `${fieldPath}.id`, `must be one of ${SCREENS.join(', ')}`));
+      if (!CAPTURE_SCREENS.includes(entry.id)) {
+        issues.push(issue('invalid-screen', `${fieldPath}.id`, `must be one of ${CAPTURE_SCREENS.join(', ')}`));
       }
       if (!THEMES.includes(entry.theme)) {
         issues.push(issue('invalid-theme', `${fieldPath}.theme`, 'must be light or dark'));
@@ -380,7 +393,7 @@ function validateReferenceManifest(manifest, options = {}) {
 
       if (
         nonEmptyString(entry.file) &&
-        SCREENS.includes(entry.id) &&
+        CAPTURE_SCREENS.includes(entry.id) &&
         THEMES.includes(entry.theme)
       ) {
         const expectedName = `${entry.id}-${entry.theme}.png`;
@@ -452,8 +465,11 @@ function validateReferenceManifest(manifest, options = {}) {
           }
         }
       }
+      // The approved baseline is exactly SCREENS × THEMES: capture-only
+      // Service screens can never join it (they have no approved reference),
+      // so any extra entry fails coverage here.
       if (manifest.screens.length !== SCREENS.length * THEMES.length) {
-        issues.push(issue('wrong-coverage', 'screens', `expected exactly 16 entries, received ${manifest.screens.length}`));
+        issues.push(issue('wrong-coverage', 'screens', `expected exactly ${SCREENS.length * THEMES.length} entries, received ${manifest.screens.length}`));
       }
     }
   }
@@ -504,10 +520,12 @@ if (require.main === module) {
 
 module.exports = {
   APPROVALS,
+  CAPTURE_SCREENS,
   ManifestValidationError,
   REQUIRED_PHYSICAL,
   REQUIRED_VIEWPORT,
   SCREENS,
+  SERVICE_SCREENS,
   THEMES,
   loadReferenceManifest,
   readPngSize,

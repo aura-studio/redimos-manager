@@ -110,10 +110,19 @@ function fullPngBuffer() {
 function writeRun(activeRoot, manifest, runNumber, overrides = {}) {
   const runDir = path.join(activeRoot, 'captures', `run-${runNumber}`);
   fs.mkdirSync(runDir, { recursive: true });
-  const entry = manifest.screens[0];
-  const name = `${entry.id}-${entry.theme}.png`;
-  const file = path.join(runDir, name);
-  fs.writeFileSync(file, fullPngBuffer());
+  const files = [];
+  for (const entry of manifest.screens) {
+    const name = `${entry.id}-${entry.theme}.png`;
+    const file = path.join(runDir, name);
+    fs.writeFileSync(file, fullPngBuffer());
+    files.push({
+      screen: entry.id,
+      theme: entry.theme,
+      file: name,
+      ...PHYSICAL,
+      sha256: sha256(file),
+    });
+  }
   const metadata = {
     schemaVersion: 2,
     referenceVersion: manifest.referenceVersion,
@@ -126,13 +135,7 @@ function writeRun(activeRoot, manifest, runNumber, overrides = {}) {
     buildRevision: 'b'.repeat(64),
     fontRevision: 'c'.repeat(64),
     fonts: [{ id: 'Inter-Variable.ttf', source: 'bundled', sha256: 'd'.repeat(64) }],
-    files: [{
-      screen: entry.id,
-      theme: entry.theme,
-      file: name,
-      ...PHYSICAL,
-      sha256: sha256(file),
-    }],
+    files,
     ...overrides,
   };
   const metadataPath = path.join(runDir, 'capture-metadata.json');
@@ -319,4 +322,44 @@ test('complete measurement writes one pending report and refuses overwrite', (t)
     () => measureNoiseFloor({ manifestPath: fixture.manifestPath }),
     /Refusing to overwrite existing noise report/,
   );
+});
+
+test('noise measurement covers capture-only Service screens without blessing references, thresholds, or archive', (t) => {
+  const fixture = completeFixture(t);
+  // Stage 16.2: the manifest gains capture-only Service candidates. They
+  // must flow through the same-build pairwise measurement exactly like the
+  // golden screens — without any side effect on references or approvals.
+  fixture.manifest.screens.push({
+    id: 'svc-empty',
+    theme: 'light',
+    file: 'references/svc-empty-light.png',
+    source: 'stage-16.1-deterministic-service-fixtures-capture-only',
+    approval: 'candidate',
+    regions: [{ id: 'sample', x: 0, y: 0, width: 1280, height: 800 }],
+  });
+  fs.writeFileSync(fixture.manifestPath, `${JSON.stringify(fixture.manifest, null, 2)}\n`);
+  // Rebuild the runs so every declared screen (now two) has a capture.
+  fs.rmSync(path.join(fixture.activeRoot, 'captures'), { recursive: true, force: true });
+  for (const runNumber of fixture.manifest.noiseMeasurement.runNumbers) {
+    writeRun(fixture.activeRoot, fixture.manifest, runNumber);
+  }
+
+  const result = measureNoiseFloor({ manifestPath: fixture.manifestPath });
+
+  const pairKeys = result.report.pairs.map((pair) => `${pair.screen}:${pair.theme}`);
+  assert.deepEqual(pairKeys.sort(), ['inst-browse:light', 'svc-empty:light']);
+  for (const pair of result.report.pairs) {
+    assert.equal(pair.fullFrameDiffRatio.measuredNoiseFloor, 0);
+  }
+  // Nothing is blessed: the report stays pending, the manifest on disk keeps
+  // its candidate approvals, references/ stays empty, and no archive appears.
+  assert.equal(result.report.thresholdApproval, 'pending');
+  assert.equal(result.report.legacyV23ThresholdImported, false);
+  const onDisk = JSON.parse(fs.readFileSync(fixture.manifestPath, 'utf8'));
+  assert.ok(onDisk.screens.every((entry) => entry.approval === 'candidate'));
+  assert.equal(onDisk.noiseMeasurement.thresholdApproval, 'pending');
+  assert.deepEqual(fs.readdirSync(path.join(fixture.activeRoot, 'references')), []);
+  assert.ok(!fs.existsSync(path.join(fixture.activeRoot, 'v2.3-archive')));
+  // Only the report itself was written, under reports/.
+  assert.ok(result.reportPath.startsWith(path.join(fixture.activeRoot, 'reports')));
 });

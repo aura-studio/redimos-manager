@@ -94,8 +94,13 @@ type Formatter struct {
 }
 
 type store struct {
-	Configs  []Config       `json:"configs"`
-	Settings Settings       `json:"settings"`
+	Configs  []Config `json:"configs"`
+	Settings Settings `json:"settings"`
+	// LocalDdb/DdbAutoStart are the legacy single-instance Local DynamoDB
+	// fields. They are no longer read from or written to disk — the Service
+	// collection is the only source of truth for local servers — and the
+	// in-memory copies exist only until the legacy rm_ddb_* call chain is
+	// removed.
 	LocalDdb LocalDdbConfig `json:"localDdb"`
 	// Custom value formatters for the Browser (persisted independently of
 	// Settings so the settings page can't clobber them).
@@ -104,10 +109,16 @@ type store struct {
 	// the next launch relaunches exactly what was running last time (survives a
 	// clean quit AND a crash). See autoStartAll.
 	AutoStart    []string `json:"autoStart"`    // config IDs to relaunch on boot
-	DdbAutoStart bool     `json:"ddbAutoStart"` // relaunch Local DynamoDB on boot
+	DdbAutoStart bool     `json:"ddbAutoStart"` // legacy; no longer persisted
 	// The configs that were running when the user last hit the AppBar "Stop all",
 	// persisted so the green "restore" affordance survives an app restart.
 	StopAllSnapshot []string `json:"stopAllSnapshot"`
+	// First-class local DynamoDB servers (Services), keyed by immutable ID.
+	// Supersedes the legacy LocalDdb singleton.
+	Services []ServiceConfig `json:"services"`
+	// Typed Stop All snapshot (Instance + Service ID namespaces); supersedes
+	// StopAllSnapshot. The legacy array is migrated read-only on load.
+	StopAllSnapshotV2 GlobalStopSnapshot `json:"stopAllSnapshotV2"`
 }
 
 // ---------------------------------------------------------------------------
@@ -120,7 +131,7 @@ const maxLogLines = 800
 // guard so an always-crashing instance stops retrying instead of spinning forever.
 var restartBackoff = []time.Duration{time.Second, 2 * time.Second, 5 * time.Second, 10 * time.Second, 30 * time.Second}
 
-const crashLoopMax = 5                  // give up after this many consecutive early exits
+const crashLoopMax = 5                 // give up after this many consecutive early exits
 const healthyUptime = 20 * time.Second // a child that stays up this long counts as "started OK"
 
 type instance struct {
@@ -129,10 +140,10 @@ type instance struct {
 	pid        int
 	startMicro int64 // process start-time identity of pid (0 = docker/unknown)
 	port       int
-	role       string // registry key: "config:<id>" | "ddb"
-	started time.Time
-	status  string // "running" | "restarting" | "stopped" | "error" | "failed"
-	exitMsg string
+	role       string // registry key: "config:<id>" | "ddb" | "service:<id>"
+	started    time.Time
+	status     string // "running" | "restarting" | "stopped" | "error" | "failed"
+	exitMsg    string
 	// failReason is the real cause of a startup/early failure (redimos's own fatal
 	// line, e.g. the backend startup check), set only on an errored early exit and
 	// cleared on a clean/healthy exit or a successful start — so benign lifecycle
@@ -144,6 +155,7 @@ type instance struct {
 	bin        string
 	launchArgs []string
 	launchEnv  []string
+	wd         string // working directory for the child ("" = inherit manager's)
 	container  string // docker container name when the child runs containerised ("" = plain process)
 
 	// Lifetime policy. A detached child deliberately SURVIVES manager death so
@@ -161,6 +173,12 @@ type instance struct {
 	failCount    int         // consecutive early exits (never stayed up healthyUptime)
 	restartTimer *time.Timer // pending backoff timer; cancelled by terminate()
 
+	// superviseWG counts the live supervise goroutines for this child (one per
+	// spawn generation; a restart arms a fresh one; an adopted child counts its
+	// exit watcher instead). Tests join it so teardown never races the
+	// terminal-exit bookkeeping (registry removal etc.).
+	superviseWG sync.WaitGroup
+
 	// Monitoring (filled by the sampler loop).
 	cpuPercent   float64       // % of all cores, Task-Manager style
 	memBytes     uint64        // working set
@@ -170,10 +188,10 @@ type instance struct {
 	prevSampleAt time.Time
 
 	// redimos /metrics scraping (filled by the scraper loop).
-	metricsAddr  string    // resolved reachable host:port ("" until discovered)
-	mtxOK        bool      // last scrape reached the endpoint
-	mtxHealthy   bool      // /healthz == 200
-	mtxReady     bool      // /readyz == 200
+	metricsAddr string // resolved reachable host:port ("" until discovered)
+	mtxOK       bool   // last scrape reached the endpoint
+	mtxHealthy  bool   // /healthz == 200
+	mtxReady    bool   // /readyz == 200
 	// backendError is redimos's own reported cause for a failing backend check,
 	// read from the /readyz body. Empty whenever redimos does not report one — a
 	// ready proxy, an unreachable endpoint, or a redimos too old to carry the field
@@ -229,6 +247,27 @@ type manager struct {
 	// that config id — used by table recreate so redimos rebuilds the table on
 	// restart regardless of the config's persisted AutoCreate setting. Guarded by mu.
 	forceAC map[string]bool
+
+	// Diagnostics from decoding the persisted services collection (corrupt or
+	// conflicting entries skipped at load). Written once during load — before
+	// this manager is published as mgr — and read-only afterwards.
+	serviceLoadErrors []string
+
+	// One-time notice set at boot when a legacy pre-1.2 singleton Local
+	// DynamoDB child was stopped instead of adopted (7.9). Guarded by mu;
+	// surfaced to the UI through the ABI (stage 9).
+	legacyDdbMigrationNotice string
+
+	// Multi-Service runtime registry, keyed by immutable Service ID. See
+	// service_runtime.go for the lock discipline (svcMu guards membership only;
+	// per-Service opMu serializes lifecycle ops without touching this lock).
+	svcMu sync.Mutex
+	svc   map[string]*serviceRuntime
+
+	// Auto-start (recovery) failures recorded by svcAutoStartAll, one entry per
+	// affected Service. Guarded by mu; surfaced through rm_services' errors[]
+	// (7.6, stage 9).
+	svcRecoveryErrs []string
 }
 
 // mgr is populated by init() (a var initializer would reject the newManager →
@@ -268,6 +307,10 @@ func newManager() *manager {
 		// Session restore: relaunch whatever was running last time but didn't
 		// survive as an adopted child. Async so it never blocks dylib load.
 		go m.autoStartAll()
+		// Service restore runs AFTER the reconcile claim pass (adoption above):
+		// every desiredRunning Service not adopted starts independently, and
+		// one Service's failure never blocks another.
+		go m.svcAutoStartAll()
 	}
 	go m.samplerLoop()
 	go m.scraperLoop()
@@ -345,6 +388,12 @@ func (m *manager) samplerLoop() {
 }
 
 func defaultStorePath() string {
+	// REDIMOS_STORE_PATH relocates ALL on-disk state (store, registry, instance
+	// lock, managed Service data) — used by the C ABI smoke test so it never
+	// touches the live ~/.redimos state. Empty/unset keeps the default.
+	if p := os.Getenv("REDIMOS_STORE_PATH"); p != "" {
+		return p
+	}
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
 		home, _ = os.Getwd()
@@ -364,17 +413,37 @@ func (m *manager) load() {
 		return
 	}
 	m.st.Settings = d.Settings
-	m.st.LocalDdb = d.LocalDdb
 	m.st.Formatters = d.Formatters
 	m.st.AutoStart = d.AutoStart
-	m.st.DdbAutoStart = d.DdbAutoStart
 	m.st.StopAllSnapshot = d.StopAllSnapshot
+	// Legacy singleton fields (localDdb / ddbAutoStart) are intentionally NOT
+	// decoded: the Service collection is the sole source of truth for local
+	// servers, and legacy lifecycle state is never combined with it.
+	//
+	// Typed Stop All snapshot: prefer the new key; read-only migrate the legacy
+	// string array (Instance IDs only) when the new key is absent, so no
+	// snapshot data is discarded by the upgrade.
+	if d.StopAllSnapshotV2 != nil {
+		m.st.StopAllSnapshotV2 = *d.StopAllSnapshotV2
+	} else if len(d.StopAllSnapshot) > 0 {
+		m.st.StopAllSnapshotV2 = GlobalStopSnapshot{
+			Instances: append([]string(nil), d.StopAllSnapshot...),
+		}
+	}
 	// Prefer the split form; fall back to a legacy pre-1.2 configs[] (rewritten
 	// in the new shape on the next persist).
 	if len(d.Instances) > 0 || len(d.Endpoints) > 0 {
 		m.st.Configs = mergeToConfigs(d.Endpoints, d.Instances)
 	} else {
 		m.st.Configs = d.Configs
+	}
+	// Services decode independently of the entities above: a corrupt services
+	// collection must not wipe endpoints/instances/settings.
+	m.st.Services, m.serviceLoadErrors = decodeServices(b)
+	// Every loaded Service gets its runtime carrier so lifecycle ops can find
+	// it by ID; process state itself is rebuilt by reconcile/adoption.
+	for i := range m.st.Services {
+		m.svcEnsureRuntime(m.st.Services[i].ID)
 	}
 }
 
@@ -389,13 +458,23 @@ func (m *manager) persist() error {
 		// new build falls back to configs[] cleanly.
 		Configs:         m.st.Configs,
 		Settings:        m.st.Settings,
-		LocalDdb:        m.st.LocalDdb,
 		Formatters:      m.st.Formatters,
 		AutoStart:       m.st.AutoStart,
-		DdbAutoStart:    m.st.DdbAutoStart,
 		StopAllSnapshot: m.st.StopAllSnapshot,
 	}
-	b, err := json.MarshalIndent(d, "", "  ")
+	// The legacy singleton fields (localDdb / ddbAutoStart) are never written.
+	if !m.st.StopAllSnapshotV2.empty() {
+		snap := m.st.StopAllSnapshotV2
+		d.StopAllSnapshotV2 = &snap
+	}
+	// The services collection rides alongside diskStore but is declared here,
+	// not on diskStore, so a corrupt services array can never break the decode
+	// of the other entities.
+	out := struct {
+		diskStore
+		Services []ServiceConfig `json:"services,omitempty"`
+	}{diskStore: d, Services: m.st.Services}
+	b, err := json.MarshalIndent(out, "", "  ")
 	if err != nil {
 		return err
 	}
@@ -669,6 +748,9 @@ func (in *instance) spawn() error {
 		_ = exec.Command(in.bin, "rm", "-f", in.container).Run()
 	}
 	cmd := exec.Command(in.bin, in.launchArgs...)
+	if in.wd != "" {
+		cmd.Dir = in.wd
+	}
 	// Sentinel env marker: identifies the child as ours to `ps -E`-style
 	// inspection even when the registry is lost (docker CLI children carry it
 	// too, though the container itself is identified by label instead).
@@ -745,7 +827,11 @@ func (in *instance) spawn() error {
 
 	go pump(stdout, in)
 	go pump(stderr, in)
-	go func(started time.Time) { in.superviseExit(cmd.Wait(), time.Since(started)) }(in.started)
+	in.superviseWG.Add(1)
+	go func(started time.Time) {
+		defer in.superviseWG.Done()
+		in.superviseExit(cmd.Wait(), time.Since(started))
+	}(in.started)
 	return nil
 }
 
@@ -1034,14 +1120,25 @@ func (m *manager) livePids() map[int]bool {
 }
 
 // livePidsLocked is livePids for callers that already hold m.mu (e.g. start()).
+// It additionally takes m.svcMu: safe, because no path takes svcMu and then
+// m.mu (see the lock discipline in service_runtime.go). Service children count
+// as live: they are detached and carry the spawn sentinel, so without them the
+// orphan sweeps would kill a Service this session adopted or started.
 func (m *manager) livePidsLocked() map[int]bool {
-	ins := make([]*instance, 0, len(m.running)+1)
+	ins := make([]*instance, 0, len(m.running)+len(m.svc)+1)
 	for _, in := range m.running {
 		ins = append(ins, in)
 	}
 	if m.ddb != nil {
 		ins = append(ins, m.ddb)
 	}
+	m.svcMu.Lock()
+	for _, rt := range m.svc {
+		if rt.inst != nil {
+			ins = append(ins, rt.inst)
+		}
+	}
+	m.svcMu.Unlock()
 	out := map[int]bool{}
 	for _, in := range ins {
 		in.mu.Lock()
@@ -1073,62 +1170,26 @@ func (m *manager) stopAll() {
 	wg.Wait()
 }
 
-// stopAllSnapshot is the AppBar "Stop all" action (distinct from the plain
-// stopAll used by app quit). It records which configs are currently running —
-// persisted, so the green "restore" affordance survives an app restart — and
-// clears the boot-restore set, because an explicit Stop all should stay stopped
-// on the next launch (a clean quit, by contrast, keeps AutoStart and resumes).
-// Local DynamoDB is left alone. Returns the snapshot (ids that were running).
+// stopAllSnapshot is the legacy AppBar "Stop all" entry point. It delegates to
+// the unified Instance+Service path and reports only the Instance half of the
+// snapshot (the pre-Service ABI shape); the typed snapshot is persisted by the
+// unified path. Replaced wholesale by the Stage-9 ABI.
 func (m *manager) stopAllSnapshot() []string {
-	m.mu.Lock()
-	snap := make([]string, 0, len(m.running))
-	for i := range m.st.Configs { // stable config order
-		id := m.st.Configs[i].ID
-		in, ok := m.running[id]
-		if !ok {
-			continue
-		}
-		in.mu.Lock()
-		active := in.status == "running" || in.status == "restarting" || in.status == "preparing"
-		in.mu.Unlock()
-		if active {
-			snap = append(snap, id)
-		}
-	}
-	m.st.StopAllSnapshot = append([]string{}, snap...)
-	m.st.AutoStart = nil // explicit Stop all: don't auto-resume configs next boot
-	_ = m.persist()
-	ins := make([]*instance, 0, len(m.running))
-	for _, in := range m.running {
-		ins = append(ins, in)
-	}
-	m.mu.Unlock()
-
-	var wg sync.WaitGroup
-	for _, in := range ins {
-		wg.Add(1)
-		go func(in *instance) { defer wg.Done(); in.terminate() }(in)
-	}
-	wg.Wait()
-	return snap
+	return m.stopAllUnified().Snapshot.Instances
 }
 
-// restoreAll is the AppBar green "restore" action: start every config recorded by
-// the last Stop all, then clear the snapshot. start() re-adds each to the boot
-// set. Returns the ids actually (re)started (already-running ones are skipped).
+// restoreAll is the legacy AppBar green "restore" entry point. It delegates to
+// the unified restore and reports only the restored Instance IDs (the
+// pre-Service ABI shape). Replaced wholesale by the Stage-9 ABI.
 func (m *manager) restoreAll() []string {
-	m.mu.Lock()
-	ids := append([]string{}, m.st.StopAllSnapshot...)
-	m.st.StopAllSnapshot = nil
-	_ = m.persist()
-	m.mu.Unlock()
-	started := make([]string, 0, len(ids))
-	for _, id := range ids {
-		if err := m.start(id); err == nil {
-			started = append(started, id)
+	res := m.restoreAllUnified()
+	out := make([]string, 0, len(res.Restored))
+	for _, e := range res.Restored {
+		if e.Kind == entityKindInstance {
+			out = append(out, e.ID)
 		}
 	}
-	return started
+	return out
 }
 
 type statusRow struct {
@@ -1258,12 +1319,14 @@ func rm_load() *C.char {
 	// hasn't migrated to the split model yet.
 	eps, insts := splitConfigs(mgr.st.Configs)
 	out := map[string]any{
-		"configs":         mgr.st.Configs,
-		"endpoints":       eps,
-		"instances":       insts,
-		"settings":        mgr.st.Settings,
-		"localDdb":        mgr.st.LocalDdb,
-		"stopAllSnapshot": mgr.st.StopAllSnapshot,
+		"configs":           mgr.st.Configs,
+		"endpoints":         eps,
+		"instances":         insts,
+		"settings":          mgr.st.Settings,
+		"localDdb":          mgr.st.LocalDdb,
+		"stopAllSnapshot":   mgr.st.StopAllSnapshot,
+		"stopAllSnapshotV2": mgr.st.StopAllSnapshotV2,
+		"services":          mgr.st.Services,
 	}
 	if mgr.lockErr != nil {
 		out["lockError"] = mgr.lockErr.Error()
@@ -1387,15 +1450,32 @@ func rm_stop(in *C.char) *C.char {
 
 //export rm_stop_all
 func rm_stop_all() *C.char {
-	return cjson(map[string]any{"ok": true, "snapshot": mgr.stopAllSnapshot()})
+	res := mgr.stopAllUnified()
+	return cjson(map[string]any{
+		"ok":       true,
+		"snapshot": res.Snapshot.Instances, // legacy shape during the migration
+		"result":   res,                    // typed: snapshot{instances,services} + stopped/failed
+	})
 }
 
-// rm_restore_all starts every config recorded by the last Stop all (the green
-// "restore" affordance) and clears the snapshot.
+// rm_restore_all restarts everything recorded by the last Stop all (the green
+// "restore" affordance). Successful and missing entities drop from the
+// snapshot; failed ones stay for retry (8.3, 8.4).
 //
 //export rm_restore_all
 func rm_restore_all() *C.char {
-	return cjson(map[string]any{"ok": true, "started": mgr.restoreAll()})
+	res := mgr.restoreAllUnified()
+	started := make([]string, 0, len(res.Restored))
+	for _, e := range res.Restored {
+		if e.Kind == entityKindInstance {
+			started = append(started, e.ID)
+		}
+	}
+	return cjson(map[string]any{
+		"ok":      true,
+		"started": started, // legacy shape during the migration
+		"result":  res,     // typed: restored/failed/missing
+	})
 }
 
 // rm_inspect_table peeks at the DynamoDB table a config points at and reports

@@ -12,7 +12,6 @@ import 'package:redimos_manager/src/i18n.dart';
 import 'package:redimos_manager/src/ui_theme.dart';
 import 'package:redimos_manager/src/ui_tokens.dart';
 
-import 'fake_core.dart';
 import 'golden_fonts.dart';
 
 const _diagnosticDirectoryVariable = 'REDIMOS_RAIL_DIAGNOSTIC_DIR';
@@ -30,7 +29,6 @@ ChromeState _state(EntityKind kind, Brightness brightness) => ChromeState(
       tabLabels: const ['Browse'],
       tabIndex: 0,
       stopAllSnapshot: const [],
-      ddb: null,
       themeMode:
           brightness == Brightness.dark ? ThemeMode.dark : ThemeMode.light,
       lang: AppLang.en,
@@ -50,7 +48,6 @@ ChromeCallbacks _callbacks({ValueChanged<EntityKind>? onEntityKind}) =>
       onRestoreAll: () {},
       onThemeMode: (_) {},
       onLang: (_) {},
-      onDdbMutated: () {},
     );
 
 Future<void> _pumpRail(
@@ -72,7 +69,6 @@ Future<void> _pumpRail(
           body: HomeChrome(
             state: _state(kind, brightness),
             cb: _callbacks(onEntityKind: onEntityKind),
-            core: FakeNativeCore(),
             child: const SizedBox.expand(),
           ),
         ),
@@ -123,6 +119,8 @@ List<Rect> _geometry(WidgetTester tester) => [
       tester.getRect(find.byKey(const ValueKey('main-rail-instance-tile'))),
       tester.getRect(find.byKey(const ValueKey('main-rail-endpoint-item'))),
       tester.getRect(find.byKey(const ValueKey('main-rail-endpoint-tile'))),
+      tester.getRect(find.byKey(const ValueKey('main-rail-service-item'))),
+      tester.getRect(find.byKey(const ValueKey('main-rail-service-tile'))),
     ];
 
 void main() {
@@ -153,9 +151,16 @@ void main() {
         expect(geometry[3].size, const Size(44, 42));
         expect(geometry[4].size, const Size(Dim.railW, 42));
         expect(geometry[5].size, const Size(44, 42));
+        // Stage 12: the Service item sits under the Endpoint item with the
+        // same tile grammar.
+        expect(geometry[6].size, const Size(Dim.railW, 42));
+        expect(geometry[7].size, const Size(44, 42));
 
-        final activeName =
-            kind == EntityKind.instance ? 'instance' : 'endpoint';
+        final activeName = switch (kind) {
+          EntityKind.instance => 'instance',
+          EntityKind.endpoint => 'endpoint',
+          EntityKind.service => 'service',
+        };
         final indicator =
             find.byKey(ValueKey('main-rail-$activeName-indicator'));
         expect(indicator, findsOneWidget);

@@ -13,16 +13,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 
 import 'i18n.dart';
-import 'local_ddb_panel.dart';
 import 'models.dart';
-import 'native.dart';
 import 'ui_fields.dart';
 import 'ui_primitives.dart';
 import 'ui_status.dart';
 import 'ui_tokens.dart';
 
-/// v2.3 rail entity kind — which group the entity sidebar lists.
-enum EntityKind { instance, endpoint }
+/// v2.3 rail entity kind — which group the entity sidebar lists. v1.2 adds
+/// Service as the third first-class entity (stage 12).
+enum EntityKind { instance, endpoint, service }
 
 /// Immutable snapshot of everything the chrome renders (the HomePage state
 /// fields the former private builders read).
@@ -39,9 +38,10 @@ class ChromeState {
     required this.tabLabels,
     required this.tabIndex,
     required this.stopAllSnapshot,
-    required this.ddb,
     required this.themeMode,
     required this.lang,
+    this.services = const [],
+    this.selectedServiceId,
   });
 
   final EntityKind entityKind;
@@ -53,13 +53,19 @@ class ChromeState {
   final String? hoveredCardId;
   final String entityQuery;
 
+  /// Stage 12: the Service entity list (ID-addressed snapshots from the core,
+  /// already sorted by ServicesState) and its own selected ID — kept separate
+  /// from the instance/endpoint selections so switching kinds never loses a
+  /// selection (requirement 12.6).
+  final List<ServiceInfo> services;
+  final String? selectedServiceId;
+
   /// MidBar labels for the CURRENT mode (instance tabs or endpoint screens).
   final List<String> tabLabels;
 
   /// Active MidBar index within [tabLabels].
   final int tabIndex;
   final List<String> stopAllSnapshot;
-  final LocalDdbInfo? ddb;
   final ThemeMode themeMode;
   final AppLang lang;
 
@@ -77,7 +83,15 @@ class ChromeState {
     return null;
   }
 
+  ServiceInfo? get selectedService {
+    for (final s in services) {
+      if (s.id == selectedServiceId) return s;
+    }
+    return null;
+  }
+
   bool get isEndpointMode => selectedEndpointId != null;
+  bool get isServiceMode => entityKind == EntityKind.service;
 }
 
 /// Every interaction the chrome offers. HomePage wires real handlers; the
@@ -96,7 +110,9 @@ class ChromeCallbacks {
     required this.onRestoreAll,
     required this.onThemeMode,
     required this.onLang,
-    required this.onDdbMutated,
+    this.onSelectService = _noopId,
+    this.onNewService = _noopVoid,
+    this.onServiceStartStop = _noopSvc,
   });
 
   final ValueChanged<EntityKind> onEntityKind;
@@ -111,8 +127,18 @@ class ChromeCallbacks {
   final VoidCallback onRestoreAll;
   final ValueChanged<ThemeMode> onThemeMode;
   final ValueChanged<AppLang> onLang;
-  final VoidCallback onDdbMutated;
+
+  // Stage 12 Service callbacks. Defaults keep every pre-Service construction
+  // site (fixtures / capture channel) compiling untouched; the live HomePage
+  // passes real handlers.
+  final ValueChanged<String> onSelectService;
+  final VoidCallback onNewService;
+  final void Function(ServiceInfo) onServiceStartStop;
 }
+
+void _noopId(String _) {}
+void _noopSvc(ServiceInfo _) {}
+void _noopVoid() {}
 
 /// The full chrome around the detail area: rail + entity sidebar on the left,
 /// top bar / mid bar / detail / status bar in the main column. [midBarCta]
@@ -123,14 +149,12 @@ class HomeChrome extends StatelessWidget {
     super.key,
     required this.state,
     required this.cb,
-    required this.core,
     required this.child,
     this.midBarCta,
   });
 
   final ChromeState state;
   final ChromeCallbacks cb;
-  final NativeCore core;
   final Widget child;
   final Widget? midBarCta;
 
@@ -203,10 +227,17 @@ class HomeChrome extends StatelessWidget {
 
   Widget _topBarCrumb(AppTokens t) {
     return Builder(builder: (context) {
-      final isEp = state.isEndpointMode;
+      final isSvc = state.isServiceMode;
+      final isEp = !isSvc && state.isEndpointMode;
       String entity = '';
       String sub = '';
-      if (isEp) {
+      if (isSvc) {
+        final s = state.selectedService;
+        if (s != null) {
+          entity = s.config.name.isEmpty ? tr('service.unnamed') : s.config.name;
+          sub = '${s.config.engine.wire} · :${s.config.port}';
+        }
+      } else if (isEp) {
         final e = state.selectedEndpoint;
         if (e != null) {
           entity = e.name.isEmpty ? tr('config.unnamed') : e.name;
@@ -365,9 +396,45 @@ class HomeChrome extends StatelessWidget {
   Widget _statusBar() {
     return Builder(builder: (context) {
       final t = AppTokens.of(context);
-      final isEp = state.isEndpointMode;
+      final isSvc = state.isServiceMode;
+      final isEp = !isSvc && state.isEndpointMode;
       Widget leading;
-      if (isEp) {
+      if (isSvc) {
+        final s = state.selectedService;
+        final statusLabel = s?.runtime.state.name ?? 'stopped';
+        leading = Row(
+          key: const ValueKey('home-statusbar-leading'),
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CodexStatusDot(
+              key: const ValueKey('home-statusbar-dot'),
+              status: _codexStatus(statusLabel),
+              semanticLabel: 'Service $statusLabel',
+            ),
+            const SizedBox(width: 7),
+            Text(
+              '127.0.0.1:${s?.config.port ?? 0}',
+              key: const ValueKey('home-statusbar-host'),
+              style: Ts.style(
+                size: Ts.xs,
+                color: t.text2,
+                monoFont: true,
+                tabularNums: true,
+              ),
+            ),
+            const SizedBox(width: 10),
+            Text(
+              statusLabel,
+              key: const ValueKey('home-statusbar-status'),
+              style: Ts.style(
+                size: Ts.xs,
+                color: codexStatusColor(context, _codexStatus(statusLabel)),
+                monoFont: true,
+              ),
+            ),
+          ],
+        );
+      } else if (isEp) {
         final e = state.selectedEndpoint;
         final sub = e == null
             ? ''
@@ -595,7 +662,8 @@ class HomeChrome extends StatelessWidget {
   // recorded, it becomes a triangle that restores exactly that set.
   Widget _stopAllButton(AppTokens t) {
     final anyRunning = state.statuses.values
-        .any((s) => s.isRunning || s.status == 'restarting');
+            .any((s) => s.isRunning || s.status == 'restarting') ||
+        state.services.any((s) => s.runtime.isLive);
     if (anyRunning) {
       return IconButton(
         tooltip: tr('app.stopAll'),
@@ -662,6 +730,12 @@ class HomeChrome extends StatelessWidget {
                   icon: Icons.swap_horiz,
                   label: tr('nav.endpoints'),
                 ),
+                const SizedBox(height: 6),
+                _railItem(
+                  kind: EntityKind.service,
+                  icon: Icons.widgets_outlined,
+                  label: tr('nav.services'),
+                ),
               ]),
             ),
             Positioned(
@@ -683,7 +757,11 @@ class HomeChrome extends StatelessWidget {
     required String label,
   }) {
     final active = state.entityKind == kind;
-    final keyName = kind == EntityKind.instance ? 'instance' : 'endpoint';
+    final keyName = switch (kind) {
+      EntityKind.instance => 'instance',
+      EntityKind.endpoint => 'endpoint',
+      EntityKind.service => 'service',
+    };
     return Builder(builder: (context) {
       final t = AppTokens.of(context);
       var focused = false;
@@ -788,6 +866,7 @@ class HomeChrome extends StatelessWidget {
     return Builder(builder: (context) {
       final t = AppTokens.of(context);
       final isInstance = state.entityKind == EntityKind.instance;
+      final isService = state.entityKind == EntityKind.service;
       final q = state.entityQuery.trim().toLowerCase();
       final items = isInstance
           ? state.configs
@@ -814,38 +893,51 @@ class HomeChrome extends StatelessWidget {
                         (state.statuses[c.id]?.isRunning ?? false) ||
                         state.statuses[c.id]?.status == 'restarting',
                   ))
-          : state.endpoints
-              .where((e) =>
-                  q.isEmpty ||
-                  e.name.toLowerCase().contains(q) ||
-                  e.endpoint.toLowerCase().contains(q))
-              .map((e) => _entityCardShell(
-                    cardKey: e.id,
-                    selected: e.id == state.selectedEndpointId,
-                    hovered: e.id == state.hoveredCardId,
-                    onTap: () => cb.onSelectEndpoint(e.id),
-                    onHover: (h) => cb.onHoverCard(h ? e.id : null),
-                    dot: Container(
-                        width: 7,
-                        height: 7,
-                        decoration: BoxDecoration(
-                            color: t.success, shape: BoxShape.circle)),
-                    badge: switch (e.kind) {
-                      'local' => 'LOCAL',
-                      'aws' => 'AWS',
-                      _ => 'URL'
-                    },
-                    name: e.name.isEmpty ? tr('config.unnamed') : e.name,
-                    sub: switch (e.kind) {
-                      'aws' =>
-                        e.region.isEmpty ? 'AWS' : 'dynamodb · ${e.region}',
-                      'local' => _portLabel(e.endpoint),
-                      _ => _hostOf(e.endpoint),
-                    },
-                    sub2: '',
-                    sub2Color: t.text3,
-                    trailing: null,
-                  ));
+          : isService
+              ? state.services
+                  .where((s) =>
+                      q.isEmpty ||
+                      s.config.name.toLowerCase().contains(q) ||
+                      s.config.engine.wire.contains(q) ||
+                      ':${s.config.port}'.contains(q))
+                  .map((s) => _serviceCard(context, s))
+              : state.endpoints
+                  .where((e) =>
+                      q.isEmpty ||
+                      e.name.toLowerCase().contains(q) ||
+                      e.endpoint.toLowerCase().contains(q))
+                  .map((e) => _entityCardShell(
+                        cardKey: e.id,
+                        selected: e.id == state.selectedEndpointId,
+                        hovered: e.id == state.hoveredCardId,
+                        onTap: () => cb.onSelectEndpoint(e.id),
+                        onHover: (h) => cb.onHoverCard(h ? e.id : null),
+                        dot: Container(
+                            width: 7,
+                            height: 7,
+                            decoration: BoxDecoration(
+                                color: t.success, shape: BoxShape.circle)),
+                        badge: switch (e.kind) {
+                          'local' => 'LOCAL',
+                          'aws' => 'AWS',
+                          _ => 'URL'
+                        },
+                        name: e.name.isEmpty ? tr('config.unnamed') : e.name,
+                        sub: switch (e.kind) {
+                          'aws' =>
+                            e.region.isEmpty ? 'AWS' : 'dynamodb · ${e.region}',
+                          'local' => _portLabel(e.endpoint),
+                          _ => _hostOf(e.endpoint),
+                        },
+                        sub2: '',
+                        sub2Color: t.text3,
+                        trailing: null,
+                      ));
+      final itemCount = isInstance
+          ? state.configs.length
+          : isService
+              ? state.services.length
+              : state.endpoints.length;
       return Container(
         key: const ValueKey('entity-sidebar'),
         decoration: BoxDecoration(
@@ -870,9 +962,10 @@ class HomeChrome extends StatelessWidget {
                 child: CodexButton(
                   key: const ValueKey('entity-sidebar-new-action'),
                   variant: CodexButtonVariant.primary,
-                  onPressed: cb.onNewConfig,
+                  onPressed: isService ? cb.onNewService : cb.onNewConfig,
                   icon: const Icon(Icons.add, size: 16),
-                  label: Text(tr('config.new')),
+                  label:
+                      Text(isService ? tr('service.new') : tr('config.new')),
                 ),
               ),
             ),
@@ -884,7 +977,11 @@ class HomeChrome extends StatelessWidget {
                   Icon(Icons.keyboard_arrow_down, size: 10, color: t.text3),
                   const SizedBox(width: 7),
                   Text(
-                    (isInstance ? tr('nav.instances') : tr('nav.endpoints'))
+                    (isInstance
+                            ? tr('nav.instances')
+                            : isService
+                                ? tr('nav.services')
+                                : tr('nav.endpoints'))
                         .toUpperCase(),
                     style: Ts.style(
                       size: 10.5,
@@ -904,7 +1001,7 @@ class HomeChrome extends StatelessWidget {
                       border: Border.all(color: t.hairline),
                     ),
                     child: Text(
-                      '${isInstance ? state.configs.length : state.endpoints.length}',
+                      '$itemCount',
                       style: Ts.style(
                         size: 10,
                         weight: FontWeight.w500,
@@ -921,7 +1018,7 @@ class HomeChrome extends StatelessWidget {
                   ? Center(
                       key: const ValueKey('entity-sidebar-empty'),
                       child: Text(
-                        tr('nav.noneYet'),
+                        isService ? tr('service.noneYet') : tr('nav.noneYet'),
                         style: Ts.style(size: Ts.md, color: t.text3),
                       ),
                     )
@@ -930,12 +1027,6 @@ class HomeChrome extends StatelessWidget {
                       padding: const EdgeInsets.fromLTRB(10, 4, 10, 10),
                       children: items.toList(),
                     ),
-            ),
-            const Divider(height: 1),
-            LocalDdbPanel(
-              core: core,
-              info: state.ddb,
-              onMutated: cb.onDdbMutated,
             ),
           ],
         ),
@@ -965,6 +1056,52 @@ class HomeChrome extends StatelessWidget {
         icon: Icon(active ? Icons.stop_circle : Icons.play_circle_fill,
             color: active ? t.danger : t.success),
         onPressed: () => cb.onStartStop(c),
+      );
+    });
+  }
+
+  // Stage 12: one Service card. Same shell grammar as instance/endpoint cards
+  // (12.3 — shared primitives, semantic tokens); identity is the Service ID,
+  // status comes from the runtime state, badge from the engine family.
+  String _serviceBadge(ServiceEngine e) => switch (e) {
+        ServiceEngine.java => 'JAVA',
+        ServiceEngine.dockerDynamodb => 'DOCKER',
+        ServiceEngine.localStack => 'STACK',
+      };
+
+  Widget _serviceCard(BuildContext context, ServiceInfo s) {
+    final stateWire = s.runtime.state.name;
+    final live = s.runtime.isLive;
+    return _entityCardShell(
+      cardKey: s.id,
+      selected: s.id == state.selectedServiceId,
+      hovered: s.id == state.hoveredCardId,
+      onTap: () => cb.onSelectService(s.id),
+      onHover: (h) => cb.onHoverCard(h ? s.id : null),
+      dot: _statusDot(stateWire),
+      badge: _serviceBadge(s.config.engine),
+      name: s.config.name.isEmpty ? tr('service.unnamed') : s.config.name,
+      sub: ':${s.config.port} · ${s.config.engine.wire}',
+      sub2: stateWire,
+      sub2Color: _statusColor(context, stateWire),
+      trailing: _serviceStartStop(s),
+      trailingVisible: state.hoveredCardId == s.id || live,
+    );
+  }
+
+  // Start/stop control for a Service card — mirrors the instance affordance.
+  Widget _serviceStartStop(ServiceInfo s) {
+    final active = s.runtime.isLive;
+    return Builder(builder: (context) {
+      final t = AppTokens.of(context);
+      return IconButton(
+        key: ValueKey('entity-card-${s.id}-start-stop'),
+        tooltip: active ? tr('service.stop') : tr('service.start'),
+        visualDensity: VisualDensity.compact,
+        iconSize: 18,
+        icon: Icon(active ? Icons.stop_circle : Icons.play_circle_fill,
+            color: active ? t.danger : t.success),
+        onPressed: () => cb.onServiceStartStop(s),
       );
     });
   }
@@ -1167,7 +1304,8 @@ class HomeChrome extends StatelessWidget {
 
   CodexStatus _codexStatus(String status) => switch (status) {
         'running' || 'ready' => CodexStatus.running,
-        'preparing' || 'restarting' || 'degraded' => CodexStatus.warning,
+        'preparing' || 'restarting' || 'degraded' || 'stopping' || 'recovering' =>
+          CodexStatus.warning,
         'error' || 'failed' || 'exited' || 'stopped' => CodexStatus.danger,
         _ => CodexStatus.neutral,
       };

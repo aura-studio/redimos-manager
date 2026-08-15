@@ -10,7 +10,6 @@ import 'package:redimos_manager/src/models.dart';
 import 'package:redimos_manager/src/ui_theme.dart';
 import 'package:redimos_manager/src/ui_tokens.dart';
 
-import 'fake_core.dart';
 import 'golden_fonts.dart';
 import 'viewport_assertions.dart';
 
@@ -38,7 +37,6 @@ ChromeState _state({
       tabLabels: const ['Browse'],
       tabIndex: 0,
       stopAllSnapshot: const [],
-      ddb: null,
       themeMode: themeMode ??
           (brightness == Brightness.dark ? ThemeMode.dark : ThemeMode.light),
       lang: lang,
@@ -61,7 +59,6 @@ ChromeCallbacks _callbacks({
       onRestoreAll: () {},
       onThemeMode: onThemeMode ?? (_) {},
       onLang: onLang ?? (_) {},
-      onDdbMutated: () {},
     );
 
 Future<void> _pumpChrome(
@@ -80,7 +77,6 @@ Future<void> _pumpChrome(
         body: HomeChrome(
           state: state,
           cb: callbacks ?? _callbacks(),
-          core: FakeNativeCore(),
           child: const SizedBox.expand(),
         ),
       ),

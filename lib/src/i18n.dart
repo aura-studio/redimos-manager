@@ -107,12 +107,6 @@ const Map<String, Map<AppLang, String>> _strings = {
     AppLang.zh:
         '端点是存储后端而非受管进程 —— CPU/内存监控与进程日志在代理它的「实例」上。'
   },
-  'ep.ovLocalEngineNote': {
-    AppLang.en:
-        'This backend is the managed Local DynamoDB engine — its process Monitor and Logs live in this page’s Monitor/Logs tabs.',
-    AppLang.zh:
-        '该后端是受管的 Local DynamoDB 引擎 —— 其进程 Monitor 与 Logs 在本页的 Monitor/Logs 标签页中。'
-  },
 
   // Endpoint Browser (v1.2 R7: merged Tables + Explorer two-pane view)
   'epb.noTableSelected': {AppLang.en: 'No table selected', AppLang.zh: '未选择表'},
@@ -205,9 +199,141 @@ const Map<String, Map<AppLang, String>> _strings = {
   // --- v1.2 nav (instances / endpoints sidebar) ---
   'nav.instances': {AppLang.en: 'Instances', AppLang.zh: '实例'},
   'nav.endpoints': {AppLang.en: 'Endpoints', AppLang.zh: '端点'},
+  'nav.services': {AppLang.en: 'Services', AppLang.zh: '服务'},
   'nav.collapse': {AppLang.en: 'Collapse sidebar', AppLang.zh: '收起侧栏'},
   'nav.expand': {AppLang.en: 'Expand sidebar', AppLang.zh: '展开侧栏'},
   'nav.noneYet': {AppLang.en: 'No instances or endpoints yet', AppLang.zh: '暂无实例或端点'},
+  'service.noneYet': {AppLang.en: 'No services yet', AppLang.zh: '暂无服务'},
+  'service.new': {AppLang.en: 'Service', AppLang.zh: '新建服务'},
+  'service.start': {AppLang.en: 'Start service', AppLang.zh: '启动服务'},
+  'service.stop': {AppLang.en: 'Stop service', AppLang.zh: '停止服务'},
+  'service.unnamed': {AppLang.en: 'Unnamed service', AppLang.zh: '未命名服务'},
+  'service.pick': {AppLang.en: 'Pick a service', AppLang.zh: '选择一个服务'},
+
+  // --- v1.2 Service Configure (CRUD form + safe delete) ---
+  'svc.identitySection': {AppLang.en: 'Identity', AppLang.zh: '身份'},
+  'svc.storageSection': {AppLang.en: 'Storage & options', AppLang.zh: '存储与选项'},
+  'svc.name': {AppLang.en: 'Service name', AppLang.zh: '服务名称'},
+  'svc.engine': {AppLang.en: 'Engine', AppLang.zh: '引擎'},
+  'svc.engine.java': {AppLang.en: 'Java DynamoDB Local', AppLang.zh: 'Java DynamoDB Local'},
+  'svc.engine.docker': {AppLang.en: 'Docker DynamoDB Local', AppLang.zh: 'Docker DynamoDB Local'},
+  'svc.engine.localstack': {AppLang.en: 'LocalStack', AppLang.zh: 'LocalStack'},
+  'svc.port': {AppLang.en: 'Host port', AppLang.zh: '宿主端口'},
+  'svc.portHint': {AppLang.en: '0 = engine default', AppLang.zh: '0 = 引擎默认端口'},
+  'svc.storage': {AppLang.en: 'Storage mode', AppLang.zh: '存储模式'},
+  'svc.storage.memory': {AppLang.en: 'Memory', AppLang.zh: '内存'},
+  'svc.storage.managed': {AppLang.en: 'Managed', AppLang.zh: '受管'},
+  'svc.storage.custom': {AppLang.en: 'Custom', AppLang.zh: '自定义'},
+  'svc.storage.path': {AppLang.en: 'Data path', AppLang.zh: '数据路径'},
+  'svc.storage.volume': {AppLang.en: 'Volume name', AppLang.zh: '卷名'},
+  'svc.heap': {AppLang.en: 'JVM heap', AppLang.zh: 'JVM 堆内存'},
+  'svc.heapHint': {AppLang.en: 'e.g. 512m', AppLang.zh: '如 512m'},
+  'svc.servicesOpt': {AppLang.en: 'LocalStack services', AppLang.zh: 'LocalStack 服务清单'},
+  'svc.servicesOptHint': {AppLang.en: 'e.g. dynamodb,s3', AppLang.zh: '如 dynamodb,s3'},
+  'svc.identityLocked': {
+    AppLang.en: 'Stop this Service to change engine, port, or storage',
+    AppLang.zh: '停止服务后才能修改引擎、端口或存储'
+  },
+  'svc.nameRequired': {AppLang.en: 'Name is required', AppLang.zh: '名称不能为空'},
+  'svc.nameTaken': {AppLang.en: 'Name is already in use', AppLang.zh: '名称已被使用'},
+  'svc.portInvalid': {AppLang.en: 'Port must be 0–65535', AppLang.zh: '端口须在 0–65535'},
+  'svc.portTaken': {
+    AppLang.en: 'Port is already configured by another Service',
+    AppLang.zh: '端口已被其他服务占用'
+  },
+  'svc.pathRequired': {
+    AppLang.en: 'Custom storage needs a data path',
+    AppLang.zh: '自定义存储需要数据路径'
+  },
+  'svc.volumeRequired': {
+    AppLang.en: 'Custom storage needs a volume name',
+    AppLang.zh: '自定义存储需要卷名'
+  },
+  'svc.saved': {AppLang.en: 'Service saved', AppLang.zh: '服务已保存'},
+  'svc.saveFailed': {AppLang.en: 'Save failed', AppLang.zh: '保存失败'},
+  'svc.deleteTitle': {AppLang.en: 'Delete Service', AppLang.zh: '删除服务'},
+  'svc.deleteBody': {
+    AppLang.en: 'The configuration and registry ownership are removed.',
+    AppLang.zh: '将移除配置与注册归属。'
+  },
+  'svc.deleteDataCheck': {
+    AppLang.en: 'Also delete managed data',
+    AppLang.zh: '同时删除受管数据'
+  },
+  'svc.deleteDataPreserved': {
+    AppLang.en: 'Data stays at its location unless cleanup is selected.',
+    AppLang.zh: '除非勾选清理，数据将保留在原位置。'
+  },
+  'svc.deleteDestructiveTitle': {
+    AppLang.en: 'Delete Service data',
+    AppLang.zh: '删除服务数据'
+  },
+  'svc.deleteDestructiveBody': {
+    AppLang.en: 'proven managed data will be permanently removed.',
+    AppLang.zh: '已证明归属的受管数据将被永久删除。'
+  },
+  'svc.deleteData': {AppLang.en: 'Delete data', AppLang.zh: '删除数据'},
+  'svc.deleted': {AppLang.en: 'Service deleted', AppLang.zh: '服务已删除'},
+  'svc.dataKept': {
+    AppLang.en: 'Data preserved at its location',
+    AppLang.zh: '数据已保留在原位置'
+  },
+  'svc.manualCleanupTitle': {
+    AppLang.en: 'Manual cleanup required',
+    AppLang.zh: '需要手动清理'
+  },
+  'svc.manualCleanupBody': {
+    AppLang.en: 'This data could not be proven owned and was preserved:',
+    AppLang.zh: '以下数据无法证明归属，已保留：'
+  },
+  'svc.partialDelete': {
+    AppLang.en: 'Partial deletion — the Service is kept for retry',
+    AppLang.zh: '部分删除——服务已保留以便重试'
+  },
+  'svc.deleteFailed': {AppLang.en: 'Delete failed', AppLang.zh: '删除失败'},
+  'svc.state': {AppLang.en: 'State', AppLang.zh: '状态'},
+  'svc.dataLocation': {AppLang.en: 'Data location', AppLang.zh: '数据位置'},
+  'svc.location.memory': {AppLang.en: 'in-memory', AppLang.zh: '内存'},
+  'svc.location.managed': {
+    AppLang.en: 'managed (derived from Service ID)',
+    AppLang.zh: '受管（由服务 ID 派生）'
+  },
+
+  // --- v1.2 Service detail tabs (stage 14) ---
+  'svc.state.stopped': {AppLang.en: 'Stopped', AppLang.zh: '已停止'},
+  'svc.state.preparing': {AppLang.en: 'Preparing', AppLang.zh: '准备中'},
+  'svc.state.running': {AppLang.en: 'Running', AppLang.zh: '运行中'},
+  'svc.state.restarting': {AppLang.en: 'Restarting', AppLang.zh: '重启中'},
+  'svc.state.stopping': {AppLang.en: 'Stopping', AppLang.zh: '停止中'},
+  'svc.state.failed': {AppLang.en: 'Failed', AppLang.zh: '启动失败'},
+  'svc.state.error': {AppLang.en: 'Error', AppLang.zh: '错误'},
+  'svc.state.recovering': {AppLang.en: 'Recovering', AppLang.zh: '恢复中'},
+  'svc.uptime': {AppLang.en: 'Uptime', AppLang.zh: '运行时长'},
+  'svc.runtimeIdentity': {AppLang.en: 'Runtime identity', AppLang.zh: '运行身份'},
+  'svc.readiness': {AppLang.en: 'Readiness', AppLang.zh: '就绪探针'},
+  'svc.health': {AppLang.en: 'Health', AppLang.zh: '健康探针'},
+  'svc.ready': {AppLang.en: 'Ready', AppLang.zh: '就绪'},
+  'svc.notReady': {AppLang.en: 'Not ready', AppLang.zh: '未就绪'},
+  'svc.healthy': {AppLang.en: 'Healthy', AppLang.zh: '健康'},
+  'svc.unhealthy': {AppLang.en: 'Unhealthy', AppLang.zh: '不健康'},
+  'svc.neverStarted': {AppLang.en: 'Never started', AppLang.zh: '从未启动'},
+  'svc.start': {AppLang.en: 'Start', AppLang.zh: '启动'},
+  'svc.stop': {AppLang.en: 'Stop', AppLang.zh: '停止'},
+  'svc.restart': {AppLang.en: 'Restart', AppLang.zh: '重启'},
+  'svc.lastError': {AppLang.en: 'Last error', AppLang.zh: '最近错误'},
+  'svc.monitorEmpty': {
+    AppLang.en: 'No metrics yet — samples appear while the Service is running',
+    AppLang.zh: '暂无指标——服务运行中才会采样'
+  },
+  'svc.cpu': {AppLang.en: 'CPU', AppLang.zh: 'CPU'},
+  'svc.memory': {AppLang.en: 'Memory', AppLang.zh: '内存'},
+  'svc.disk': {AppLang.en: 'Disk I/O', AppLang.zh: '磁盘 I/O'},
+  'svc.logsEmpty': {AppLang.en: 'No log lines yet', AppLang.zh: '暂无日志'},
+  'svc.logsLoadFailed': {AppLang.en: 'Failed to load logs', AppLang.zh: '日志加载失败'},
+  'svc.refresh': {AppLang.en: 'Refresh', AppLang.zh: '刷新'},
+  'svc.copy': {AppLang.en: 'Copy', AppLang.zh: '复制'},
+  'svc.copied': {AppLang.en: 'Logs copied', AppLang.zh: '日志已复制'},
+  'svc.clearView': {AppLang.en: 'Clear view', AppLang.zh: '清空视图'},
 
   // --- v1.2 Playground (JS via goja / Go via yaegi) ---
   'pg.run': {AppLang.en: 'Run', AppLang.zh: '运行'},
@@ -309,53 +435,38 @@ const Map<String, Map<AppLang, String>> _strings = {
   'home.close': {AppLang.en: 'Close', AppLang.zh: '关闭'},
   'home.configUpdatedHint': {AppLang.en: 'Config updated to match the data — Save, then Start again', AppLang.zh: '配置已更新以匹配数据 — 请保存后重新启动'},
   'home.configsSuffix': {AppLang.en: 'config(s)', AppLang.zh: '个配置'},
-  'home.copyEndpoint': {AppLang.en: 'Copy endpoint', AppLang.zh: '复制端点'},
   'home.coreBuildHint': {AppLang.en: 'Build it with scripts/build_native.ps1 and place the library next to the app executable, or set REDIMOS_CORE_LIB.', AppLang.zh: '请使用 scripts/build_native.ps1 构建,并将库文件放在应用可执行文件旁,或设置 REDIMOS_CORE_LIB。'},
   'home.coreLoadFailed': {AppLang.en: 'Could not load the native core (redimos_core.dll).', AppLang.zh: '无法加载原生核心 (redimos_core.dll)。'},
   'home.cpu': {AppLang.en: 'CPU', AppLang.zh: 'CPU'},
-  'home.dataDir': {AppLang.en: 'Data dir', AppLang.zh: '数据目录'},
   'home.delete': {AppLang.en: 'Delete', AppLang.zh: '删除'},
   'home.deleteConfigTitle': {AppLang.en: 'Delete config?', AppLang.zh: '删除配置?'},
   'home.deleteFailed': {AppLang.en: 'Delete failed', AppLang.zh: '删除失败'},
   'home.deleted': {AppLang.en: 'Deleted', AppLang.zh: '已删除'},
-  'home.diskIo': {AppLang.en: 'Disk I/O', AppLang.zh: '磁盘 I/O'},
   'home.dontSave': {AppLang.en: 'Don\'t save', AppLang.zh: '不保存'},
   'home.down': {AppLang.en: 'Down', AppLang.zh: '离线'},
   'home.endpoint': {AppLang.en: 'Endpoint', AppLang.zh: '端点'},
   'home.engine': {AppLang.en: 'Engine', AppLang.zh: '引擎'},
-  'home.error': {AppLang.en: 'Error', AppLang.zh: '错误'},
   'home.extraFlags': {AppLang.en: 'Extra flags', AppLang.zh: '额外参数'},
-  'home.failed': {AppLang.en: 'Failed', AppLang.zh: '失败'},
   'home.health': {AppLang.en: 'Health', AppLang.zh: '健康'},
   'home.healthy': {AppLang.en: 'Healthy', AppLang.zh: '正常'},
-  'home.inMemory': {AppLang.en: 'In-memory', AppLang.zh: '内存模式'},
   'home.key': {AppLang.en: 'Key', AppLang.zh: '键'},
   'home.latency': {AppLang.en: 'Latency', AppLang.zh: '延迟'},
-  'home.localDdbLogs': {AppLang.en: 'Local DynamoDB logs', AppLang.zh: '本地 DynamoDB 日志'},
-  'home.localDynamoDb': {AppLang.en: 'Local DynamoDB', AppLang.zh: '本地 DynamoDB'},
   'home.logs': {AppLang.en: 'logs', AppLang.zh: '日志'},
-  'home.logsTooltip': {AppLang.en: 'Logs', AppLang.zh: '日志'},
   'home.memory': {AppLang.en: 'Memory', AppLang.zh: '内存'},
   'home.monitor': {AppLang.en: 'monitor', AppLang.zh: '监控'},
   'home.multiDb': {AppLang.en: 'MultiDB', AppLang.zh: '多库'},
   'home.name': {AppLang.en: 'Name', AppLang.zh: '名称'},
   'home.native': {AppLang.en: 'Native', AppLang.zh: '原生'},
-  'home.noDocker': {AppLang.en: '(no Docker)', AppLang.zh: '(无 Docker)'},
-  'home.noJre': {AppLang.en: '(no JRE)', AppLang.zh: '(无 JRE)'},
   'home.noOutput': {AppLang.en: '(no output)', AppLang.zh: '(无输出)'},
   'home.off': {AppLang.en: 'Off', AppLang.zh: '关'},
   'home.on': {AppLang.en: 'On', AppLang.zh: '开'},
   'home.opsPerSec': {AppLang.en: 'Ops / sec', AppLang.zh: '操作/秒'},
   'home.permanentlyRemove': {AppLang.en: 'Permanently remove', AppLang.zh: '永久删除'},
-  'home.persisted': {AppLang.en: 'Persisted', AppLang.zh: '持久化'},
   // A universal term — stays "PID" in Chinese.
-  'home.pid': {AppLang.en: 'PID', AppLang.zh: 'PID'},
   'home.port': {AppLang.en: 'Port', AppLang.zh: '端口'},
-  'home.preparing': {AppLang.en: 'Preparing…', AppLang.zh: '准备中…'},
   'home.ready': {AppLang.en: 'Ready', AppLang.zh: '就绪'},
   'home.region': {AppLang.en: 'Region', AppLang.zh: '区域'},
   'home.remove': {AppLang.en: 'Remove', AppLang.zh: '移除'},
-  'home.restarting': {AppLang.en: 'Restarting…', AppLang.zh: '重启中…'},
   'home.restarts': {AppLang.en: 'Restarts', AppLang.zh: '重启次数'},
   'home.restore': {AppLang.en: 'restore', AppLang.zh: '恢复'},
   'home.restored': {AppLang.en: 'Restored', AppLang.zh: '已恢复'},
@@ -368,15 +479,11 @@ const Map<String, Map<AppLang, String>> _strings = {
   'home.saved': {AppLang.en: 'Saved', AppLang.zh: '已保存'},
   'home.secretAccessKey': {AppLang.en: 'SecretAccessKey', AppLang.zh: '秘密访问密钥'},
   'home.sessionToken': {AppLang.en: 'SessionToken', AppLang.zh: '会话令牌'},
-  'home.start': {AppLang.en: 'Start', AppLang.zh: '启动'},
   'home.startFailed': {AppLang.en: 'Start failed', AppLang.zh: '启动失败'},
   'home.startingAnyway': {AppLang.en: 'Starting anyway would fail or corrupt the data. Choose how to fix it:', AppLang.zh: '强行启动会失败或损坏数据。请选择修复方式:'},
   'home.status': {AppLang.en: 'Status', AppLang.zh: '状态'},
-  'home.stop': {AppLang.en: 'Stop', AppLang.zh: '停止'},
   'home.stopFailed': {AppLang.en: 'Stop failed', AppLang.zh: '停止失败'},
   'home.stopped': {AppLang.en: 'Stopped', AppLang.zh: '已停止'},
-  'home.storage': {AppLang.en: 'Storage', AppLang.zh: '存储'},
-  'home.storageManagedByLocalstack': {AppLang.en: 'storage: managed by LocalStack', AppLang.zh: '存储:由 LocalStack 管理'},
   'home.table': {AppLang.en: 'Table', AppLang.zh: '表'},
   'home.tableMismatchTitle': {AppLang.en: 'Table format mismatch', AppLang.zh: '表格式不匹配'},
   'home.tableRenamedHint': {AppLang.en: 'Table renamed — Save, then Start again', AppLang.zh: '表已重命名 — 请保存后重新启动'},
@@ -390,7 +497,6 @@ const Map<String, Map<AppLang, String>> _strings = {
   'home.useRecommendedConfig': {AppLang.en: 'Use recommended config', AppLang.zh: '使用推荐配置'},
   'home.value': {AppLang.en: 'Value', AppLang.zh: '值'},
   'home.version': {AppLang.en: 'Version', AppLang.zh: '版本'},
-  'home.volume': {AppLang.en: 'Volume', AppLang.zh: '数据卷'},
   'ep.tables': {AppLang.en: 'Tables', AppLang.zh: '表'},
   'ep.filterTables': {AppLang.en: 'Filter tables…', AppLang.zh: '筛选表…'},
   'ep.refresh': {AppLang.en: 'Refresh', AppLang.zh: '刷新'},

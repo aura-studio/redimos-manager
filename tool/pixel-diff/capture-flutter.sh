@@ -1,7 +1,8 @@
 #!/bin/bash
 # Codex dual-theme Flutter capture driver. Creates one immutable run directory
-# containing 8 screens × light/dark and writes metadata only after all 16 PNGs
-# pass naming and 2560×1600 dimension validation.
+# containing 14 screens × light/dark (8 golden + 6 capture-only Service
+# screens, stage 16.2) and writes metadata only after all 28 PNGs pass naming
+# and 2560×1600 dimension validation.
 set -euo pipefail
 
 if [[ $# -ne 1 || ! "$1" =~ ^[1-9][0-9]*$ ]]; then

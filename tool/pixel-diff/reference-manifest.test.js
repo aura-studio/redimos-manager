@@ -10,6 +10,7 @@ const test = require('node:test');
 const {
   ManifestValidationError,
   SCREENS,
+  SERVICE_SCREENS,
   THEMES,
   loadReferenceManifest,
   validateReferenceManifest,
@@ -89,6 +90,45 @@ test('draft mode permits candidate slots without creating or approving files', (
   assert.equal(
     validateReferenceManifest(value, { mode: 'draft', checkFiles: false }),
     value,
+  );
+});
+
+test('draft mode accepts capture-only Service screens as candidates; unknown ids stay rejected', () => {
+  const value = manifest('candidate');
+  value.screens = SERVICE_SCREENS.flatMap((id) =>
+    THEMES.map((theme) => entry(id, theme, 'candidate')),
+  );
+
+  assert.equal(
+    validateReferenceManifest(value, { mode: 'draft', checkFiles: false }),
+    value,
+  );
+
+  value.screens = [entry('svc-unknown', 'light', 'candidate')];
+  assert.throws(
+    () => validateReferenceManifest(value, { mode: 'draft', checkFiles: false }),
+    (error) => issueCodes(error).has('invalid-screen'),
+  );
+});
+
+test('acceptance baseline stays exactly 8x2 approved even when Service candidates are present', (t) => {
+  const root = temporaryRoot(t);
+  const value = manifest();
+  for (const screen of value.screens) {
+    writePngHeader(path.join(root, screen.file));
+  }
+  // Append a capture-only Service candidate: it must never join the
+  // approved baseline.
+  value.screens.push(entry('svc-empty', 'light', 'candidate'));
+
+  assert.throws(
+    () => validateReferenceManifest(value, { activeRoot: root }),
+    (error) => {
+      const codes = issueCodes(error);
+      assert.ok(codes.has('unapproved-reference'));
+      assert.ok(codes.has('wrong-coverage'));
+      return true;
+    },
   );
 });
 

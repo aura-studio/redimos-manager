@@ -19,9 +19,13 @@ import 'package:redimos_manager/src/cmd_console.dart';
 import 'package:redimos_manager/src/configure_page.dart';
 import 'package:redimos_manager/src/endpoint_browser.dart';
 import 'package:redimos_manager/src/endpoint_detail.dart';
+import 'package:redimos_manager/src/i18n.dart';
 import 'package:redimos_manager/src/logs_page.dart';
 import 'package:redimos_manager/src/models.dart';
 import 'package:redimos_manager/src/playground_page.dart';
+import 'package:redimos_manager/src/service_configure.dart';
+import 'package:redimos_manager/src/service_detail.dart';
+import 'package:redimos_manager/src/services_state.dart';
 import 'package:redimos_manager/src/ui_theme.dart';
 
 import 'fake_core.dart';
@@ -195,6 +199,92 @@ const mockSparkOps = <double>[
   42,
   30
 ];
+
+// ---------------------------------------------------------------------------
+// Service fixtures (stage 16.1 capture channel).
+// ---------------------------------------------------------------------------
+
+/// The capture channel's Service: java engine on the design's port 8000.
+/// startedAt is seeded RELATIVE to now because the Overview computes its
+/// uptime against DateTime.now() — a static timestamp would paint a
+/// run-dependent label; the relative seed freezes the label at '2h 14m'
+/// (30 s headroom before the minute rolls, far beyond one capture run).
+ServiceInfo fixtureServiceRunning() => ServiceInfo.fromJson({
+      'config': {
+        'id': 'svc-1',
+        'name': 'local-ddb',
+        'engine': 'java',
+        'port': 8000,
+      },
+      'runtime': {
+        'state': 'running',
+        'ready': true,
+        'healthy': true,
+        'pid': 4242,
+        'startedAt': DateTime.now()
+            .subtract(const Duration(hours: 2, minutes: 14, seconds: 30))
+            .toUtc()
+            .toIso8601String(),
+        'metrics': {
+          'cpuPercent': 18.4,
+          'memBytes': 432013312, // 412 MB, the mockup instance-monitor value
+          'diskBytesPerSec': 812,
+        },
+      },
+    });
+
+/// A lifecycle failure: in-context error surface (9.8), identity still
+/// readable, start available again from the failed state (9.7).
+ServiceInfo fixtureServiceFailed() => ServiceInfo.fromJson({
+      'config': {
+        'id': 'svc-1',
+        'name': 'local-ddb',
+        'engine': 'java',
+        'port': 8000,
+      },
+      'runtime': {
+        'state': 'failed',
+        'ready': false,
+        'healthy': false,
+        'errorCode': 'port_in_use',
+        'error': 'bind tcp 0.0.0.0:8000: address already in use',
+      },
+    });
+
+/// Deterministic waves for the Service monitor's three rings — the same
+/// sin-based shapes the instance sparklines use (fixtureHist), no randomness.
+ServiceHistory fixtureServiceHistory() {
+  final h = ServiceHistory(ServiceHistory.defaultCapacity);
+  for (var i = 0; i < 60; i++) {
+    final cpu = 18 + 8 * math.sin(i * 0.32 + 0.9) + (i % 7) * 0.4;
+    final memMb = 400 + 24 * math.sin(i * 0.21 + 2.1) + (i % 5) * 2.0;
+    final disk = 700 + 260 * math.sin(i * 0.27 + 4.2) + (i % 9) * 12.0;
+    h.sample(ServiceMetrics(
+      cpuPercent: cpu < 0 ? 0 : cpu,
+      memBytes: (memMb * 1024 * 1024).round(),
+      diskBytesPerSec: disk < 0 ? 0 : disk,
+    ));
+  }
+  return h;
+}
+
+/// Capture-side core for the Service screens: deterministic log lines; every
+/// other Service API trips FakeNativeCore's loud noSuchMethod.
+class CaptureServiceCore extends FakeNativeCore {
+  @override
+  List<String> serviceLogs(String id) => const [
+        '2026-08-14T12:00:00.204Z INFO  ddb-local: starting engine on port 8000',
+        '2026-08-14T12:00:00.512Z INFO  ddb-local: storage mode=memory (shared: false)',
+        '2026-08-14T12:00:01.118Z INFO  ddb-local: loaded 0 tables from previous session',
+        '2026-08-14T12:00:01.402Z INFO  http: listening on 0.0.0.0:8000',
+        '2026-08-14T12:00:02.007Z INFO  health: readiness probe ok',
+        '2026-08-14T12:00:02.031Z INFO  health: liveness probe ok',
+        '2026-08-14T12:00:04.552Z INFO  request CreateTable users → 200 · 14 ms',
+        '2026-08-14T12:00:06.918Z INFO  request PutItem users → 200 · 3 ms',
+        '2026-08-14T12:00:09.114Z WARN  slow request Query users 214 ms · index byEmail',
+        '2026-08-14T12:00:12.690Z INFO  compaction: 0 tables pending · disk idle',
+      ];
+}
 
 // ---------------------------------------------------------------------------
 // Per-screen pump sequences — mirror golden_screens_test.dart bodies.
@@ -494,4 +584,102 @@ Future<void> pumpEpBrowser(WidgetTester t,
   await t.pump();
   await t.pump(const Duration(milliseconds: 50));
   await t.pump();
+}
+
+// ---------------------------------------------------------------------------
+// Service screen pumps (stage 16.1 capture channel). The four Service tabs
+// are pure widgets over (ServiceInfo, ServicesState) — no sockets — so the
+// pumps only need the FakeAsync zero-timer order for the Logs fetch.
+// ---------------------------------------------------------------------------
+
+/// No Services registered: HomePage's detail pane shows the pick hint while
+/// the sidebar renders the empty Service list.
+Future<void> pumpSvcEmpty(WidgetTester t,
+    {required bool dark, Key? shotKey, Widget Function(Widget)? chrome}) async {
+  await pumpScreen(t,
+      dark: dark,
+      shotKey: shotKey,
+      chrome: chrome,
+      child: Center(child: Text(tr('service.pick'))));
+  await t.pump(const Duration(milliseconds: 50));
+}
+
+Future<void> pumpSvcOverviewRunning(WidgetTester t,
+    {required bool dark, Key? shotKey, Widget Function(Widget)? chrome}) async {
+  await pumpScreen(t,
+      dark: dark,
+      shotKey: shotKey,
+      chrome: chrome,
+      child: ServiceOverviewTab(
+        service: fixtureServiceRunning(),
+        onStart: () {},
+        onStop: () {},
+        onRestart: () {},
+      ));
+  await t.pump(const Duration(milliseconds: 50));
+}
+
+Future<void> pumpSvcOverviewFailed(WidgetTester t,
+    {required bool dark, Key? shotKey, Widget Function(Widget)? chrome}) async {
+  await pumpScreen(t,
+      dark: dark,
+      shotKey: shotKey,
+      chrome: chrome,
+      child: ServiceOverviewTab(
+        service: fixtureServiceFailed(),
+        onStart: () {},
+        onStop: () {},
+        onRestart: () {},
+      ));
+  await t.pump(const Duration(milliseconds: 50));
+}
+
+Future<void> pumpSvcMonitor(WidgetTester t,
+    {required bool dark, Key? shotKey, Widget Function(Widget)? chrome}) async {
+  await pumpScreen(t,
+      dark: dark,
+      shotKey: shotKey,
+      chrome: chrome,
+      child: ServiceMonitorTab(
+        service: fixtureServiceRunning(),
+        history: fixtureServiceHistory(),
+      ));
+  await t.pump(const Duration(milliseconds: 50));
+}
+
+/// requestLogs() hides behind a zero-duration Future (FakeAsync): fire the
+/// timer, let the continuation land, then rebuild. The scripted core returns
+/// deterministic lines, so the tail is stable run-to-run.
+Future<void> pumpSvcLogs(WidgetTester t,
+    {required bool dark, Key? shotKey, Widget Function(Widget)? chrome}) async {
+  final state = ServicesState(CaptureServiceCore());
+  addTearDown(state.dispose);
+  state.select('svc-1'); // requestLogs only lands for the selected ID (12.4)
+  await pumpScreen(t,
+      dark: dark,
+      shotKey: shotKey,
+      chrome: chrome,
+      child: ServiceLogsTab(
+        service: fixtureServiceRunning(),
+        state: state,
+      ));
+  await t.pump();
+  await t.pump(const Duration(milliseconds: 1)); // fire the zero-timer fetch
+  await t.pump();
+}
+
+Future<void> pumpSvcConfig(WidgetTester t,
+    {required bool dark, Key? shotKey, Widget Function(Widget)? chrome}) async {
+  await pumpScreen(t,
+      dark: dark,
+      shotKey: shotKey,
+      chrome: chrome,
+      child: ServiceConfigEditor(
+        service: fixtureServiceRunning(),
+        peers: const [],
+        core: fakeCore,
+        onSaved: (_) {},
+        onDeleted: (_) {},
+      ));
+  await t.pump(const Duration(milliseconds: 50));
 }

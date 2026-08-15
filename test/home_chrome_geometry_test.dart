@@ -7,7 +7,6 @@ import 'package:redimos_manager/src/models.dart';
 import 'package:redimos_manager/src/ui_theme.dart';
 import 'package:redimos_manager/src/ui_tokens.dart';
 
-import 'fake_core.dart';
 import 'golden_fonts.dart';
 
 final _config = RedimosConfig(
@@ -47,7 +46,6 @@ ChromeState _state({
       ],
       tabIndex: 0,
       stopAllSnapshot: const [],
-      ddb: null,
       themeMode:
           brightness == Brightness.dark ? ThemeMode.dark : ThemeMode.light,
       lang: AppLang.en,
@@ -66,7 +64,6 @@ const _callbacks = ChromeCallbacks(
   onRestoreAll: _ignore,
   onThemeMode: _ignoreThemeMode,
   onLang: _ignoreLang,
-  onDdbMutated: _ignore,
 );
 
 void _ignore() {}
@@ -93,7 +90,6 @@ Future<void> _pumpChrome(
         body: HomeChrome(
           state: _state(brightness: brightness, kind: kind),
           cb: _callbacks,
-          core: FakeNativeCore(),
           child: const SizedBox.expand(
             key: ValueKey('home-detail-pane'),
           ),

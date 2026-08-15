@@ -92,7 +92,13 @@
             "inst-playground",
             "inst-config",
             "ep-overview",
-            "ep-browser"
+            "ep-browser",
+            "svc-empty",
+            "svc-overview-running",
+            "svc-overview-failed",
+            "svc-monitor",
+            "svc-logs",
+            "svc-configure"
           ]
         },
         "theme": { "enum": ["light", "dark"] },

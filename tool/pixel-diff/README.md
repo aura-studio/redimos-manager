@@ -60,8 +60,8 @@ Codex reference 与本页上方的 v2.3 历史管线相互隔离。`v2.3-archive
 
 校验器提供两种模式：
 
-- `draft`：允许 9.3 阶段逐步建立候选槽位，不要求文件存在或已批准；仍校验字段、screen/theme 与文件唯一性、ROI 边界、命名和 archive/path traversal 隔离。
-- `acceptance`（默认）：要求八屏 × light/dark 共 16 个唯一条目全部为 `approved`，viewport 为 1280×800、DPR 2，PNG 为 2560×1600，文件位于 active manifest root 内，并有包含 reviewer 与 rendering environment 的批准历史。
+- `draft`：允许 9.3 阶段逐步建立候选槽位，不要求文件存在或已批准；仍校验字段、screen/theme 与文件唯一性、ROI 边界、命名和 archive/path traversal 隔离。16.2 起额外接受六个 capture-only Service 屏（`svc-empty`、`svc-overview-running`、`svc-overview-failed`、`svc-monitor`、`svc-logs`、`svc-configure`）作为候选条目；它们没有 approved reference，永远不能进入验收基线。
+- `acceptance`（默认）：要求八屏 × light/dark 共 16 个唯一条目全部为 `approved`，viewport 为 1280×800、DPR 2，PNG 为 2560×1600，文件位于 active manifest root 内，并有包含 reviewer 与 rendering environment 的批准历史。Service capture-only 条目会因覆盖检查被拒绝。
 
 ```bash
 npm run test:manifest
@@ -138,7 +138,7 @@ npm run diff:active -- \
 
 ## Codex noise-floor measurement
 
-9.6 使用 manifest 明确列出的 `captures/run-2`、`run-3`、`run-4`，不扫描目录，也不改写保留的 schema v1 `run-1`。每个新 run 必须包含 16 张 2560×1600 PNG 和 schema v2 metadata；metadata 记录 build、全部 Dart fixture、实际字体、Flutter/platform、viewport 与 physical size provenance。三轮这些字段必须完全一致，否则测量拒绝执行。
+9.6 使用 manifest 明确列出的 `captures/run-2`、`run-3`、`run-4`，不扫描目录，也不改写保留的 schema v1 `run-1`。每个新 run 必须包含 28 张 2560×1600 PNG（8 个 golden 屏 + 6 个 capture-only Service 屏，各 light/dark，16.2 起）和 schema v2 metadata；metadata 记录 build、全部 Dart fixture、实际字体、Flutter/platform、viewport 与 physical size provenance。三轮这些字段必须完全一致，否则测量拒绝执行。
 
 依次创建不可覆盖的同源 capture：
 

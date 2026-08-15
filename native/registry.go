@@ -20,7 +20,7 @@ import (
 // childRec is one spawned child. (PID, StartUnixMicro, Comm) is an exact
 // process identity — a recycled pid can't match the original start time.
 type childRec struct {
-	Role           string `json:"role"` // "config:<id>" | "ddb"
+	Role           string `json:"role"` // "config:<id>" | "ddb" | "service:<id>"
 	PID            int    `json:"pid"`
 	StartUnixMicro int64  `json:"startUnixMicro"`
 	Comm           string `json:"comm"`
@@ -34,7 +34,17 @@ type registryFile struct {
 	Children []childRec `json:"children"`
 }
 
-func registryDir() string  { return filepath.Join(filepath.Dir(defaultStorePath()), "run") }
+// registryDirForTest redirects the registry into a test sandbox when non-empty,
+// so unit tests that spawn real children never touch the live ~/.redimos state.
+var registryDirForTest string
+
+func registryDir() string {
+	if registryDirForTest != "" {
+		return registryDirForTest
+	}
+	return filepath.Join(filepath.Dir(defaultStorePath()), "run")
+}
+
 func registryPath() string { return filepath.Join(registryDir(), "children.json") }
 
 // withRegistry runs fn on the parsed registry under an exclusive cross-process

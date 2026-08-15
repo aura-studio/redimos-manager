@@ -12,7 +12,6 @@ import 'package:redimos_manager/src/models.dart';
 import 'package:redimos_manager/src/ui_theme.dart';
 import 'package:redimos_manager/src/ui_tokens.dart';
 
-import 'fake_core.dart';
 import 'golden_fonts.dart';
 import 'viewport_assertions.dart';
 
@@ -43,7 +42,6 @@ const _callbacks = ChromeCallbacks(
   onRestoreAll: _ignore,
   onThemeMode: _ignoreThemeMode,
   onLang: _ignoreLang,
-  onDdbMutated: _ignore,
 );
 
 void _ignore() {}
@@ -74,7 +72,6 @@ ChromeState _state(Brightness brightness) => ChromeState(
       ],
       tabIndex: 0,
       stopAllSnapshot: const [],
-      ddb: null,
       themeMode:
           brightness == Brightness.dark ? ThemeMode.dark : ThemeMode.light,
       lang: AppLang.zh,
@@ -103,7 +100,6 @@ Future<void> _pumpShell(
     onRestoreAll: _callbacks.onRestoreAll,
     onThemeMode: _callbacks.onThemeMode,
     onLang: _callbacks.onLang,
-    onDdbMutated: _callbacks.onDdbMutated,
   );
 
   await tester.pumpWidget(
@@ -120,7 +116,6 @@ Future<void> _pumpShell(
             body: HomeChrome(
               state: _state(brightness),
               cb: callbacks,
-              core: FakeNativeCore(),
               child: ListView.builder(
                 key: const ValueKey('platform-smoke-scroll'),
                 controller: controller,
@@ -203,7 +198,6 @@ void main() {
         expect(find.text('浏览器'), findsWidgets);
         expect(find.byTooltip('主题'), findsOneWidget);
         expect(find.byTooltip('语言'), findsOneWidget);
-        expect(find.byTooltip('本地 DynamoDB'), findsOneWidget);
 
         final endpointSemantics =
             _actionableNode(tester, tr('nav.endpoints')).getSemanticsData();

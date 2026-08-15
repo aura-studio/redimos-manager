@@ -6,16 +6,13 @@
 // On an AWS endpoint every view is read-only (the native layer re-guards writes
 // regardless).
 //
-// One exception to "an endpoint has no process": the kind=local endpoint that
-// IS the managed Local DynamoDB engine. Since the 2026-08-05 separation
-// (separate-monitor-logs) the engine's Monitor and Logs live HERE — as two
-// extra tabs (DdbMonitorView / DdbLogsView, ddb_views.dart) — instead of mixed
-// into whichever instance page happens to proxy it. `ddb != null` is what
-// switches the tab set 4 ↔ 6.
+// Stage 15 (requirements 3.1–3.4): an endpoint is CLIENT-side storage access
+// only. Even when its URL points at a Service's port, the engine's process
+// state, metrics, and logs live on the Service entity — nothing here infers a
+// binding from host/port text, and the tab set is a fixed four.
 
 import 'package:flutter/material.dart';
 
-import 'ddb_views.dart';
 import 'endpoint_browser.dart';
 import 'i18n.dart';
 import 'models.dart';
@@ -30,15 +27,6 @@ import 'ui_tokens.dart';
 class EndpointDetailView extends StatefulWidget {
   final NativeCore core;
   final DdbEndpoint endpoint;
-  // Non-null iff this endpoint is bound to the managed Local DynamoDB engine
-  // (kind=local + host:port match, decided by HomePage._ddbForEndpoint). When
-  // set, the tab set gains Monitor + Logs hosting the engine's own telemetry.
-  // The snapshot PERSISTS across engine stop/start (HomePage keeps the last
-  // non-null rm_ddb_get result), so the tab count never flaps with lifecycle.
-  final LocalDdbInfo? ddb;
-  final List<double> ddbCpuHist;
-  final List<double> ddbMemHist;
-  final List<double> ddbDiskHist;
   // v2.3: the active screen index, driven by the HomePage-level MidBar tabs
   // (the per-view TabBar was lifted up so instance and endpoint chrome match).
   final int screenIndex;
@@ -50,10 +38,6 @@ class EndpointDetailView extends StatefulWidget {
       {super.key,
       required this.core,
       required this.endpoint,
-      this.ddb,
-      this.ddbCpuHist = const [],
-      this.ddbMemHist = const [],
-      this.ddbDiskHist = const [],
       this.screenIndex = 0,
       this.onEdit,
       this.browserKey});
@@ -63,12 +47,10 @@ class EndpointDetailView extends StatefulWidget {
 }
 
 class _EndpointDetailViewState extends State<EndpointDetailView> {
-  bool get _showDdb => widget.ddb != null;
-
   DdbEndpoint get e => widget.endpoint;
 
-  // Screen list (Overview / Browser / PartiQL / Playground [+ Monitor + Logs]),
-  // one per MidBar tab. Index-matched with HomePage._endpointTabLabels.
+  // Screen list (Overview / Browser / PartiQL / Playground), one per MidBar
+  // tab. Index-matched with HomePage._epTabLabels.
   List<Widget> get _screens {
     final cfg = e.toStorageConfig();
     return [
@@ -78,7 +60,6 @@ class _EndpointDetailViewState extends State<EndpointDetailView> {
         core: widget.core,
         endpoint: e,
         config: cfg,
-        managedEngine: _showDdb,
         onEdit: widget.onEdit,
       ),
       // Browser — the Tables list + item Explorer in one two-pane view.
@@ -101,21 +82,6 @@ class _EndpointDetailViewState extends State<EndpointDetailView> {
         config: cfg,
         kind: 'ddb',
       ),
-      if (_showDdb) ...[
-        // Monitor — the managed Local DynamoDB engine's own dashboard.
-        DdbMonitorView(
-          key: ValueKey('ep-ddbmon-${e.id}'),
-          ddb: widget.ddb,
-          cpuHist: widget.ddbCpuHist,
-          memHist: widget.ddbMemHist,
-          diskHist: widget.ddbDiskHist,
-        ),
-        // Logs — the engine's live log tail (rm_ddb_logs)
-        DdbLogsView(
-          key: ValueKey('ep-ddblog-${e.id}'),
-          core: widget.core,
-        ),
-      ],
     ];
   }
 
@@ -141,17 +107,13 @@ class _EndpointDetailViewState extends State<EndpointDetailView> {
 }
 
 // The endpoint Overview: backend metadata + a live reachability probe. An
-// endpoint is normally storage, not a process, so this stands in for the
-// instance's Monitor/Logs tabs with something meaningful for a backend (is it
-// reachable, how many tables, how fast). The one backend that IS a managed
-// process — the Local DynamoDB engine — gets its Monitor/Logs as real tabs on
-// this page (managedEngine: true), and its note banner says so instead.
+// endpoint is storage access, not a process (3.3): even a URL that points at
+// a Service's port shows this same client-side view — the engine's state,
+// metrics, and logs live on the Service entity.
 class EndpointOverviewPane extends StatefulWidget {
   final NativeCore core;
   final DdbEndpoint endpoint;
   final RedimosConfig config;
-  // True iff this endpoint is bound to the managed Local DynamoDB engine.
-  final bool managedEngine;
   // R4.3/R4.4: opens the endpoint Edit dialog (owned by HomePage, which knows
   // how to persist the change via saveConfig and sync sibling instances).
   final VoidCallback? onEdit;
@@ -160,7 +122,6 @@ class EndpointOverviewPane extends StatefulWidget {
       required this.core,
       required this.endpoint,
       required this.config,
-      this.managedEngine = false,
       this.onEdit});
 
   @override
@@ -236,16 +197,11 @@ class _EndpointOverviewPaneState extends State<EndpointOverviewPane>
         if (_isAws)
           _noteBanner(Icons.lock_outline, tr('ep.ovReadOnlyNote'), t.warning),
         if (_isAws) const SizedBox(height: 10),
-        // Honesty guard: "an endpoint is storage, not a managed process" is
-        // false for the engine-bound endpoint — its process Monitor/Logs live
-        // in this very page's tabs since the 2026-08-05 separation. Mockup
-        // .note-banner is always the amber warning tint.
+        // An endpoint is client-side storage access; any engine process
+        // behind the URL is owned by a Service, never surfaced here (3.3).
+        // Mockup .note-banner is always the amber warning tint.
         _noteBanner(
-            widget.managedEngine ? Icons.dns : Icons.info_outline,
-            widget.managedEngine
-                ? tr('ep.ovLocalEngineNote')
-                : tr('ep.ovNoProcessNote'),
-            t.warning),
+            Icons.info_outline, tr('ep.ovNoProcessNote'), t.warning),
         const SizedBox(height: 14),
         // Backend identity card (mockup .ov-card: head band + ruled kv rows).
         _card(

@@ -7,7 +7,6 @@ import 'package:redimos_manager/src/models.dart';
 import 'package:redimos_manager/src/ui_theme.dart';
 import 'package:redimos_manager/src/ui_tokens.dart';
 
-import 'fake_core.dart';
 import 'golden_fonts.dart';
 
 final _config = RedimosConfig(
@@ -24,6 +23,17 @@ const _endpoint = DdbEndpoint(
   endpoint: 'http://localhost:8000',
 );
 
+// Stage 12: the Service entity fixture for the crumb / status bar branches.
+final _svc = ServiceInfo.fromJson({
+  'config': {
+    'id': 'service-1',
+    'name': 'local-ddb',
+    'engine': 'java',
+    'port': 8000,
+  },
+  'runtime': {'state': 'stopped', 'ready': false, 'healthy': false},
+});
+
 ChromeState _state({
   required Brightness brightness,
   EntityKind kind = EntityKind.instance,
@@ -39,12 +49,13 @@ ChromeState _state({
       statuses: statuses,
       selectedConfigId: kind == EntityKind.instance ? _config.id : null,
       selectedEndpointId: kind == EntityKind.endpoint ? _endpoint.id : null,
+      services: kind == EntityKind.service ? [_svc] : const [],
+      selectedServiceId: kind == EntityKind.service ? _svc.id : null,
       hoveredCardId: null,
       entityQuery: '',
       tabLabels: tabLabels,
       tabIndex: tabIndex,
       stopAllSnapshot: stopAllSnapshot,
-      ddb: null,
       themeMode:
           brightness == Brightness.dark ? ThemeMode.dark : ThemeMode.light,
       lang: AppLang.en,
@@ -67,7 +78,6 @@ ChromeCallbacks _callbacks({
       onRestoreAll: onRestoreAll ?? () {},
       onThemeMode: (_) {},
       onLang: (_) {},
-      onDdbMutated: () {},
     );
 
 Future<void> _pumpTopbar(
@@ -86,7 +96,6 @@ Future<void> _pumpTopbar(
         body: HomeChrome(
           state: state,
           cb: callbacks ?? _callbacks(),
-          core: FakeNativeCore(),
           child: const SizedBox.expand(),
         ),
       ),

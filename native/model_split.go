@@ -49,16 +49,26 @@ type Instance struct {
 // diskStore is the on-disk shape. load/persist translate between it and the
 // in-memory store (which keeps []Config). Legacy configs[] is a read-only
 // fallback for upgrading a pre-1.2 store.json.
+//
+// The legacy Local DynamoDB singleton fields (localDdb, ddbAutoStart) are
+// deliberately NOT declared: unknown keys are ignored on decode and encode
+// never emits them — the Service collection is the sole owner of local-server
+// state. The services array itself also lives OUTSIDE this struct (persist
+// wraps it in) so a corrupt services collection can never break the decode of
+// endpoints/instances/settings.
 type diskStore struct {
-	Endpoints       []Endpoint     `json:"endpoints,omitempty"`
-	Instances       []Instance     `json:"instances,omitempty"`
-	Configs         []Config       `json:"configs,omitempty"` // legacy (pre-1.2) fallback
-	Settings        Settings       `json:"settings"`
-	LocalDdb        LocalDdbConfig `json:"localDdb"`
-	Formatters      []Formatter    `json:"formatters,omitempty"`
-	AutoStart       []string       `json:"autoStart"`
-	DdbAutoStart    bool           `json:"ddbAutoStart"`
-	StopAllSnapshot []string       `json:"stopAllSnapshot"`
+	Endpoints  []Endpoint  `json:"endpoints,omitempty"`
+	Instances  []Instance  `json:"instances,omitempty"`
+	Configs    []Config    `json:"configs,omitempty"` // legacy (pre-1.2) fallback
+	Settings   Settings    `json:"settings"`
+	Formatters []Formatter `json:"formatters,omitempty"`
+	AutoStart  []string    `json:"autoStart"`
+	// Legacy string-array Stop All snapshot (Instance IDs only). Kept as a
+	// read-only migration source for StopAllSnapshotV2; still round-tripped
+	// until the unified snapshot consumers switch over.
+	StopAllSnapshot []string `json:"stopAllSnapshot"`
+	// Typed Stop All snapshot: separate Instance/Service ID namespaces.
+	StopAllSnapshotV2 *GlobalStopSnapshot `json:"stopAllSnapshotV2,omitempty"`
 }
 
 // endpointKind classifies a backend by its endpoint URL: no URL => online AWS;

@@ -61,7 +61,6 @@ const _callbacks = ChromeCallbacks(
   onRestoreAll: _ignore,
   onThemeMode: _ignoreThemeMode,
   onLang: _ignoreLang,
-  onDdbMutated: _ignore,
 );
 
 void _ignore() {}
@@ -227,14 +226,12 @@ Widget Function(Widget) _chromeFor(
                   : _localizedTabs(screen.kind),
               tabIndex: screen.tabIndex,
               stopAllSnapshot: const [],
-              ddb: null,
               themeMode: brightness == Brightness.dark
                   ? ThemeMode.dark
                   : ThemeMode.light,
               lang: appLang.value,
             ),
             cb: _callbacks,
-            core: fx.fakeCore,
             child: content,
           ),
         ),

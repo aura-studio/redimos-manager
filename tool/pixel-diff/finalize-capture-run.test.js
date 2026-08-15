@@ -82,7 +82,7 @@ function finalizeOptions(fixture, runNumber, overrides = {}) {
   };
 }
 
-test('finalizer validates 16 captures and records deterministic metadata v2', (t) => {
+test('finalizer validates 28 captures (8 golden + 6 Service) and records deterministic metadata v2', (t) => {
   const fixture = completeRun(t, 7);
   const result = finalizeCaptureRun(fixture.runDir, finalizeOptions(fixture, 7));
 
@@ -95,8 +95,15 @@ test('finalizer validates 16 captures and records deterministic metadata v2', (t
   });
   assert.deepEqual(result.metadata.physicalSize, { width: 2560, height: 1600 });
   assert.equal(result.metadata.renderingEnvironment.fontMode, 'bundled');
-  assert.equal(result.metadata.files.length, 16);
-  assert.equal(new Set(result.metadata.files.map((entry) => `${entry.screen}:${entry.theme}`)).size, 16);
+  assert.equal(result.metadata.files.length, 28);
+  assert.equal(new Set(result.metadata.files.map((entry) => `${entry.screen}:${entry.theme}`)).size, 28);
+  // Stage 16.2: the capture-only Service screens are part of every run.
+  const names = expectedCaptureNames();
+  assert.equal(names.length, 28);
+  for (const svc of ['svc-empty', 'svc-overview-running', 'svc-overview-failed', 'svc-monitor', 'svc-logs', 'svc-configure']) {
+    assert.ok(names.includes(`${svc}-light.png`), `missing ${svc}-light.png`);
+    assert.ok(names.includes(`${svc}-dark.png`), `missing ${svc}-dark.png`);
+  }
   assert.match(result.metadata.fixtureRevision, /^[0-9a-f]{64}$/);
   assert.match(result.metadata.buildRevision, /^[0-9a-f]{64}$/);
   assert.match(result.metadata.fontRevision, /^[0-9a-f]{64}$/);

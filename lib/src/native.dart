@@ -40,12 +40,14 @@ String _callCoreSymbol(String libPath, String symbol, String arg) {
 class NativeCore {
   late final DynamicLibrary _lib;
   late final _StrDartFn _version, _load, _status, _stopAll, _restoreAll, _shutdown;
-  late final _StrDartFn _ddbGet, _ddbStart, _ddbStop, _ddbLogs;
   late final _StrArgDartFn _saveConfig, _deleteConfig, _setSettings, _start, _stop, _logs;
-  late final _StrArgDartFn _ddbSet, _inspectTable, _tableMeta, _tablePage, _partiql;
+  late final _StrArgDartFn _inspectTable, _tableMeta, _tablePage, _partiql;
   late final _StrArgDartFn _tablePrecheck, _tableGetItem, _tablePutItem, _tableDeleteItem;
   late final _StrDartFn _getFormatters;
   late final _StrArgDartFn _setFormatters;
+  late final _StrDartFn _services;
+  late final _StrArgDartFn _serviceSave, _serviceDelete, _serviceStart, _serviceStop,
+      _serviceRestart, _serviceLogs;
   late final _FreeDartFn _free;
 
   NativeCore() {
@@ -62,11 +64,6 @@ class NativeCore {
     _start = _lib.lookupFunction<_StrArgNativeFn, _StrArgDartFn>('rm_start');
     _stop = _lib.lookupFunction<_StrArgNativeFn, _StrArgDartFn>('rm_stop');
     _logs = _lib.lookupFunction<_StrArgNativeFn, _StrArgDartFn>('rm_logs');
-    _ddbGet = _lib.lookupFunction<_StrNativeFn, _StrDartFn>('rm_ddb_get');
-    _ddbStart = _lib.lookupFunction<_StrNativeFn, _StrDartFn>('rm_ddb_start');
-    _ddbStop = _lib.lookupFunction<_StrNativeFn, _StrDartFn>('rm_ddb_stop');
-    _ddbLogs = _lib.lookupFunction<_StrNativeFn, _StrDartFn>('rm_ddb_logs');
-    _ddbSet = _lib.lookupFunction<_StrArgNativeFn, _StrArgDartFn>('rm_ddb_set');
     _inspectTable = _lib.lookupFunction<_StrArgNativeFn, _StrArgDartFn>('rm_inspect_table');
     _tableMeta = _lib.lookupFunction<_StrArgNativeFn, _StrArgDartFn>('rm_table_meta');
     _tablePage = _lib.lookupFunction<_StrArgNativeFn, _StrArgDartFn>('rm_table_page');
@@ -77,6 +74,14 @@ class NativeCore {
     _tableDeleteItem = _lib.lookupFunction<_StrArgNativeFn, _StrArgDartFn>('rm_table_delete_item');
     _getFormatters = _lib.lookupFunction<_StrNativeFn, _StrDartFn>('rm_get_formatters');
     _setFormatters = _lib.lookupFunction<_StrArgNativeFn, _StrArgDartFn>('rm_set_formatters');
+    // Stage 9 Service ABI: ID-addressed multi-Service surface.
+    _services = _lib.lookupFunction<_StrNativeFn, _StrDartFn>('rm_services');
+    _serviceSave = _lib.lookupFunction<_StrArgNativeFn, _StrArgDartFn>('rm_service_save');
+    _serviceDelete = _lib.lookupFunction<_StrArgNativeFn, _StrArgDartFn>('rm_service_delete');
+    _serviceStart = _lib.lookupFunction<_StrArgNativeFn, _StrArgDartFn>('rm_service_start');
+    _serviceStop = _lib.lookupFunction<_StrArgNativeFn, _StrArgDartFn>('rm_service_stop');
+    _serviceRestart = _lib.lookupFunction<_StrArgNativeFn, _StrArgDartFn>('rm_service_restart');
+    _serviceLogs = _lib.lookupFunction<_StrArgNativeFn, _StrArgDartFn>('rm_service_logs');
     _free = _lib.lookupFunction<_FreeNativeFn, _FreeDartFn>('rm_free');
   }
 
@@ -128,6 +133,8 @@ class NativeCore {
     List<ProxyInstance> instances,
     Settings settings,
     List<String> stopAllSnapshot,
+    GlobalStopSnapshot stopAllSnapshotV2,
+    List<ServiceConfig> services,
   }) load() {
     final j = jsonDecode(_call0(_load)) as Map<String, dynamic>;
     // The core refuses to manage children when another app instance already
@@ -149,12 +156,19 @@ class NativeCore {
     final snap = ((j['stopAllSnapshot'] as List?) ?? [])
         .map((e) => e.toString())
         .toList();
+    final snapV2 = GlobalStopSnapshot.fromJson(
+        (j['stopAllSnapshotV2'] as Map<String, dynamic>?) ?? const {});
+    final services = ((j['services'] as List?) ?? [])
+        .map((e) => ServiceConfig.fromJson(e as Map<String, dynamic>))
+        .toList();
     return (
       configs: configs,
       endpoints: endpoints,
       instances: instances,
       settings: settings,
       stopAllSnapshot: snap,
+      stopAllSnapshotV2: snapV2,
+      services: services,
     );
   }
 
@@ -224,19 +238,77 @@ class NativeCore {
     }
   }
 
-  /// AppBar "Stop all": stop every running config and return the ids that were
-  /// running (recorded natively so the "restore" button survives an app restart).
-  List<String> stopAll() {
-    final j = jsonDecode(_call0(_stopAll)) as Map<String, dynamic>;
-    return ((j['snapshot'] as List?) ?? []).map((e) => e.toString()).toList();
+  /// AppBar "Stop all": stop every running Instance AND Service; the typed
+  /// snapshot records both ID namespaces so the "restore" affordance survives
+  /// an app restart and never confuses the two.
+  GlobalStopResult stopAll() {
+    final j = _envelope(_call0(_stopAll), 'stopAll');
+    return GlobalStopResult.fromJson(
+        (j['result'] as Map<String, dynamic>?) ?? const {});
   }
 
-  /// AppBar green "restore": start every config recorded by the last Stop all;
-  /// returns the ids actually (re)started.
-  List<String> restoreAll() {
-    final j = jsonDecode(_call0(_restoreAll)) as Map<String, dynamic>;
-    return ((j['started'] as List?) ?? []).map((e) => e.toString()).toList();
+  /// AppBar green "restore": restart exactly the entities recorded by the last
+  /// Stop all. Successful and missing entities drop from the snapshot; failed
+  /// ones stay for retry.
+  GlobalRestoreResult restoreAll() {
+    final j = _envelope(_call0(_restoreAll), 'restoreAll');
+    return GlobalRestoreResult.fromJson(
+        (j['result'] as Map<String, dynamic>?) ?? const {});
   }
+
+  // ---- Services (stage 9 ID-addressed ABI) ----
+
+  /// Every Service with its live runtime, plus boot recovery errors and any
+  /// warnings (the list envelope carries all three).
+  ({List<ServiceInfo> services, List<String> errors, List<String> warnings})
+      services() {
+    final j = _envelope(_call0(_services), 'services');
+    return (
+      services: ((j['services'] as List?) ?? [])
+          .map((e) => ServiceInfo.fromJson(e as Map<String, dynamic>))
+          .toList(),
+      errors: ((j['errors'] as List?) ?? []).map((e) => e.toString()).toList(),
+      warnings:
+          ((j['warnings'] as List?) ?? []).map((e) => e.toString()).toList(),
+    );
+  }
+
+  /// Create (empty id) or update (known id) one Service; returns the saved
+  /// Service as the core sees it. Throws [ServiceApiException] with the
+  /// taxonomy code on any refusal.
+  ServiceInfo serviceSave(ServiceConfig service) {
+    final j = _envelope(
+        _call1(_serviceSave, jsonEncode({'service': service.toJson()})),
+        'serviceSave');
+    return ServiceInfo.fromJson(
+        (j['service'] as Map<String, dynamic>?) ?? const {});
+  }
+
+  /// Delete one Service. Data is preserved unless [deleteData] — and even
+  /// then only proven-owned managed data is ever removed.
+  ServiceDeleteResult serviceDelete(String id, {required bool deleteData}) {
+    final j = _envelope(
+        _call1(_serviceDelete, jsonEncode({'id': id, 'deleteData': deleteData})),
+        'serviceDelete');
+    return ServiceDeleteResult.fromJson(j);
+  }
+
+  ServiceInfo serviceStart(String id) =>
+      _serviceInfoFrom(_envelope(_call1(_serviceStart, jsonEncode({'id': id})), 'serviceStart'));
+
+  ServiceInfo serviceStop(String id) =>
+      _serviceInfoFrom(_envelope(_call1(_serviceStop, jsonEncode({'id': id})), 'serviceStop'));
+
+  ServiceInfo serviceRestart(String id) => _serviceInfoFrom(
+      _envelope(_call1(_serviceRestart, jsonEncode({'id': id})), 'serviceRestart'));
+
+  List<String> serviceLogs(String id) {
+    final j = _envelope(_call1(_serviceLogs, jsonEncode({'id': id})), 'serviceLogs');
+    return ((j['lines'] as List?) ?? []).map((e) => e.toString()).toList();
+  }
+
+  ServiceInfo _serviceInfoFrom(Map<String, dynamic> j) => ServiceInfo.fromJson(
+      (j['service'] as Map<String, dynamic>?) ?? const {});
 
   /// Terminate every managed child (redimos instances + Local DynamoDB). Call on
   /// app exit so nothing is left orphaned holding a port.
@@ -244,19 +316,6 @@ class NativeCore {
 
   List<String> logs(String id) {
     final j = jsonDecode(_call1(_logs, id)) as Map<String, dynamic>;
-    return ((j['lines'] as List?) ?? []).map((e) => e.toString()).toList();
-  }
-
-  // ---- Local DynamoDB ----
-  LocalDdbInfo ddbGet() =>
-      LocalDdbInfo.fromJson(jsonDecode(_call0(_ddbGet)) as Map<String, dynamic>);
-  void ddbSet(LocalDdbConfig c) =>
-      _expectOk(_call1(_ddbSet, jsonEncode(c.toJson())));
-  void ddbStart() => _expectOk(_call0(_ddbStart));
-  void ddbStop() => _expectOk(_call0(_ddbStop));
-
-  List<String> ddbLogs() {
-    final j = jsonDecode(_call0(_ddbLogs)) as Map<String, dynamic>;
     return ((j['lines'] as List?) ?? []).map((e) => e.toString()).toList();
   }
 
@@ -463,5 +522,29 @@ class NativeCore {
   void _expectOk(String raw) {
     final r = jsonDecode(raw) as Map<String, dynamic>;
     if (r['ok'] != true) throw StateError(r['error']?.toString() ?? 'call failed');
+  }
+
+  /// Decode one Service-ABI envelope. Failures become a [ServiceApiException]
+  /// carrying the stable machine code — a failed call NEVER returns a fake
+  /// success default ([op] is the calling method, for context).
+  Map<String, dynamic> _envelope(String raw, String op) => parseEnvelope(raw, op);
+
+  /// Pure envelope parser (static so tests exercise it without the dylib).
+  static Map<String, dynamic> parseEnvelope(String raw, String op) {
+    Map<String, dynamic> j;
+    try {
+      j = jsonDecode(raw) as Map<String, dynamic>;
+    } catch (e) {
+      throw ServiceApiException('invalid_response', '$op: undecodable reply ($e)', op: op);
+    }
+    if (j['ok'] != true) {
+      throw ServiceApiException(
+        (j['code'] ?? 'invalid_response').toString(),
+        (j['error'] ?? 'call failed').toString(),
+        id: j['id'] as String?,
+        op: op,
+      );
+    }
+    return j;
   }
 }

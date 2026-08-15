@@ -603,6 +603,450 @@
           "height": 24
         }
       ]
+    },
+    {
+      "id": "svc-empty",
+      "theme": "light",
+      "file": "references/svc-empty-light.png",
+      "source": "stage-16.1-deterministic-service-fixtures-capture-only",
+      "approval": "candidate",
+      "regions": [
+        {
+          "id": "railSidebar",
+          "x": 0,
+          "y": 0,
+          "width": 344,
+          "height": 800
+        },
+        {
+          "id": "topBars",
+          "x": 344,
+          "y": 0,
+          "width": 936,
+          "height": 92
+        },
+        {
+          "id": "detail",
+          "x": 344,
+          "y": 92,
+          "width": 936,
+          "height": 684
+        },
+        {
+          "id": "statusbar",
+          "x": 344,
+          "y": 776,
+          "width": 936,
+          "height": 24
+        }
+      ]
+    },
+    {
+      "id": "svc-empty",
+      "theme": "dark",
+      "file": "references/svc-empty-dark.png",
+      "source": "stage-16.1-deterministic-service-fixtures-capture-only",
+      "approval": "candidate",
+      "regions": [
+        {
+          "id": "railSidebar",
+          "x": 0,
+          "y": 0,
+          "width": 344,
+          "height": 800
+        },
+        {
+          "id": "topBars",
+          "x": 344,
+          "y": 0,
+          "width": 936,
+          "height": 92
+        },
+        {
+          "id": "detail",
+          "x": 344,
+          "y": 92,
+          "width": 936,
+          "height": 684
+        },
+        {
+          "id": "statusbar",
+          "x": 344,
+          "y": 776,
+          "width": 936,
+          "height": 24
+        }
+      ]
+    },
+    {
+      "id": "svc-overview-running",
+      "theme": "light",
+      "file": "references/svc-overview-running-light.png",
+      "source": "stage-16.1-deterministic-service-fixtures-capture-only",
+      "approval": "candidate",
+      "regions": [
+        {
+          "id": "railSidebar",
+          "x": 0,
+          "y": 0,
+          "width": 344,
+          "height": 800
+        },
+        {
+          "id": "topBars",
+          "x": 344,
+          "y": 0,
+          "width": 936,
+          "height": 92
+        },
+        {
+          "id": "detail",
+          "x": 344,
+          "y": 92,
+          "width": 936,
+          "height": 684
+        },
+        {
+          "id": "statusbar",
+          "x": 344,
+          "y": 776,
+          "width": 936,
+          "height": 24
+        }
+      ]
+    },
+    {
+      "id": "svc-overview-running",
+      "theme": "dark",
+      "file": "references/svc-overview-running-dark.png",
+      "source": "stage-16.1-deterministic-service-fixtures-capture-only",
+      "approval": "candidate",
+      "regions": [
+        {
+          "id": "railSidebar",
+          "x": 0,
+          "y": 0,
+          "width": 344,
+          "height": 800
+        },
+        {
+          "id": "topBars",
+          "x": 344,
+          "y": 0,
+          "width": 936,
+          "height": 92
+        },
+        {
+          "id": "detail",
+          "x": 344,
+          "y": 92,
+          "width": 936,
+          "height": 684
+        },
+        {
+          "id": "statusbar",
+          "x": 344,
+          "y": 776,
+          "width": 936,
+          "height": 24
+        }
+      ]
+    },
+    {
+      "id": "svc-overview-failed",
+      "theme": "light",
+      "file": "references/svc-overview-failed-light.png",
+      "source": "stage-16.1-deterministic-service-fixtures-capture-only",
+      "approval": "candidate",
+      "regions": [
+        {
+          "id": "railSidebar",
+          "x": 0,
+          "y": 0,
+          "width": 344,
+          "height": 800
+        },
+        {
+          "id": "topBars",
+          "x": 344,
+          "y": 0,
+          "width": 936,
+          "height": 92
+        },
+        {
+          "id": "detail",
+          "x": 344,
+          "y": 92,
+          "width": 936,
+          "height": 684
+        },
+        {
+          "id": "statusbar",
+          "x": 344,
+          "y": 776,
+          "width": 936,
+          "height": 24
+        }
+      ]
+    },
+    {
+      "id": "svc-overview-failed",
+      "theme": "dark",
+      "file": "references/svc-overview-failed-dark.png",
+      "source": "stage-16.1-deterministic-service-fixtures-capture-only",
+      "approval": "candidate",
+      "regions": [
+        {
+          "id": "railSidebar",
+          "x": 0,
+          "y": 0,
+          "width": 344,
+          "height": 800
+        },
+        {
+          "id": "topBars",
+          "x": 344,
+          "y": 0,
+          "width": 936,
+          "height": 92
+        },
+        {
+          "id": "detail",
+          "x": 344,
+          "y": 92,
+          "width": 936,
+          "height": 684
+        },
+        {
+          "id": "statusbar",
+          "x": 344,
+          "y": 776,
+          "width": 936,
+          "height": 24
+        }
+      ]
+    },
+    {
+      "id": "svc-monitor",
+      "theme": "light",
+      "file": "references/svc-monitor-light.png",
+      "source": "stage-16.1-deterministic-service-fixtures-capture-only",
+      "approval": "candidate",
+      "regions": [
+        {
+          "id": "railSidebar",
+          "x": 0,
+          "y": 0,
+          "width": 344,
+          "height": 800
+        },
+        {
+          "id": "topBars",
+          "x": 344,
+          "y": 0,
+          "width": 936,
+          "height": 92
+        },
+        {
+          "id": "detail",
+          "x": 344,
+          "y": 92,
+          "width": 936,
+          "height": 684
+        },
+        {
+          "id": "statusbar",
+          "x": 344,
+          "y": 776,
+          "width": 936,
+          "height": 24
+        }
+      ]
+    },
+    {
+      "id": "svc-monitor",
+      "theme": "dark",
+      "file": "references/svc-monitor-dark.png",
+      "source": "stage-16.1-deterministic-service-fixtures-capture-only",
+      "approval": "candidate",
+      "regions": [
+        {
+          "id": "railSidebar",
+          "x": 0,
+          "y": 0,
+          "width": 344,
+          "height": 800
+        },
+        {
+          "id": "topBars",
+          "x": 344,
+          "y": 0,
+          "width": 936,
+          "height": 92
+        },
+        {
+          "id": "detail",
+          "x": 344,
+          "y": 92,
+          "width": 936,
+          "height": 684
+        },
+        {
+          "id": "statusbar",
+          "x": 344,
+          "y": 776,
+          "width": 936,
+          "height": 24
+        }
+      ]
+    },
+    {
+      "id": "svc-logs",
+      "theme": "light",
+      "file": "references/svc-logs-light.png",
+      "source": "stage-16.1-deterministic-service-fixtures-capture-only",
+      "approval": "candidate",
+      "regions": [
+        {
+          "id": "railSidebar",
+          "x": 0,
+          "y": 0,
+          "width": 344,
+          "height": 800
+        },
+        {
+          "id": "topBars",
+          "x": 344,
+          "y": 0,
+          "width": 936,
+          "height": 92
+        },
+        {
+          "id": "detail",
+          "x": 344,
+          "y": 92,
+          "width": 936,
+          "height": 684
+        },
+        {
+          "id": "statusbar",
+          "x": 344,
+          "y": 776,
+          "width": 936,
+          "height": 24
+        }
+      ]
+    },
+    {
+      "id": "svc-logs",
+      "theme": "dark",
+      "file": "references/svc-logs-dark.png",
+      "source": "stage-16.1-deterministic-service-fixtures-capture-only",
+      "approval": "candidate",
+      "regions": [
+        {
+          "id": "railSidebar",
+          "x": 0,
+          "y": 0,
+          "width": 344,
+          "height": 800
+        },
+        {
+          "id": "topBars",
+          "x": 344,
+          "y": 0,
+          "width": 936,
+          "height": 92
+        },
+        {
+          "id": "detail",
+          "x": 344,
+          "y": 92,
+          "width": 936,
+          "height": 684
+        },
+        {
+          "id": "statusbar",
+          "x": 344,
+          "y": 776,
+          "width": 936,
+          "height": 24
+        }
+      ]
+    },
+    {
+      "id": "svc-configure",
+      "theme": "light",
+      "file": "references/svc-configure-light.png",
+      "source": "stage-16.1-deterministic-service-fixtures-capture-only",
+      "approval": "candidate",
+      "regions": [
+        {
+          "id": "railSidebar",
+          "x": 0,
+          "y": 0,
+          "width": 344,
+          "height": 800
+        },
+        {
+          "id": "topBars",
+          "x": 344,
+          "y": 0,
+          "width": 936,
+          "height": 92
+        },
+        {
+          "id": "detail",
+          "x": 344,
+          "y": 92,
+          "width": 936,
+          "height": 684
+        },
+        {
+          "id": "statusbar",
+          "x": 344,
+          "y": 776,
+          "width": 936,
+          "height": 24
+        }
+      ]
+    },
+    {
+      "id": "svc-configure",
+      "theme": "dark",
+      "file": "references/svc-configure-dark.png",
+      "source": "stage-16.1-deterministic-service-fixtures-capture-only",
+      "approval": "candidate",
+      "regions": [
+        {
+          "id": "railSidebar",
+          "x": 0,
+          "y": 0,
+          "width": 344,
+          "height": 800
+        },
+        {
+          "id": "topBars",
+          "x": 344,
+          "y": 0,
+          "width": 936,
+          "height": 92
+        },
+        {
+          "id": "detail",
+          "x": 344,
+          "y": 92,
+          "width": 936,
+          "height": 684
+        },
+        {
+          "id": "statusbar",
+          "x": 344,
+          "y": 776,
+          "width": 936,
+          "height": 24
+        }
+      ]
     }
   ],
   "captureRuns": [
@@ -668,6 +1112,30 @@
       "buildRevision": "fa7a7c2a87cdd7b61be46d183e94f2eb9c80b810b6a708cabd5b32d1a79924fa",
       "fontRevision": "7838b1a9b60a7f3a069f798ca81a9585e1862969376445ef7debf4cd14c519ea",
       "recordedAt": "2026-08-12T13:40:51.000Z"
+    },
+    {
+      "reason": "Add 6x2 capture-only Service screen candidate slots (stage 16.1/16.2) without approving references, thresholds, or archive content",
+      "affected": [
+        "svc-empty:light",
+        "svc-empty:dark",
+        "svc-overview-running:light",
+        "svc-overview-running:dark",
+        "svc-overview-failed:light",
+        "svc-overview-failed:dark",
+        "svc-monitor:light",
+        "svc-monitor:dark",
+        "svc-logs:light",
+        "svc-logs:dark",
+        "svc-configure:light",
+        "svc-configure:dark"
+      ],
+      "renderingEnvironment": {
+        "platform": "macOS",
+        "flutter": "pending-capture",
+        "fontMode": "bundled"
+      },
+      "approval": "candidate",
+      "recordedAt": "2026-08-15T00:00:00.000Z"
     }
   ]
 }

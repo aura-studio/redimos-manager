@@ -9,7 +9,6 @@ import 'package:redimos_manager/src/models.dart';
 import 'package:redimos_manager/src/ui_theme.dart';
 import 'package:redimos_manager/src/ui_tokens.dart';
 
-import 'fake_core.dart';
 import 'golden_fonts.dart';
 
 final _config = RedimosConfig(
@@ -148,7 +147,6 @@ class _InteractionHarnessState extends State<_InteractionHarness> {
         tabLabels: tabLabels,
         tabIndex: tabIndex,
         stopAllSnapshot: const [],
-        ddb: null,
         themeMode: themeMode,
         lang: lang,
       );
@@ -166,7 +164,6 @@ class _InteractionHarnessState extends State<_InteractionHarness> {
         onRestoreAll: () {},
         onThemeMode: _selectTheme,
         onLang: _selectLanguage,
-        onDdbMutated: () {},
       );
 
   @override
@@ -181,7 +178,6 @@ class _InteractionHarnessState extends State<_InteractionHarness> {
         body: HomeChrome(
           state: chromeState,
           cb: callbacks,
-          core: FakeNativeCore(),
           child: const SizedBox.expand(
             key: ValueKey('interaction-detail-pane'),
           ),

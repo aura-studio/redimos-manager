@@ -1,11 +1,9 @@
 // Shared monitor-dashboard primitives — the sparkline / info-tile grammar used
-// by the instance Monitor tab (the REDIMOS section in lib/main.dart) and by
-// the Local DynamoDB engine's own Monitor view on the local endpoint page
-// (lib/src/ddb_views.dart). Extracted from main.dart on 2026-08-05 when the
-// engine telemetry was separated off the instance page
-// (separate-monitor-logs): the native surface was always entity-disjoint
-// (rm_status/rm_logs vs rm_ddb_get/rm_ddb_logs); only the Dart composition
-// mixed them, and this file is what both hosts now draw from.
+// by the instance Monitor tab (the REDIMOS section in lib/main.dart) and the
+// Service Monitor tab (lib/src/service_detail.dart). Extracted from main.dart
+// on 2026-08-05 when the engine telemetry was separated off the instance page
+// (separate-monitor-logs); since stage 15 the engine telemetry lives on the
+// Service entity, and this file is what both monitor hosts draw from.
 
 import 'dart:math' as math;
 
@@ -14,7 +12,7 @@ import 'package:flutter/material.dart';
 import 'ui_surfaces.dart';
 import 'ui_tokens.dart';
 
-// A section eyebrow shared by the instance and Local DynamoDB monitor panels.
+// A section eyebrow shared by the instance and Service monitor panels.
 // The legacy icon parameter remains for source compatibility; Codex section
 // headers intentionally render no decorative leading icon.
 Widget sectionHeader(BuildContext context, IconData icon, String label,
