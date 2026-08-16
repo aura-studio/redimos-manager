@@ -38,7 +38,6 @@ class ChromeState {
     required this.tabLabels,
     required this.tabIndex,
     required this.stopAllSnapshot,
-    required this.themeMode,
     required this.lang,
     this.services = const [],
     this.selectedServiceId,
@@ -66,7 +65,6 @@ class ChromeState {
   /// Active MidBar index within [tabLabels].
   final int tabIndex;
   final List<String> stopAllSnapshot;
-  final ThemeMode themeMode;
   final AppLang lang;
 
   RedimosConfig? get selectedConfig {
@@ -108,7 +106,6 @@ class ChromeCallbacks {
     required this.onStartStop,
     required this.onStopAll,
     required this.onRestoreAll,
-    required this.onThemeMode,
     required this.onLang,
     this.onSelectService = _noopId,
     this.onNewService = _noopVoid,
@@ -125,7 +122,6 @@ class ChromeCallbacks {
   final void Function(RedimosConfig) onStartStop;
   final VoidCallback onStopAll;
   final VoidCallback onRestoreAll;
-  final ValueChanged<ThemeMode> onThemeMode;
   final ValueChanged<AppLang> onLang;
 
   // Stage 12 Service callbacks. Defaults keep every pre-Service construction
@@ -205,12 +201,6 @@ class HomeChrome extends StatelessWidget {
                 key: const ValueKey('home-topbar-stop-slot'),
                 dimension: Dim.ctlH,
                 child: _stopAllButton(t),
-              ),
-              const SizedBox(width: 8),
-              SizedBox.square(
-                key: const ValueKey('home-topbar-theme-slot'),
-                dimension: Dim.ctlH,
-                child: _themeMenu(),
               ),
               const SizedBox(width: 8),
               SizedBox.square(
@@ -553,32 +543,6 @@ class HomeChrome extends StatelessWidget {
     );
   }
 
-  Widget _themeMenu() => Builder(builder: (context) {
-        final t = AppTokens.of(context);
-        return PopupMenuButton<ThemeMode>(
-          key: const ValueKey('home-theme-menu'),
-          initialValue: state.themeMode,
-          tooltip: tr('app.theme'),
-          padding: EdgeInsets.zero,
-          menuPadding: const EdgeInsets.symmetric(vertical: 4),
-          constraints: const BoxConstraints(minWidth: 180, maxWidth: 220),
-          position: PopupMenuPosition.under,
-          requestFocus: true,
-          style: _menuButtonStyle(t),
-          icon: const Icon(Icons.contrast),
-          iconSize: 14,
-          onSelected: cb.onThemeMode,
-          itemBuilder: (_) => [
-            _themeMenuItem(
-                ThemeMode.light, Icons.light_mode_outlined, tr('theme.light')),
-            _themeMenuItem(
-                ThemeMode.dark, Icons.dark_mode_outlined, tr('theme.dark')),
-            _themeMenuItem(ThemeMode.system, Icons.brightness_auto_outlined,
-                tr('theme.system')),
-          ],
-        );
-      });
-
   Widget _langMenu() => Builder(builder: (context) {
         final t = AppTokens.of(context);
         return PopupMenuButton<AppLang>(
@@ -632,20 +596,6 @@ class HomeChrome extends StatelessWidget {
             borderRadius: BorderRadius.circular(Dim.radiusS),
           ),
         ),
-      );
-
-  PopupMenuEntry<ThemeMode> _themeMenuItem(
-    ThemeMode mode,
-    IconData icon,
-    String label,
-  ) =>
-      _CodexPopupMenuItem<ThemeMode>(
-        key: ValueKey('home-theme-menu-${mode.name}-item'),
-        keyName: 'home-theme-menu-${mode.name}',
-        value: mode,
-        selected: state.themeMode == mode,
-        icon: icon,
-        label: label,
       );
 
   PopupMenuEntry<AppLang> _langMenuItem(AppLang lang, String label) =>
@@ -707,7 +657,7 @@ class HomeChrome extends StatelessWidget {
       return Container(
         key: const ValueKey('main-rail'),
         width: Dim.railW,
-        decoration: BoxDecoration(color: t.railBg),
+        decoration: BoxDecoration(gradient: t.railGradient),
         child: Stack(
           fit: StackFit.expand,
           children: [
@@ -778,6 +728,8 @@ class HomeChrome extends StatelessWidget {
                 child: Material(
                   key: ValueKey('main-rail-$keyName-tile'),
                   color: active ? t.railActiveBg : Colors.transparent,
+                  elevation: active ? 2 : 0,
+                  shadowColor: t.railGlow,
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(Dim.radiusM),
                     side: BorderSide(
@@ -811,7 +763,7 @@ class HomeChrome extends StatelessWidget {
                           children: [
                             Icon(
                               icon,
-                              size: 16,
+                              size: active ? 18 : 16,
                               color: active ? t.railFgActive : t.railFg,
                             ),
                             const SizedBox(height: 3),
@@ -826,7 +778,8 @@ class HomeChrome extends StatelessWidget {
                                   letterSpacing: .2,
                                   height: 1,
                                   color: active ? t.railFgActive : t.railFg,
-                                  fontWeight: FontWeight.w600,
+                                  fontWeight:
+                                      active ? FontWeight.w700 : FontWeight.w600,
                                 ),
                               ),
                             ),

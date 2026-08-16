@@ -86,7 +86,6 @@ class _ThreeEntityHarnessState extends State<_ThreeEntityHarness> {
           EntityKind.service => serviceTab,
         },
         stopAllSnapshot: const [],
-        themeMode: ThemeMode.dark,
         lang: AppLang.en,
       ),
       cb: ChromeCallbacks(
@@ -121,7 +120,6 @@ class _ThreeEntityHarnessState extends State<_ThreeEntityHarness> {
         onServiceStartStop: (_) {},
         onStopAll: () {},
         onRestoreAll: () {},
-        onThemeMode: (_) {},
         onLang: (_) {},
       ),
       child: const SizedBox.expand(),

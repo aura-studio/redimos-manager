@@ -186,7 +186,6 @@ void _noopHover(String? id) {}
 void _noopQuery(String q) {}
 void _noopStartStop(RedimosConfig c) {}
 void _noopInt(int i) {}
-void _noopThemeMode(ThemeMode m) {}
 void _noopLang(AppLang l) {}
 void _noop() {}
 
@@ -201,7 +200,6 @@ const _captureCb = ChromeCallbacks(
   onStartStop: _noopStartStop,
   onStopAll: _noop,
   onRestoreAll: _noop,
-  onThemeMode: _noopThemeMode,
   onLang: _noopLang,
 );
 
@@ -265,7 +263,6 @@ Widget Function(Widget) _captureChrome({
           tabLabels: tabLabels,
           tabIndex: tabIndex,
           stopAllSnapshot: const [],
-          themeMode: dark ? ThemeMode.dark : ThemeMode.light,
           lang: AppLang.en,
         ),
         cb: _captureCb,

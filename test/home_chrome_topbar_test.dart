@@ -56,8 +56,6 @@ ChromeState _state({
       tabLabels: tabLabels,
       tabIndex: tabIndex,
       stopAllSnapshot: stopAllSnapshot,
-      themeMode:
-          brightness == Brightness.dark ? ThemeMode.dark : ThemeMode.light,
       lang: AppLang.en,
     );
 
@@ -76,7 +74,6 @@ ChromeCallbacks _callbacks({
       onStartStop: (_) {},
       onStopAll: onStopAll ?? () {},
       onRestoreAll: onRestoreAll ?? () {},
-      onThemeMode: (_) {},
       onLang: (_) {},
     );
 
@@ -109,7 +106,6 @@ List<Rect> _invariantGeometry(WidgetTester tester) => [
       tester.getRect(find.byKey(const ValueKey('home-topbar-sub-entity'))),
       tester.getRect(find.byKey(const ValueKey('home-topbar-actions'))),
       tester.getRect(find.byKey(const ValueKey('home-topbar-stop-slot'))),
-      tester.getRect(find.byKey(const ValueKey('home-topbar-theme-slot'))),
       tester.getRect(find.byKey(const ValueKey('home-topbar-lang-slot'))),
     ];
 
@@ -144,9 +140,6 @@ void main() {
         final slots = [
           tester.getSize(
             find.byKey(const ValueKey('home-topbar-stop-slot')),
-          ),
-          tester.getSize(
-            find.byKey(const ValueKey('home-topbar-theme-slot')),
           ),
           tester.getSize(
             find.byKey(const ValueKey('home-topbar-lang-slot')),

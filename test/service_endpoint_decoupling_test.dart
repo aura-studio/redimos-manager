@@ -159,7 +159,6 @@ void _chromeTests() {
           tabLabels: const ['Overview'],
           tabIndex: 0,
           stopAllSnapshot: const [],
-          themeMode: ThemeMode.dark,
           lang: AppLang.en,
         ),
         cb: ChromeCallbacks(
@@ -173,7 +172,6 @@ void _chromeTests() {
           onStartStop: (_) {},
           onStopAll: () {},
           onRestoreAll: () {},
-          onThemeMode: (_) {},
           onLang: (_) {},
         ),
         child: const SizedBox.expand(),

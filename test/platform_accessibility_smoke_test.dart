@@ -40,7 +40,6 @@ const _callbacks = ChromeCallbacks(
   onStartStop: _ignoreConfig,
   onStopAll: _ignore,
   onRestoreAll: _ignore,
-  onThemeMode: _ignoreThemeMode,
   onLang: _ignoreLang,
 );
 
@@ -51,7 +50,6 @@ void _ignoreInt(int _) {}
 void _ignoreLang(AppLang _) {}
 void _ignoreNullableString(String? _) {}
 void _ignoreString(String _) {}
-void _ignoreThemeMode(ThemeMode _) {}
 
 ChromeState _state(Brightness brightness) => ChromeState(
       entityKind: EntityKind.instance,
@@ -72,8 +70,6 @@ ChromeState _state(Brightness brightness) => ChromeState(
       ],
       tabIndex: 0,
       stopAllSnapshot: const [],
-      themeMode:
-          brightness == Brightness.dark ? ThemeMode.dark : ThemeMode.light,
       lang: AppLang.zh,
     );
 
@@ -98,7 +94,6 @@ Future<void> _pumpShell(
     onStartStop: _callbacks.onStartStop,
     onStopAll: _callbacks.onStopAll,
     onRestoreAll: _callbacks.onRestoreAll,
-    onThemeMode: _callbacks.onThemeMode,
     onLang: _callbacks.onLang,
   );
 
@@ -196,7 +191,6 @@ void main() {
 
         expect(find.text('实例'), findsWidgets);
         expect(find.text('浏览器'), findsWidgets);
-        expect(find.byTooltip('主题'), findsOneWidget);
         expect(find.byTooltip('语言'), findsOneWidget);
 
         final endpointSemantics =

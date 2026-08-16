@@ -72,8 +72,6 @@ ChromeState _state({
       tabLabels: const ['Browse'],
       tabIndex: 0,
       stopAllSnapshot: const [],
-      themeMode:
-          brightness == Brightness.dark ? ThemeMode.dark : ThemeMode.light,
       lang: AppLang.en,
     );
 
@@ -96,7 +94,6 @@ ChromeCallbacks _callbacks({
       onStartStop: onStartStop ?? (_) {},
       onStopAll: () {},
       onRestoreAll: () {},
-      onThemeMode: (_) {},
       onLang: (_) {},
     );
 

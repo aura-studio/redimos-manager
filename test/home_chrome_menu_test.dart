@@ -1,7 +1,5 @@
-import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:redimos_manager/src/home_chrome.dart';
@@ -22,7 +20,6 @@ final _config = RedimosConfig(
 
 ChromeState _state({
   required Brightness brightness,
-  ThemeMode? themeMode,
   AppLang lang = AppLang.en,
 }) =>
     ChromeState(
@@ -37,13 +34,10 @@ ChromeState _state({
       tabLabels: const ['Browse'],
       tabIndex: 0,
       stopAllSnapshot: const [],
-      themeMode: themeMode ??
-          (brightness == Brightness.dark ? ThemeMode.dark : ThemeMode.light),
       lang: lang,
     );
 
 ChromeCallbacks _callbacks({
-  ValueChanged<ThemeMode>? onThemeMode,
   ValueChanged<AppLang>? onLang,
 }) =>
     ChromeCallbacks(
@@ -57,7 +51,6 @@ ChromeCallbacks _callbacks({
       onStartStop: (_) {},
       onStopAll: () {},
       onRestoreAll: () {},
-      onThemeMode: onThemeMode ?? (_) {},
       onLang: onLang ?? (_) {},
     );
 
@@ -96,10 +89,6 @@ Finder _popupMaterialFinder(String rowKey) {
   return find.ancestor(of: menuRow, matching: find.byType(Material)).last;
 }
 
-Material _popupMaterial(WidgetTester tester) => tester.widget<Material>(
-      _popupMaterialFinder('home-theme-menu-light-row'),
-    );
-
 void _expectLabelFits(WidgetTester tester, String keyName) {
   final label = find.byKey(ValueKey('$keyName-label'));
   final row = find.byKey(ValueKey('$keyName-row'));
@@ -115,163 +104,6 @@ void main() {
 
   tearDown(() {
     appLang.value = AppLang.en;
-  });
-
-  testWidgets('theme popup uses compact semantic shell and stable rows',
-      (tester) async {
-    tester.view.physicalSize = const Size(2560, 1600);
-    tester.view.devicePixelRatio = 2;
-    addTearDown(tester.view.reset);
-
-    for (final brightness in Brightness.values) {
-      final tokens = AppTokens.forBrightness(brightness);
-      await _pumpChrome(
-        tester,
-        brightness: brightness,
-        state: _state(brightness: brightness),
-      );
-
-      final slot = find.byKey(const ValueKey('home-topbar-theme-slot'));
-      expect(tester.getSize(slot), const Size.square(Dim.ctlH));
-      final slotBefore = tester.getRect(slot);
-
-      await tester.tap(find.byKey(const ValueKey('home-theme-menu')));
-      await tester.pumpAndSettle();
-
-      final menuMaterial = _popupMaterial(tester);
-      expectInsideTestViewport(
-        tester,
-        _popupMaterialFinder('home-theme-menu-light-row'),
-      );
-      expectHitTestable(
-        tester,
-        find.byKey(const ValueKey('home-theme-menu-system-action')),
-      );
-      final shape = menuMaterial.shape! as RoundedRectangleBorder;
-      expect(menuMaterial.color, tokens.panel);
-      expect(menuMaterial.surfaceTintColor, Colors.transparent);
-      expect(menuMaterial.shadowColor, Colors.black.withValues(alpha: 0.28));
-      expect(menuMaterial.elevation, 8);
-      expect(shape.side.color, tokens.border);
-      expect(shape.side.width, Dim.borderW);
-
-      final scrollView = tester.widget<SingleChildScrollView>(
-        find.byType(SingleChildScrollView).last,
-      );
-      expect(scrollView.padding, const EdgeInsets.symmetric(vertical: 4));
-
-      const rows = [
-        'home-theme-menu-light',
-        'home-theme-menu-dark',
-        'home-theme-menu-system',
-      ];
-      final geometry = rows.map((key) => _rowRect(tester, key)).toList();
-      expect(geometry.map((rect) => rect.height), everyElement(Dim.rowH));
-      expect(geometry[1].top, geometry[0].bottom);
-      expect(geometry[2].top, geometry[1].bottom);
-
-      final selected = brightness == Brightness.dark ? rows[1] : rows[0];
-      expect(_rowDecoration(tester, selected).color, tokens.selection);
-      expect(
-        tester
-            .widget<Text>(
-              find.byKey(ValueKey('$selected-label')),
-            )
-            .style!
-            .color,
-        tokens.accent,
-      );
-      expect(find.byKey(ValueKey('$selected-check')), findsOneWidget);
-
-      for (final row in rows) {
-        _expectLabelFits(tester, row);
-      }
-      expect(tester.getRect(slot), slotBefore);
-      expect(tester.takeException(), isNull);
-
-      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
-      await tester.pumpAndSettle();
-      expect(find.byKey(const ValueKey('home-theme-menu-light-row')),
-          findsNothing);
-      expect(tester.getRect(slot), slotBefore);
-    }
-  });
-
-  testWidgets('theme rows keep geometry across hover and keyboard focus',
-      (tester) async {
-    tester.view.physicalSize = const Size(2560, 1600);
-    tester.view.devicePixelRatio = 2;
-    addTearDown(tester.view.reset);
-
-    const tokens = AppTokens.dark;
-    await _pumpChrome(
-      tester,
-      brightness: Brightness.dark,
-      state: _state(brightness: Brightness.dark),
-    );
-    await tester.tap(find.byKey(const ValueKey('home-theme-menu')));
-    await tester.pumpAndSettle();
-
-    const rows = [
-      'home-theme-menu-light',
-      'home-theme-menu-dark',
-      'home-theme-menu-system',
-    ];
-    final before = rows.map((key) => _rowRect(tester, key)).toList();
-
-    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
-    await mouse.addPointer(location: Offset.zero);
-    addTearDown(mouse.removePointer);
-    await mouse.moveTo(
-      tester.getCenter(
-        find.byKey(const ValueKey('home-theme-menu-system-action')),
-      ),
-    );
-    await tester.pump();
-    expect(rows.map((key) => _rowRect(tester, key)).toList(), before);
-    expect(
-      _rowDecoration(tester, rows[2]).color,
-      Color.alphaBlend(tokens.hover, Colors.transparent),
-    );
-
-    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
-    await tester.pump();
-    expect(rows.map((key) => _rowRect(tester, key)).toList(), before);
-    final focused = rows.where(
-      (key) => _rowDecoration(tester, key).border!.top.color == tokens.focus,
-    );
-    expect(focused, hasLength(1));
-    expect(tester.takeException(), isNull);
-  });
-
-  testWidgets('theme menu keyboard selection preserves callback value',
-      (tester) async {
-    tester.view.physicalSize = const Size(2560, 1600);
-    tester.view.devicePixelRatio = 2;
-    addTearDown(tester.view.reset);
-
-    final selected = <ThemeMode>[];
-    await _pumpChrome(
-      tester,
-      brightness: Brightness.dark,
-      state: _state(
-        brightness: Brightness.dark,
-        themeMode: ThemeMode.system,
-      ),
-      callbacks: _callbacks(onThemeMode: selected.add),
-    );
-
-    await tester.tap(find.byKey(const ValueKey('home-theme-menu')));
-    await tester.pumpAndSettle();
-    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
-    await tester.pump();
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-    await tester.pumpAndSettle();
-
-    expect(selected, hasLength(1));
-    expect(ThemeMode.values, contains(selected.single));
-    expect(
-        find.byKey(const ValueKey('home-theme-menu-light-row')), findsNothing);
   });
 
   testWidgets('language popup keeps labels visible and callbacks exact',

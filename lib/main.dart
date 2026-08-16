@@ -25,47 +25,8 @@ import 'src/ui_theme.dart';
 import 'src/ui_tokens.dart';
 
 void main() {
-  _loadThemeMode();
   loadAppLang();
   runApp(const RedimosManagerApp());
-}
-
-/// App-wide theme selection (Light / Dark / System), chosen from the app bar.
-final ValueNotifier<ThemeMode> appThemeMode = ValueNotifier(ThemeMode.system);
-
-// The theme choice is persisted next to the Go core's store, in ~/.redimos/theme.
-File? _themeFile() {
-  final home =
-      Platform.environment['HOME'] ?? Platform.environment['USERPROFILE'];
-  if (home == null || home.isEmpty) return null;
-  return File(
-      '$home${Platform.pathSeparator}.redimos${Platform.pathSeparator}theme');
-}
-
-void _loadThemeMode() {
-  try {
-    final f = _themeFile();
-    if (f != null && f.existsSync()) {
-      appThemeMode.value = switch (f.readAsStringSync().trim()) {
-        'light' => ThemeMode.light,
-        'dark' => ThemeMode.dark,
-        _ => ThemeMode.system,
-      };
-    }
-  } catch (_) {}
-}
-
-void _saveThemeMode(ThemeMode m) {
-  try {
-    final f = _themeFile();
-    if (f == null) return;
-    f.parent.createSync(recursive: true);
-    f.writeAsStringSync(switch (m) {
-      ThemeMode.light => 'light',
-      ThemeMode.dark => 'dark',
-      ThemeMode.system => 'system',
-    });
-  } catch (_) {}
 }
 
 class RedimosManagerApp extends StatelessWidget {
@@ -73,16 +34,15 @@ class RedimosManagerApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Rebuild the whole app on a theme OR language change, so every widget that
-    // reads tr() re-localises and the theme re-applies.
+    // Rebuild the whole app on a language change so every widget that reads
+    // tr() re-localises. The app ships a single light theme; the dark paint
+    // tokens survive only as the pixel-evidence capture layer.
     return AnimatedBuilder(
-      animation: Listenable.merge([appThemeMode, appLang]),
+      animation: appLang,
       builder: (_, __) => MaterialApp(
         title: 'Redimos Manager',
         debugShowCheckedModeBanner: false,
         theme: appTheme(Brightness.light),
-        darkTheme: appTheme(Brightness.dark),
-        themeMode: appThemeMode.value,
         scrollBehavior: appScrollBehavior,
         home: const HomePage(),
       ),
@@ -474,7 +434,6 @@ class _HomePageState extends State<HomePage>
                   ? _epScreenIndex
                   : _tabs.index,
           stopAllSnapshot: _stopAllSnapshot,
-          themeMode: appThemeMode.value,
           lang: appLang.value,
           services: _svcState?.services ?? const [],
           selectedServiceId: _svcState?.selectedId,
@@ -493,10 +452,6 @@ class _HomePageState extends State<HomePage>
           onServiceStartStop: _serviceStartStop,
           onStopAll: _stopAll,
           onRestoreAll: _restoreAll,
-          onThemeMode: (m) {
-            appThemeMode.value = m;
-            _saveThemeMode(m);
-          },
           onLang: (l) {
             appLang.value = l;
             saveAppLang(l);

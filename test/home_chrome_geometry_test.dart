@@ -46,8 +46,6 @@ ChromeState _state({
       ],
       tabIndex: 0,
       stopAllSnapshot: const [],
-      themeMode:
-          brightness == Brightness.dark ? ThemeMode.dark : ThemeMode.light,
       lang: AppLang.en,
     );
 
@@ -62,7 +60,6 @@ const _callbacks = ChromeCallbacks(
   onStartStop: _ignoreConfig,
   onStopAll: _ignore,
   onRestoreAll: _ignore,
-  onThemeMode: _ignoreThemeMode,
   onLang: _ignoreLang,
 );
 
@@ -73,7 +70,6 @@ void _ignoreInt(int _) {}
 void _ignoreLang(AppLang _) {}
 void _ignoreNullableString(String? _) {}
 void _ignoreString(String _) {}
-void _ignoreThemeMode(ThemeMode _) {}
 
 Future<void> _pumpChrome(
   WidgetTester tester, {

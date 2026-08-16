@@ -65,13 +65,9 @@ String trp(String key, Map<String, String> vars) {
 // Product names (PartiQL, DynamoDB, Redis, redimos) intentionally stay as-is.
 const Map<String, Map<AppLang, String>> _strings = {
   // --- top bar ---
-  'app.theme': {AppLang.en: 'Theme', AppLang.zh: '主题'},
   'app.language': {AppLang.en: 'Language', AppLang.zh: '语言'},
   'app.stopAll': {AppLang.en: 'Stop all', AppLang.zh: '全部停止'},
   'app.startAll': {AppLang.en: 'Start all', AppLang.zh: '全部启动'},
-  'theme.light': {AppLang.en: 'Light', AppLang.zh: '浅色'},
-  'theme.dark': {AppLang.en: 'Dark', AppLang.zh: '深色'},
-  'theme.system': {AppLang.en: 'System', AppLang.zh: '跟随系统'},
 
   // --- right-pane tabs ---
   'tab.configure': {AppLang.en: 'Configure', AppLang.zh: '配置'},

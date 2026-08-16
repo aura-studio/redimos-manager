@@ -147,7 +147,6 @@ class _InteractionHarnessState extends State<_InteractionHarness> {
         tabLabels: tabLabels,
         tabIndex: tabIndex,
         stopAllSnapshot: const [],
-        themeMode: themeMode,
         lang: lang,
       );
 
@@ -162,7 +161,6 @@ class _InteractionHarnessState extends State<_InteractionHarness> {
         onStartStop: (_) {},
         onStopAll: () {},
         onRestoreAll: () {},
-        onThemeMode: _selectTheme,
         onLang: _selectLanguage,
       );
 
@@ -377,27 +375,12 @@ void main() {
       trailingSlot,
     );
 
-    await tester.tap(find.byKey(const ValueKey('home-theme-menu')));
-    await tester.pumpAndSettle();
-    final themeSlotBefore = tester.getRect(
-      find.byKey(const ValueKey('home-topbar-theme-slot')),
-    );
-    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
-    await tester.pump();
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    // The app ships light-only; the harness still exercises the dark paint
+    // tokens by switching the pumped MaterialApp directly.
+    state._selectTheme(ThemeMode.light);
     await tester.pumpAndSettle();
 
-    expect(state.themeSelections, hasLength(1));
-    expect(state.themeMode, state.themeSelections.single);
-    expect(ThemeMode.values, contains(state.themeMode));
-    expect(
-      find.byKey(const ValueKey('home-theme-menu-light-row')),
-      findsNothing,
-    );
-    expect(
-      tester.getRect(find.byKey(const ValueKey('home-topbar-theme-slot'))),
-      themeSlotBefore,
-    );
+    expect(state.themeMode, ThemeMode.light);
     expect(_shellGeometry(tester), shell);
     _expectOffsetsStable(_topbarAnchors(tester), topbarBefore);
 
@@ -444,11 +427,7 @@ void main() {
     addTearDown(mouse.removePointer);
 
     for (final mode in [ThemeMode.light, ThemeMode.dark]) {
-      await tester.tap(find.byKey(const ValueKey('home-theme-menu')));
-      await tester.pumpAndSettle();
-      await tester.tap(
-        find.byKey(ValueKey('home-theme-menu-${mode.name}-row')),
-      );
+      state._selectTheme(mode);
       await tester.pumpAndSettle();
 
       expect(state.themeMode, mode);

@@ -29,8 +29,6 @@ ChromeState _state(EntityKind kind, Brightness brightness) => ChromeState(
       tabLabels: const ['Browse'],
       tabIndex: 0,
       stopAllSnapshot: const [],
-      themeMode:
-          brightness == Brightness.dark ? ThemeMode.dark : ThemeMode.light,
       lang: AppLang.en,
     );
 
@@ -46,7 +44,6 @@ ChromeCallbacks _callbacks({ValueChanged<EntityKind>? onEntityKind}) =>
       onStartStop: (_) {},
       onStopAll: () {},
       onRestoreAll: () {},
-      onThemeMode: (_) {},
       onLang: (_) {},
     );
 
@@ -169,7 +166,7 @@ void main() {
     }
   });
 
-  testWidgets('rail uses flat themed paint without gradients or glow',
+  testWidgets('rail paints a themed gradient surface and glowing active tile',
       (tester) async {
     tester.view.physicalSize = const Size(2560, 1600);
     tester.view.devicePixelRatio = 2;
@@ -188,8 +185,7 @@ void main() {
         find.byKey(const ValueKey('main-rail')),
       );
       final railDecoration = rail.decoration! as BoxDecoration;
-      expect(railDecoration.color, tokens.railBg);
-      expect(railDecoration.gradient, isNull);
+      expect(railDecoration.gradient, tokens.railGradient);
       expect(railDecoration.boxShadow, isNull);
 
       final activeTile = tester.widget<Material>(
@@ -199,7 +195,10 @@ void main() {
         find.byKey(const ValueKey('main-rail-endpoint-tile')),
       );
       expect(activeTile.color, tokens.railActiveBg);
+      expect(activeTile.shadowColor, tokens.railGlow);
+      expect(activeTile.elevation, 2);
       expect(inactiveTile.color, Colors.transparent);
+      expect(inactiveTile.elevation, 0);
 
       final indicator = tester.widget<DecoratedBox>(
         find.byKey(const ValueKey('main-rail-instance-indicator')),

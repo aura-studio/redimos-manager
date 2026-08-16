@@ -59,7 +59,6 @@ const _callbacks = ChromeCallbacks(
   onStartStop: _ignoreConfig,
   onStopAll: _ignore,
   onRestoreAll: _ignore,
-  onThemeMode: _ignoreThemeMode,
   onLang: _ignoreLang,
 );
 
@@ -70,7 +69,6 @@ void _ignoreInt(int _) {}
 void _ignoreLang(AppLang _) {}
 void _ignoreNullableString(String? _) {}
 void _ignoreString(String _) {}
-void _ignoreThemeMode(ThemeMode _) {}
 
 class _ScreenCase {
   const _ScreenCase({
@@ -226,9 +224,6 @@ Widget Function(Widget) _chromeFor(
                   : _localizedTabs(screen.kind),
               tabIndex: screen.tabIndex,
               stopAllSnapshot: const [],
-              themeMode: brightness == Brightness.dark
-                  ? ThemeMode.dark
-                  : ThemeMode.light,
               lang: appLang.value,
             ),
             cb: _callbacks,
@@ -360,7 +355,6 @@ void _expectScaledShell(
     tester,
     find.byKey(const ValueKey('entity-sidebar-new-action')),
   );
-  expectHitTestable(tester, find.byKey(const ValueKey('home-theme-menu')));
   expectHitTestable(tester, find.byKey(const ValueKey('home-language-menu')));
   expect(tester.takeException(), isNull);
 }
