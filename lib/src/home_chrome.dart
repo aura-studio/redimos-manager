@@ -17,6 +17,7 @@ import 'models.dart';
 import 'ui_fields.dart';
 import 'ui_primitives.dart';
 import 'ui_status.dart';
+import 'ui_surfaces.dart';
 import 'ui_tokens.dart';
 
 /// v2.3 rail entity kind — which group the entity sidebar lists. v1.2 adds
@@ -794,20 +795,26 @@ class HomeChrome extends StatelessWidget {
                               color: active ? t.railFgActive : t.railFg,
                             ),
                             const SizedBox(height: 3),
-                            FittedBox(
-                              fit: BoxFit.scaleDown,
-                              child: Text(
-                                label,
-                                maxLines: 1,
-                                softWrap: false,
-                                style: TextStyle(
-                                  fontSize: 10,
-                                  letterSpacing: .2,
-                                  height: 1,
-                                  color: active ? t.railFgActive : t.railFg,
-                                  fontWeight: active
-                                      ? FontWeight.w700
-                                      : FontWeight.w600,
+                            // Horizontal inset so the scaled-down label never
+                            // paints flush against the tile's left/right edge.
+                            Padding(
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 3),
+                              child: FittedBox(
+                                fit: BoxFit.scaleDown,
+                                child: Text(
+                                  label,
+                                  maxLines: 1,
+                                  softWrap: false,
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    letterSpacing: .2,
+                                    height: 1,
+                                    color: active ? t.railFgActive : t.railFg,
+                                    fontWeight: active
+                                        ? FontWeight.w700
+                                        : FontWeight.w600,
+                                  ),
                                 ),
                               ),
                             ),
@@ -952,45 +959,36 @@ class HomeChrome extends StatelessWidget {
             Padding(
               key: const ValueKey('entity-sidebar-group-header'),
               padding: const EdgeInsets.fromLTRB(12, 2, 12, 0),
-              child: Row(
-                children: [
-                  Icon(Icons.keyboard_arrow_down, size: 10, color: t.text3),
-                  const SizedBox(width: 7),
-                  Text(
-                    (isInstance
-                            ? tr('nav.instances')
-                            : isService
-                                ? tr('nav.services')
-                                : tr('nav.endpoints'))
-                        .toUpperCase(),
+              // One flat list per pane now — no collapsible groups — so the
+              // old collapse-era chevron row becomes the design-system
+              // section header (eyebrow + hairline rule), keeping the count
+              // pill as its trailing element.
+              child: CodexSectionHeader(
+                label: (isInstance
+                        ? tr('nav.instances')
+                        : isService
+                            ? tr('nav.services')
+                            : tr('nav.endpoints'))
+                    .toUpperCase(),
+                trailing: Container(
+                  key: const ValueKey('entity-sidebar-count'),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 7, vertical: 1),
+                  decoration: BoxDecoration(
+                    color: t.panel2,
+                    borderRadius: BorderRadius.circular(999),
+                    border: Border.all(color: t.hairline),
+                  ),
+                  child: Text(
+                    '$itemCount',
                     style: Ts.style(
-                      size: 10.5,
-                      weight: FontWeight.w700,
-                      color: t.text3,
-                      letterSpacing: 1,
+                      size: 10,
+                      weight: FontWeight.w500,
+                      color: t.text2,
+                      monoFont: true,
                     ),
                   ),
-                  const SizedBox(width: 7),
-                  Container(
-                    key: const ValueKey('entity-sidebar-count'),
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 7, vertical: 1),
-                    decoration: BoxDecoration(
-                      color: t.panel2,
-                      borderRadius: BorderRadius.circular(999),
-                      border: Border.all(color: t.hairline),
-                    ),
-                    child: Text(
-                      '$itemCount',
-                      style: Ts.style(
-                        size: 10,
-                        weight: FontWeight.w500,
-                        color: t.text2,
-                        monoFont: true,
-                      ),
-                    ),
-                  ),
-                ],
+                ),
               ),
             ),
             Expanded(
