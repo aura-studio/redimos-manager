@@ -19,6 +19,7 @@ import 'src/playground_page.dart';
 import 'src/service_configure.dart';
 import 'src/service_detail.dart';
 import 'src/services_state.dart';
+import 'src/theme_prefs.dart';
 import 'src/ui_states.dart';
 import 'src/ui_surfaces.dart';
 import 'src/ui_theme.dart';
@@ -26,6 +27,7 @@ import 'src/ui_tokens.dart';
 
 void main() {
   loadAppLang();
+  loadAppStyle();
   runApp(const RedimosManagerApp());
 }
 
@@ -34,15 +36,16 @@ class RedimosManagerApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Rebuild the whole app on a language change so every widget that reads
-    // tr() re-localises. The app ships a single light theme; the dark paint
-    // tokens survive only as the pixel-evidence capture layer.
+    // Rebuild the whole app on a language or style change so every widget that
+    // reads tr() / AppTokens re-resolves. The persisted style (restored in
+    // main) picks one of the seven palettes; `dark` tokens survive only as the
+    // pixel-evidence capture layer.
     return AnimatedBuilder(
-      animation: appLang,
+      animation: Listenable.merge([appLang, appStyle]),
       builder: (_, __) => MaterialApp(
         title: 'Redimos Manager',
         debugShowCheckedModeBanner: false,
-        theme: appTheme(Brightness.light),
+        theme: appThemeForStyle(appStyle.value),
         scrollBehavior: appScrollBehavior,
         home: const HomePage(),
       ),

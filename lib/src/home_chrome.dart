@@ -14,6 +14,7 @@ import 'package:flutter/semantics.dart';
 
 import 'i18n.dart';
 import 'models.dart';
+import 'theme_prefs.dart';
 import 'ui_fields.dart';
 import 'ui_primitives.dart';
 import 'ui_status.dart';
@@ -202,6 +203,12 @@ class HomeChrome extends StatelessWidget {
                 key: const ValueKey('home-topbar-stop-slot'),
                 dimension: Dim.ctlH,
                 child: _stopAllButton(t),
+              ),
+              const SizedBox(width: 8),
+              SizedBox(
+                key: const ValueKey('home-topbar-style-slot'),
+                height: Dim.ctlH,
+                child: _styleMenu(),
               ),
               const SizedBox(width: 8),
               SizedBox.square(
@@ -608,6 +615,56 @@ class HomeChrome extends StatelessWidget {
         selected: state.lang == lang,
         label: label,
       );
+
+  // v1.3: theme-style picker. A text dropdown (current palette label + ▾)
+  // sitting between stop-all and the language menu; picking a style swaps the
+  // global appStyle (rebuilding MaterialApp's theme) and persists the choice.
+  Widget _styleMenu() => Builder(builder: (context) {
+        final t = AppTokens.of(context);
+        return PopupMenuButton<AppStyle>(
+          key: const ValueKey('home-style-menu'),
+          initialValue: appStyle.value,
+          tooltip: tr('app.theme'),
+          padding: EdgeInsets.zero,
+          menuPadding: const EdgeInsets.symmetric(vertical: 4),
+          constraints: const BoxConstraints(minWidth: 152, maxWidth: 196),
+          position: PopupMenuPosition.under,
+          requestFocus: true,
+          style: _menuButtonStyle(t).copyWith(
+            fixedSize: const WidgetStatePropertyAll(null),
+            minimumSize: const WidgetStatePropertyAll(Size(0, Dim.ctlH)),
+            maximumSize:
+                const WidgetStatePropertyAll(Size(double.infinity, Dim.ctlH)),
+            padding: const WidgetStatePropertyAll(
+              EdgeInsets.symmetric(horizontal: 10),
+            ),
+          ),
+          onSelected: (s) {
+            if (s == appStyle.value) return;
+            appStyle.value = s;
+            saveAppStyle();
+          },
+          itemBuilder: (_) => [
+            for (final s in AppStyle.values)
+              _CodexPopupMenuItem<AppStyle>(
+                key: ValueKey('home-style-menu-${s.id}-item'),
+                keyName: 'home-style-menu-${s.id}',
+                value: s,
+                selected: s == appStyle.value,
+                label: s.label,
+              ),
+          ],
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Text(
+              appStyle.value.label,
+              style: Ts.style(
+                  size: Ts.md, weight: FontWeight.w600, color: t.text2),
+            ),
+            const SizedBox(width: 4),
+            Text('▾', style: Ts.style(size: Ts.sm, color: t.text3)),
+          ]),
+        );
+      });
 
   // AppBar action: stop-all / restore toggle. When anything is running it stops
   // all (recording the running set); when nothing is running but a set was

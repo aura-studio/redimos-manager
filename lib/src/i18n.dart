@@ -66,6 +66,7 @@ String trp(String key, Map<String, String> vars) {
 const Map<String, Map<AppLang, String>> _strings = {
   // --- top bar ---
   'app.language': {AppLang.en: 'Language', AppLang.zh: '语言'},
+  'app.theme': {AppLang.en: 'Theme', AppLang.zh: '主题'},
   'app.stopAll': {AppLang.en: 'Stop all', AppLang.zh: '全部停止'},
   'app.startAll': {AppLang.en: 'Start all', AppLang.zh: '全部启动'},
 

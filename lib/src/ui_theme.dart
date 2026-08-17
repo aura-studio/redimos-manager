@@ -15,8 +15,24 @@ const ScrollBehavior appScrollBehavior = MaterialScrollBehavior();
 ThemeData appTheme(
   Brightness brightness, {
   String? fontFamily,
+}) =>
+    _buildTheme(AppTokens.forBrightness(brightness), brightness,
+        fontFamily: fontFamily);
+
+/// Style-driven factory for the seven selectable palettes (v1.3). The
+/// Brightness-based [appTheme] above is byte-identical to before and remains
+/// the entry point for goldens and the capture layer.
+ThemeData appThemeForStyle(
+  AppStyle style, {
+  String? fontFamily,
+}) =>
+    _buildTheme(style.tokens, style.brightness, fontFamily: fontFamily);
+
+ThemeData _buildTheme(
+  AppTokens tokens,
+  Brightness brightness, {
+  String? fontFamily,
 }) {
-  final tokens = AppTokens.forBrightness(brightness);
   final base = ThemeData(
     useMaterial3: true,
     brightness: brightness,

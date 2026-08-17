@@ -222,6 +222,247 @@ class AppTokens extends ThemeExtension<AppTokens> {
         border: Color(0x4DFFFFFF)),
   );
 
+  // ------------------------------------------------- style palettes (v1.3) ---
+  // Six additional named palettes selectable at runtime via AppStyle. Values
+  // are the pixel-QC'd mappings from the bold-recolor mockups (design doc:
+  // .kiro/specs/theme-style-selector). `light` (= Parchment) and `dark`
+  // (capture layer) above remain untouched.
+
+  /// Forest: deep green surfaces, amber accent.
+  static const AppTokens forest = AppTokens(
+    bg: Color(0xFF1C241E),
+    panel: Color(0xFF232C26),
+    panel2: Color(0xFF2A352D),
+    sidebar: Color(0xFF202A23),
+    border: Color(0xFF3E4C42),
+    hairline: Color(0xFF323E35),
+    text: Color(0xFFF0EDE2),
+    text2: Color(0xFFB8BFB2),
+    text3: Color(0xFF9AA594),
+    accent: Color(0xFFE8A33D),
+    onAccent: Color(0xFF1C241E),
+    hover: Color(0xFF2A352D),
+    selection: Color(0xFF3A4432),
+    focus: Color(0xFFC07F2A),
+    danger: Color(0xFFFF6B5E),
+    success: Color(0xFF57C785),
+    warning: Color(0xFFE8C35A),
+    highlight: Color(0x17FFFFFF),
+    highlightSoft: Color(0x0DFFFFFF),
+    railBg: Color(0xFF171E19),
+    railBgTop: Color(0xFF1B231D),
+    railBgBottom: Color(0xFF131A15),
+    railFg: Color(0xFF9AA594),
+    railFgActive: Color(0xFFF0C778),
+    railActiveBg: Color(0xFF333F2A),
+    railGlow: Color(0x40E8A33D),
+    railIndicatorTop: Color(0xFFE8A33D),
+    railIndicatorBottom: Color(0xFFE8A33D),
+    typeString: _typeDarkString,
+    typeHash: _typeDarkHash,
+    typeList: _typeDarkList,
+    typeSet: _typeDarkSet,
+    typeZset: _typeDarkZset,
+    typeStream: _typeDarkStream,
+    typeJson: _typeDarkJson,
+  );
+
+  /// Midnight: deep navy surfaces, bright blue accent.
+  static const AppTokens midnight = AppTokens(
+    bg: Color(0xFF10151D),
+    panel: Color(0xFF161C26),
+    panel2: Color(0xFF1C242F),
+    sidebar: Color(0xFF131923),
+    border: Color(0xFF2E3A4B),
+    hairline: Color(0xFF242F3E),
+    text: Color(0xFFE8ECF3),
+    text2: Color(0xFFA9B4C4),
+    text3: Color(0xFF8B97A8),
+    accent: Color(0xFF4F8FE8),
+    onAccent: Color(0xFFFFFFFF),
+    hover: Color(0xFF1C242F),
+    selection: Color(0xFF1E3A5C),
+    focus: Color(0xFF3A72C4),
+    danger: Color(0xFFFF6B6B),
+    success: Color(0xFF4CC27A),
+    warning: Color(0xFFE8C35A),
+    highlight: Color(0x17FFFFFF),
+    highlightSoft: Color(0x0DFFFFFF),
+    railBg: Color(0xFF0C1118),
+    railBgTop: Color(0xFF0F141C),
+    railBgBottom: Color(0xFF090D13),
+    railFg: Color(0xFF8B97A8),
+    railFgActive: Color(0xFF7FB2F0),
+    railActiveBg: Color(0xFF1C3250),
+    railGlow: Color(0x404F8FE8),
+    railIndicatorTop: Color(0xFF4F8FE8),
+    railIndicatorBottom: Color(0xFF4F8FE8),
+    typeString: _typeDarkString,
+    typeHash: _typeDarkHash,
+    typeList: _typeDarkList,
+    typeSet: _typeDarkSet,
+    typeZset: _typeDarkZset,
+    typeStream: _typeDarkStream,
+    typeJson: _typeDarkJson,
+  );
+
+  /// Charcoal: neutral near-black surfaces, amber accent.
+  static const AppTokens charcoal = AppTokens(
+    bg: Color(0xFF191919),
+    panel: Color(0xFF212121),
+    panel2: Color(0xFF2A2A2A),
+    sidebar: Color(0xFF1E1E1E),
+    border: Color(0xFF3D3D3D),
+    hairline: Color(0xFF313131),
+    text: Color(0xFFF2F0EB),
+    text2: Color(0xFFBDBAB2),
+    text3: Color(0xFF9C9890),
+    accent: Color(0xFFFFB020),
+    onAccent: Color(0xFF241B07),
+    hover: Color(0xFF2A2A2A),
+    selection: Color(0xFF453517),
+    focus: Color(0xFFD9950F),
+    danger: Color(0xFFFF6B6B),
+    success: Color(0xFF4CC27A),
+    warning: Color(0xFFE8C35A),
+    highlight: Color(0x17FFFFFF),
+    highlightSoft: Color(0x0DFFFFFF),
+    railBg: Color(0xFF141414),
+    railBgTop: Color(0xFF171717),
+    railBgBottom: Color(0xFF101010),
+    railFg: Color(0xFF9C9890),
+    railFgActive: Color(0xFFFFC655),
+    railActiveBg: Color(0xFF3A2E16),
+    railGlow: Color(0x40FFB020),
+    railIndicatorTop: Color(0xFFFFB020),
+    railIndicatorBottom: Color(0xFFFFB020),
+    typeString: _typeDarkString,
+    typeHash: _typeDarkHash,
+    typeList: _typeDarkList,
+    typeSet: _typeDarkSet,
+    typeZset: _typeDarkZset,
+    typeStream: _typeDarkStream,
+    typeJson: _typeDarkJson,
+  );
+
+  /// Brick: cream surfaces, brick-red accent — the boldest light palette.
+  static const AppTokens brick = AppTokens(
+    bg: Color(0xFFF6EFE3),
+    panel: Color(0xFFFFFAF0),
+    panel2: Color(0xFFF0E6D2),
+    sidebar: Color(0xFFF3EBDC),
+    border: Color(0xFFC4AE93),
+    hairline: Color(0xFFE3D5BC),
+    text: Color(0xFF2E2118),
+    text2: Color(0xFF6B5138),
+    text3: Color(0xFF7A6248),
+    accent: Color(0xFFC0392B),
+    onAccent: Color(0xFFFFF6E8),
+    hover: Color(0xFFF0E6D2),
+    selection: Color(0xFFF5D7B8),
+    focus: Color(0xFFA32B1F),
+    danger: Color(0xFFAD0017),
+    success: Color(0xFF137A42),
+    warning: Color(0xFF8A5A00),
+    highlight: Color(0xD9FFFFFF),
+    highlightSoft: Color(0x8CFFFFFF),
+    railBg: Color(0xFFEFE5D2),
+    railBgTop: Color(0xFFF4EBD9),
+    railBgBottom: Color(0xFFEADFC8),
+    railFg: Color(0xFF6B5138),
+    railFgActive: Color(0xFFA32B1F),
+    railActiveBg: Color(0xFFF2CBAE),
+    railGlow: Color(0x40C0392B),
+    railIndicatorTop: Color(0xFFC0392B),
+    railIndicatorBottom: Color(0xFFC0392B),
+    typeString: _typeLightString,
+    typeHash: _typeLightHash,
+    typeList: _typeLightList,
+    typeSet: _typeLightSet,
+    typeZset: _typeLightZset,
+    typeStream: _typeLightStream,
+    typeJson: _typeLightJson,
+  );
+
+  /// Aubergine: deep purple surfaces, lavender accent.
+  static const AppTokens aubergine = AppTokens(
+    bg: Color(0xFF1E1626),
+    panel: Color(0xFF261D30),
+    panel2: Color(0xFF2E2439),
+    sidebar: Color(0xFF231A2C),
+    border: Color(0xFF443652),
+    hairline: Color(0xFF372B44),
+    text: Color(0xFFF0EAF5),
+    text2: Color(0xFFB6A9C2),
+    text3: Color(0xFF9A8CA8),
+    accent: Color(0xFFBB86E0),
+    onAccent: Color(0xFF24132E),
+    hover: Color(0xFF2E2439),
+    selection: Color(0xFF3E2A52),
+    focus: Color(0xFFA06BD0),
+    danger: Color(0xFFFF7A85),
+    success: Color(0xFF6FD3A0),
+    warning: Color(0xFFE8C98A),
+    highlight: Color(0x17FFFFFF),
+    highlightSoft: Color(0x0DFFFFFF),
+    railBg: Color(0xFF1A1220),
+    railBgTop: Color(0xFF1E1628),
+    railBgBottom: Color(0xFF150E1B),
+    railFg: Color(0xFF9A8CA8),
+    railFgActive: Color(0xFFD3AEF0),
+    railActiveBg: Color(0xFF3A2A4C),
+    railGlow: Color(0x40BB86E0),
+    railIndicatorTop: Color(0xFFBB86E0),
+    railIndicatorBottom: Color(0xFFBB86E0),
+    typeString: _typeDarkString,
+    typeHash: _typeDarkHash,
+    typeList: _typeDarkList,
+    typeSet: _typeDarkSet,
+    typeZset: _typeDarkZset,
+    typeStream: _typeDarkStream,
+    typeJson: _typeDarkJson,
+  );
+
+  /// Mono: black-and-white newspaper — pure white surfaces, black accent, a
+  /// single true red reserved for danger, and grayscale type badges.
+  static const AppTokens mono = AppTokens(
+    bg: Color(0xFFFFFFFF),
+    panel: Color(0xFFFFFFFF),
+    panel2: Color(0xFFF2F2F0),
+    sidebar: Color(0xFFF7F7F5),
+    border: Color(0xFF3A3A38),
+    hairline: Color(0xFFD8D8D4),
+    text: Color(0xFF0A0A0A),
+    text2: Color(0xFF3D3D3B),
+    text3: Color(0xFF5A5A57),
+    accent: Color(0xFF0A0A0A),
+    onAccent: Color(0xFFFFFFFF),
+    hover: Color(0xFFF2F2F0),
+    selection: Color(0xFFDEDEDA),
+    focus: Color(0xFF0A0A0A),
+    danger: Color(0xFFC0001A),
+    success: Color(0xFF0A0A0A),
+    warning: Color(0xFF5A5A57),
+    highlight: Color(0xD9FFFFFF),
+    highlightSoft: Color(0x8CFFFFFF),
+    railBg: Color(0xFFF0F0EE),
+    railBgTop: Color(0xFFF5F5F3),
+    railBgBottom: Color(0xFFE9E9E6),
+    railFg: Color(0xFF5A5A57),
+    railFgActive: Color(0xFF0A0A0A),
+    railActiveBg: Color(0xFFE4E4E0),
+    railGlow: Color(0x400A0A0A),
+    railIndicatorTop: Color(0xFF0A0A0A),
+    railIndicatorBottom: Color(0xFF0A0A0A),
+    typeString: _typeMonoString,
+    typeHash: _typeMonoHash,
+    typeList: _typeMonoList,
+    typeSet: _typeMonoSet,
+    typeZset: _typeMonoZset,
+    typeStream: _typeMonoStream,
+    typeJson: _typeMonoJson,
+  );
+
   static AppTokens of(BuildContext context) {
     final ext = Theme.of(context).extension<AppTokens>();
     assert(ext != null, 'AppTokens not registered on the theme');
@@ -789,3 +1030,145 @@ class MatSuppress {
 /// callers can migrate to `AppTokens.of(context).success` without changing
 /// paint behavior.
 Color goGreen(BuildContext context) => AppTokens.of(context).success;
+
+// ---------------------------------------------------------------------------
+// Shared Redis type-colour triples for the style palettes (v1.3). Dark set =
+// saturated fill + white text; light set = pastel fill + dark text; mono set =
+// grayscale newspaper badges.
+// ---------------------------------------------------------------------------
+const _typeDarkString = RedisTypeColors(
+    fill: Color(0xFF6A1DC3), fg: Color(0xFFFFFFFF), border: Color(0x4DFFFFFF));
+const _typeDarkHash = RedisTypeColors(
+    fill: Color(0xFF364CFF), fg: Color(0xFFFFFFFF), border: Color(0x4DFFFFFF));
+const _typeDarkList = RedisTypeColors(
+    fill: Color(0xFF008556), fg: Color(0xFFFFFFFF), border: Color(0x4DFFFFFF));
+const _typeDarkSet = RedisTypeColors(
+    fill: Color(0xFF9C5C2B), fg: Color(0xFFFFFFFF), border: Color(0x4DFFFFFF));
+const _typeDarkZset = RedisTypeColors(
+    fill: Color(0xFFA00A6B), fg: Color(0xFFFFFFFF), border: Color(0x4DFFFFFF));
+const _typeDarkStream = RedisTypeColors(
+    fill: Color(0xFF5A6B85), fg: Color(0xFFFFFFFF), border: Color(0x4DFFFFFF));
+const _typeDarkJson = RedisTypeColors(
+    fill: Color(0xFF3F4B5F), fg: Color(0xFFFFFFFF), border: Color(0x4DFFFFFF));
+
+const _typeLightString = RedisTypeColors(
+    fill: Color(0xFFC7B0EA), fg: Color(0xFF25231F), border: Color(0x6625231F));
+const _typeLightHash = RedisTypeColors(
+    fill: Color(0xFFCDDDF8), fg: Color(0xFF25231F), border: Color(0x6625231F));
+const _typeLightList = RedisTypeColors(
+    fill: Color(0xFFA5D4C3), fg: Color(0xFF0C4A33), border: Color(0x6625231F));
+const _typeLightSet = RedisTypeColors(
+    fill: Color(0xFFD4BAA7), fg: Color(0xFF5C320F), border: Color(0x6625231F));
+const _typeLightZset = RedisTypeColors(
+    fill: Color(0xFFD9A0C6), fg: Color(0xFF63113F), border: Color(0x6625231F));
+const _typeLightStream = RedisTypeColors(
+    fill: Color(0xFFB8C5DB), fg: Color(0xFF20335A), border: Color(0x6625231F));
+const _typeLightJson = RedisTypeColors(
+    fill: Color(0xFFDFE3EA), fg: Color(0xFF5F5A51), border: Color(0x6625231F));
+
+const _typeMonoString = RedisTypeColors(
+    fill: Color(0xFFF0F0EE), fg: Color(0xFF0A0A0A), border: Color(0x660A0A0A));
+const _typeMonoHash = RedisTypeColors(
+    fill: Color(0xFFE4E4E2), fg: Color(0xFF0A0A0A), border: Color(0x660A0A0A));
+const _typeMonoList = RedisTypeColors(
+    fill: Color(0xFFD8D8D6), fg: Color(0xFF0A0A0A), border: Color(0x660A0A0A));
+const _typeMonoSet = RedisTypeColors(
+    fill: Color(0xFFCCCCCA), fg: Color(0xFF0A0A0A), border: Color(0x660A0A0A));
+const _typeMonoZset = RedisTypeColors(
+    fill: Color(0xFFBFBFBD), fg: Color(0xFF0A0A0A), border: Color(0x660A0A0A));
+const _typeMonoStream = RedisTypeColors(
+    fill: Color(0xFFB3B3B1), fg: Color(0xFF0A0A0A), border: Color(0x660A0A0A));
+const _typeMonoJson = RedisTypeColors(
+    fill: Color(0xFFA6A6A4), fg: Color(0xFF0A0A0A), border: Color(0x660A0A0A));
+
+// ---------------------------------------------------------------------------
+// AppStyle (v1.3): the seven selectable named palettes. Parchment is the
+// historical default; the other six come from the bold-recolor mockups.
+// ---------------------------------------------------------------------------
+enum AppStyle { parchment, forest, midnight, charcoal, brick, aubergine, mono }
+
+extension AppStyleX on AppStyle {
+  /// Stable on-disk identifier written to ~/.redimosmanager/theme.json.
+  String get id {
+    switch (this) {
+      case AppStyle.parchment:
+        return 'parchment';
+      case AppStyle.forest:
+        return 'forest';
+      case AppStyle.midnight:
+        return 'midnight';
+      case AppStyle.charcoal:
+        return 'charcoal';
+      case AppStyle.brick:
+        return 'brick';
+      case AppStyle.aubergine:
+        return 'aubergine';
+      case AppStyle.mono:
+        return 'mono';
+    }
+  }
+
+  /// Display name shown in the topbar style menu.
+  String get label {
+    switch (this) {
+      case AppStyle.parchment:
+        return 'Parchment';
+      case AppStyle.forest:
+        return 'Forest';
+      case AppStyle.midnight:
+        return 'Midnight';
+      case AppStyle.charcoal:
+        return 'Charcoal';
+      case AppStyle.brick:
+        return 'Brick';
+      case AppStyle.aubergine:
+        return 'Aubergine';
+      case AppStyle.mono:
+        return 'Mono';
+    }
+  }
+
+  /// Material scaffold brightness: three light palettes, four dark ones.
+  Brightness get brightness {
+    switch (this) {
+      case AppStyle.parchment:
+      case AppStyle.brick:
+      case AppStyle.mono:
+        return Brightness.light;
+      case AppStyle.forest:
+      case AppStyle.midnight:
+      case AppStyle.charcoal:
+      case AppStyle.aubergine:
+        return Brightness.dark;
+    }
+  }
+
+  /// The palette's complete token set. Parchment aliases the historical
+  /// `AppTokens.light` so the default path is byte-identical to before.
+  AppTokens get tokens {
+    switch (this) {
+      case AppStyle.parchment:
+        return AppTokens.light;
+      case AppStyle.forest:
+        return AppTokens.forest;
+      case AppStyle.midnight:
+        return AppTokens.midnight;
+      case AppStyle.charcoal:
+        return AppTokens.charcoal;
+      case AppStyle.brick:
+        return AppTokens.brick;
+      case AppStyle.aubergine:
+        return AppTokens.aubergine;
+      case AppStyle.mono:
+        return AppTokens.mono;
+    }
+  }
+
+  /// Parse a persisted id; unknown / empty → null (caller falls back).
+  static AppStyle? fromId(String id) {
+    for (final s in AppStyle.values) {
+      if (s.id == id) return s;
+    }
+    return null;
+  }
+}
