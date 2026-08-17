@@ -81,7 +81,7 @@ class NativeCore {
   }
 
   static String _resolveLibraryPath() {
-    final base = _libBaseName();
+    final base = libBaseName();
     // 1) next to the executable (the bundled location — see build_native script)
     final exeDir = File(Platform.resolvedExecutable).parent.path;
     final beside = '$exeDir${Platform.pathSeparator}$base';
@@ -93,7 +93,10 @@ class NativeCore {
     return base;
   }
 
-  static String _libBaseName() {
+  /// Per-platform core library file name. Public so the bootstrap error
+  /// screen can name the right artifact (the Windows dll would mislead on
+  /// macOS and vice versa).
+  static String libBaseName() {
     if (Platform.isWindows) return 'redimos_core.dll';
     if (Platform.isMacOS) return 'redimos_core.dylib';
     return 'redimos_core.so';

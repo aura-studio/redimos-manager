@@ -543,14 +543,17 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
             child: Column(mainAxisSize: MainAxisSize.min, children: [
               const Icon(Icons.error_outline, size: 48, color: Colors.redAccent),
               const SizedBox(height: 16),
-              const Text('Could not load the native core (redimos_core.dll).'),
+              // Name the platform's own artifact — a macOS failure must not
+              // talk about the Windows dll.
+              Text('Could not load the native core (${NativeCore.libBaseName()}).'),
               const SizedBox(height: 8),
               SelectableText('$_loadError',
                   style: const TextStyle(color: Colors.orangeAccent)),
               const SizedBox(height: 16),
-              const Text(
-                'Build it with scripts/build_native.ps1 and place the library '
-                'next to the app executable, or set REDIMOS_CORE_LIB.',
+              Text(
+                'Build it with ${Platform.isWindows ? 'scripts/build_native.ps1' : 'scripts/build-macos.sh'} '
+                'and place the library next to the app executable, or set '
+                'REDIMOS_CORE_LIB.',
                 textAlign: TextAlign.center,
               ),
             ]),
