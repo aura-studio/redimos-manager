@@ -582,12 +582,18 @@ class _HomePageState extends State<HomePage>
           child: Column(mainAxisSize: MainAxisSize.min, children: [
             Icon(Icons.error_outline, size: 48, color: t.danger),
             const SizedBox(height: 16),
-            Text(tr('home.coreLoadFailed')),
+            // Name the platform's own artifact — a macOS failure must not
+            // talk about the Windows dll.
+            Text(trp('home.coreLoadFailed', {'lib': NativeCore.libBaseName()})),
             const SizedBox(height: 8),
             SelectableText('$_loadError', style: TextStyle(color: t.warning)),
             const SizedBox(height: 16),
             Text(
-              tr('home.coreBuildHint'),
+              trp('home.coreBuildHint', {
+                'script': Platform.isWindows
+                    ? 'scripts/build_native.ps1'
+                    : 'scripts/build-macos.sh'
+              }),
               textAlign: TextAlign.center,
             ),
           ]),
