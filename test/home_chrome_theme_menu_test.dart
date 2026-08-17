@@ -112,7 +112,7 @@ void main() {
     expect(actions.contains(style.center), isTrue);
   });
 
-  testWidgets('opening the menu lists exactly seven styles with a selection',
+  testWidgets('opening the menu lists exactly seventeen styles with a selection',
       (tester) async {
     await _pumpChrome(tester);
     await tester.tap(find.byKey(const ValueKey('home-style-menu')));
@@ -148,7 +148,7 @@ void main() {
     expect(File('${tmp.path}/theme.json').existsSync(), isFalse);
   });
 
-  testWidgets('smoke: HomeChrome builds under all seven palettes',
+  testWidgets('smoke: HomeChrome builds under all seventeen palettes',
       (tester) async {
     for (final s in AppStyle.values) {
       appStyle.value = s;
