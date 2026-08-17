@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:redimos_manager/src/home_chrome.dart';
@@ -91,33 +92,58 @@ void main() {
     if (tmp.existsSync()) tmp.deleteSync(recursive: true);
   });
 
-  testWidgets('topbar shows the style menu as a square swatch button',
+  testWidgets('the rail R logo doubles as the style menu button',
       (tester) async {
     await _pumpChrome(tester);
-    expect(find.byKey(const ValueKey('home-topbar-style-slot')),
-        findsOneWidget);
+    expect(find.byKey(const ValueKey('main-rail-logo')), findsOneWidget);
     expect(find.byKey(const ValueKey('home-style-menu')), findsOneWidget);
-    final swatch = find.byKey(const ValueKey('home-style-menu-swatch'));
-    expect(swatch, findsOneWidget);
-    final box = tester.widget<Container>(swatch).decoration as BoxDecoration;
-    expect(box.color, AppStyle.parchment.tokens.bg);
-    // It sits between stop-all and the language menu.
-    final actions =
-        tester.getRect(find.byKey(const ValueKey('home-topbar-actions')));
-    final stop = tester.getRect(find.byKey(const ValueKey(
-        'home-topbar-stop-slot')));
-    final style =
-        tester.getRect(find.byKey(const ValueKey('home-topbar-style-slot')));
-    final lang = tester.getRect(find.byKey(const ValueKey(
-        'home-topbar-lang-slot')));
-    expect(style.left, greaterThan(stop.left));
-    expect(lang.left, greaterThan(style.left));
-    expect(actions.contains(style.center), isTrue);
-    // Square slot: same chrome as the language button.
-    expect(style.width, style.height);
+    // The menu button is the logo: the logo lives inside it, inside the rail.
+    final menu = find.byKey(const ValueKey('home-style-menu'));
+    expect(
+        find.descendant(of: menu, matching: find.byKey(
+            const ValueKey('main-rail-logo'))),
+        findsOneWidget);
+    expect(
+        find.descendant(
+            of: find.byKey(const ValueKey('main-rail')), matching: menu),
+        findsOneWidget);
   });
 
-  testWidgets('opening the menu lists exactly seventeen styles with a selection',
+  testWidgets('the topbar carries a matching square style button',
+      (tester) async {
+    await _pumpChrome(tester);
+    final slot = find.byKey(const ValueKey('home-topbar-style-slot'));
+    expect(slot, findsOneWidget);
+    final button = find.byKey(const ValueKey('home-style-button'));
+    expect(find.descendant(of: slot, matching: button), findsOneWidget);
+    expect(find.byKey(const ValueKey('home-style-button-swatch')),
+        findsOneWidget);
+    // Same chrome row: stop slot, style slot, lang slot side by side.
+    expect(find.byKey(const ValueKey('home-topbar-stop-slot')), findsOneWidget);
+    expect(find.byKey(const ValueKey('home-topbar-lang-slot')), findsOneWidget);
+  });
+
+  testWidgets('the topbar style button opens the same twelve-style menu',
+      (tester) async {
+    await _pumpChrome(tester);
+    await tester.tap(find.byKey(const ValueKey('home-style-button')));
+    await tester.pumpAndSettle();
+    for (final s in AppStyle.values) {
+      expect(find.byKey(ValueKey('home-style-menu-${s.id}-item')),
+          findsOneWidget);
+    }
+    // Keyboard preview works from this entry too: arrow down re-themes in
+    // memory without writing, Esc reverts to the persisted style.
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pump();
+    expect(appStyle.value, AppStyle.midnight);
+    expect(File('${tmp.path}/theme.json').existsSync(), isFalse);
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    expect(appStyle.value, AppStyle.parchment);
+  });
+
+  testWidgets('opening the menu lists exactly twelve styles with a selection',
       (tester) async {
     await _pumpChrome(tester);
     await tester.tap(find.byKey(const ValueKey('home-style-menu')));
@@ -127,6 +153,11 @@ void main() {
           findsOneWidget);
       expect(find.text(s.label), findsWidgets);
     }
+    // The selection pill stays inset from the popup's rounded corners — a
+    // flush row reads as overflowing the dropdown (user-reported glitch).
+    final row = tester.widget<Container>(
+        find.byKey(const ValueKey('home-style-menu-parchment-row')));
+    expect(row.margin, const EdgeInsets.symmetric(horizontal: 6));
   });
 
   testWidgets('selecting Mono switches appStyle and persists theme.json',
@@ -153,7 +184,7 @@ void main() {
     expect(File('${tmp.path}/theme.json').existsSync(), isFalse);
   });
 
-  testWidgets('smoke: HomeChrome builds under all seventeen palettes',
+  testWidgets('smoke: HomeChrome builds under all twelve palettes',
       (tester) async {
     for (final s in AppStyle.values) {
       appStyle.value = s;
@@ -164,11 +195,52 @@ void main() {
               Theme.of(context).extension<AppTokens>(), s.tokens),
           isTrue,
           reason: s.id);
-      final swatch = tester
-          .widget<Container>(
-              find.byKey(const ValueKey('home-style-menu-swatch')))
-          .decoration as BoxDecoration;
-      expect(swatch.color, s.tokens.bg, reason: s.id);
+      expect(find.byKey(const ValueKey('home-style-menu')), findsOneWidget,
+          reason: s.id);
     }
+  });
+
+  testWidgets('arrow keys live-preview the focused style without saving',
+      (tester) async {
+    await _pumpChrome(tester);
+    await tester.tap(find.byKey(const ValueKey('home-style-menu')));
+    await tester.pumpAndSettle();
+    expect(appStyle.value, AppStyle.parchment);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pump();
+    expect(appStyle.value, AppStyle.midnight); // preview applied in memory
+    expect(File('${tmp.path}/theme.json').existsSync(), isFalse); // unsaved
+  });
+
+  testWidgets('Enter after arrow-key preview commits and persists',
+      (tester) async {
+    await _pumpChrome(tester);
+    await tester.tap(find.byKey(const ValueKey('home-style-menu')));
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pump();
+    expect(appStyle.value, AppStyle.midnight);
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    expect(appStyle.value, AppStyle.midnight);
+    expect(File('${tmp.path}/theme.json').readAsStringSync(),
+        '{"style":"midnight"}');
+  });
+
+  testWidgets('Esc after arrow-key preview reverts to the persisted style',
+      (tester) async {
+    // Persist lagoon first, then start the session on parchment.
+    appStyle.value = AppStyle.lagoon;
+    saveAppStyle();
+    appStyle.value = AppStyle.parchment;
+    await _pumpChrome(tester);
+    await tester.tap(find.byKey(const ValueKey('home-style-menu')));
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pump();
+    expect(appStyle.value, AppStyle.midnight); // previewing
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    expect(appStyle.value, AppStyle.lagoon); // reverted to disk value
   });
 }

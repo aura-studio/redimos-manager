@@ -42,19 +42,6 @@ Map<String, Color> _scalarFields(AppTokens t) => {
 // The design-doc palette tables (.kiro/specs/theme-style-selector/design.md).
 // These are the single source of truth the implementation must match.
 const _expected = <AppStyle, Map<String, int>>{
-  AppStyle.forest: {
-    'bg': 0xFF1C241E, 'panel': 0xFF232C26, 'panel2': 0xFF2A352D,
-    'sidebar': 0xFF202A23, 'border': 0xFF3E4C42, 'hairline': 0xFF323E35,
-    'text': 0xFFF0EDE2, 'text2': 0xFFB8BFB2, 'text3': 0xFF9AA594,
-    'accent': 0xFFE8A33D, 'onAccent': 0xFF1C241E, 'hover': 0xFF2A352D,
-    'selection': 0xFF3A4432, 'focus': 0xFFC07F2A, 'danger': 0xFFFF6B5E,
-    'success': 0xFF57C785, 'warning': 0xFFE8C35A,
-    'highlight': 0x17FFFFFF, 'highlightSoft': 0x0DFFFFFF,
-    'railBg': 0xFF171E19, 'railBgTop': 0xFF1B231D, 'railBgBottom': 0xFF131A15,
-    'railFg': 0xFF9AA594, 'railFgActive': 0xFFF0C778,
-    'railActiveBg': 0xFF333F2A, 'railGlow': 0x40E8A33D,
-    'railIndicatorTop': 0xFFE8A33D, 'railIndicatorBottom': 0xFFE8A33D,
-  },
   AppStyle.midnight: {
     'bg': 0xFF10151D, 'panel': 0xFF161C26, 'panel2': 0xFF1C242F,
     'sidebar': 0xFF131923, 'border': 0xFF2E3A4B, 'hairline': 0xFF242F3E,
@@ -172,19 +159,6 @@ const _expected = <AppStyle, Map<String, int>>{
     'railActiveBg': 0xFFDAC7EE, 'railGlow': 0x407A4FD0,
     'railIndicatorTop': 0xFF7A4FD0, 'railIndicatorBottom': 0xFF7A4FD0,
   },
-  AppStyle.honey: {
-    'bg': 0xFFFBF6EA, 'panel': 0xFFFEFCF4, 'panel2': 0xFFF5EAD3,
-    'sidebar': 0xFFF8F1E0, 'border': 0xFFDCC7A2, 'hairline': 0xFFEDDFC2,
-    'text': 0xFF3A2C14, 'text2': 0xFF6E5A36, 'text3': 0xFF8F7B56,
-    'accent': 0xFFDE8A12, 'onAccent': 0xFF2E1F04, 'hover': 0xFFF5EAD3,
-    'selection': 0xFFF6E0B4, 'focus': 0xFFB46C08, 'danger': 0xFFB01E2E,
-    'success': 0xFF177A46, 'warning': 0xFF8A5A00,
-    'highlight': 0xD9FFFFFF, 'highlightSoft': 0x8CFFFFFF,
-    'railBg': 0xFFF4EAD2, 'railBgTop': 0xFFF8EFDC, 'railBgBottom': 0xFFF0E4C8,
-    'railFg': 0xFF8F7B56, 'railFgActive': 0xFFB46C08,
-    'railActiveBg': 0xFFF2D9A6, 'railGlow': 0x40DE8A12,
-    'railIndicatorTop': 0xFFDE8A12, 'railIndicatorBottom': 0xFFDE8A12,
-  },
   AppStyle.lagoon: {
     'bg': 0xFF0E1A1C, 'panel': 0xFF142224, 'panel2': 0xFF1A2B2D,
     'sidebar': 0xFF111F21, 'border': 0xFF2E4548, 'hairline': 0xFF23373A,
@@ -197,32 +171,6 @@ const _expected = <AppStyle, Map<String, int>>{
     'railFg': 0xFF869B96, 'railFgActive': 0xFF7FE8DF,
     'railActiveBg': 0xFF143A3B, 'railGlow': 0x402ED3C6,
     'railIndicatorTop': 0xFF2ED3C6, 'railIndicatorBottom': 0xFF2ED3C6,
-  },
-  AppStyle.wine: {
-    'bg': 0xFF1F1216, 'panel': 0xFF271820, 'panel2': 0xFF2F1E28,
-    'sidebar': 0xFF24151C, 'border': 0xFF4A2E3A, 'hairline': 0xFF3A2430,
-    'text': 0xFFF3E7EB, 'text2': 0xFFC2AAB4, 'text3': 0xFFA08A94,
-    'accent': 0xFFE05D7C, 'onAccent': 0xFF2E0A16, 'hover': 0xFF2F1E28,
-    'selection': 0xFF4A2434, 'focus': 0xFFBC3E5E, 'danger': 0xFFFF7A6B,
-    'success': 0xFF6FD3A0, 'warning': 0xFFE8C98A,
-    'highlight': 0x17FFFFFF, 'highlightSoft': 0x0DFFFFFF,
-    'railBg': 0xFF190E13, 'railBgTop': 0xFF1D1218, 'railBgBottom': 0xFF150B10,
-    'railFg': 0xFFA08A94, 'railFgActive': 0xFFF09AAC,
-    'railActiveBg': 0xFF3E1F2C, 'railGlow': 0x40E05D7C,
-    'railIndicatorTop': 0xFFE05D7C, 'railIndicatorBottom': 0xFFE05D7C,
-  },
-  AppStyle.olive: {
-    'bg': 0xFF191B14, 'panel': 0xFF212319, 'panel2': 0xFF292C1F,
-    'sidebar': 0xFF1D1F16, 'border': 0xFF3F4430, 'hairline': 0xFF313626,
-    'text': 0xFFECEFE0, 'text2': 0xFFB7BDA2, 'text3': 0xFF979D84,
-    'accent': 0xFFC0D74E, 'onAccent': 0xFF23260F, 'hover': 0xFF292C1F,
-    'selection': 0xFF3A4022, 'focus': 0xFF9BB22F, 'danger': 0xFFFF6B5E,
-    'success': 0xFF57C785, 'warning': 0xFFE8C35A,
-    'highlight': 0x17FFFFFF, 'highlightSoft': 0x0DFFFFFF,
-    'railBg': 0xFF14160F, 'railBgTop': 0xFF181A12, 'railBgBottom': 0xFF10120C,
-    'railFg': 0xFF979D84, 'railFgActive': 0xFFD8EA8C,
-    'railActiveBg': 0xFF33381E, 'railGlow': 0x40C0D74E,
-    'railIndicatorTop': 0xFFC0D74E, 'railIndicatorBottom': 0xFFC0D74E,
   },
   AppStyle.neon: {
     'bg': 0xFF0D0F14, 'panel': 0xFF131720, 'panel2': 0xFF1A1F2B,
@@ -237,33 +185,20 @@ const _expected = <AppStyle, Map<String, int>>{
     'railActiveBg': 0xFF142E3A, 'railGlow': 0x402BD9E8,
     'railIndicatorTop': 0xFF2BD9E8, 'railIndicatorBottom': 0xFF2BD9E8,
   },
-  AppStyle.mocha: {
-    'bg': 0xFF1C1512, 'panel': 0xFF241B17, 'panel2': 0xFF2C221C,
-    'sidebar': 0xFF201814, 'border': 0xFF463529, 'hairline': 0xFF382A21,
-    'text': 0xFFF1E6DC, 'text2': 0xFFC0AE9E, 'text3': 0xFF9E8B7A,
-    'accent': 0xFFD9995B, 'onAccent': 0xFF2A1706, 'hover': 0xFF2C221C,
-    'selection': 0xFF42301F, 'focus': 0xFFB87A40, 'danger': 0xFFFF7A6B,
-    'success': 0xFF7FCC8B, 'warning': 0xFFE8C35A,
-    'highlight': 0x17FFFFFF, 'highlightSoft': 0x0DFFFFFF,
-    'railBg': 0xFF16100D, 'railBgTop': 0xFF1A1410, 'railBgBottom': 0xFF120D0A,
-    'railFg': 0xFF9E8B7A, 'railFgActive': 0xFFEFC08E,
-    'railActiveBg': 0xFF37281B, 'railGlow': 0x40D9995B,
-    'railIndicatorTop': 0xFFD9995B, 'railIndicatorBottom': 0xFFD9995B,
-  },
 };
 
 void main() {
   group('AppStyle catalogue', () {
-    test('exactly seventeen styles with parchment as the default first value',
+    test('exactly twelve styles with parchment as the default first value',
         () {
-      expect(AppStyle.values.length, 17);
+      expect(AppStyle.values.length, 12);
       expect(AppStyle.values.first, AppStyle.parchment);
       expect(appStyle.value, AppStyle.parchment);
     });
 
     test('ids are unique and fromId round-trips every style', () {
       final ids = AppStyle.values.map((s) => s.id).toList();
-      expect(ids.toSet().length, 17);
+      expect(ids.toSet().length, 12);
       for (final s in AppStyle.values) {
         expect(AppStyleX.fromId(s.id), s);
       }
@@ -278,10 +213,10 @@ void main() {
     test('labels are non-empty and unique', () {
       final labels = AppStyle.values.map((s) => s.label).toList();
       expect(labels.every((l) => l.isNotEmpty), isTrue);
-      expect(labels.toSet().length, 17);
+      expect(labels.toSet().length, 12);
     });
 
-    test('brightness mapping: eight light styles, nine dark styles', () {
+    test('brightness mapping: seven light styles, five dark styles', () {
       const lightStyles = {
         AppStyle.parchment,
         AppStyle.brick,
@@ -290,7 +225,6 @@ void main() {
         AppStyle.sakura,
         AppStyle.mint,
         AppStyle.lilac,
-        AppStyle.honey,
       };
       for (final s in AppStyle.values) {
         expect(s.brightness,
@@ -318,15 +252,11 @@ void main() {
 
     test('dark styles reuse the saturated dark type-colour set', () {
       for (final s in const [
-        AppStyle.forest,
         AppStyle.midnight,
         AppStyle.charcoal,
         AppStyle.aubergine,
         AppStyle.lagoon,
-        AppStyle.wine,
-        AppStyle.olive,
         AppStyle.neon,
-        AppStyle.mocha,
       ]) {
         expect(s.tokens.typeString.fill, const Color(0xFF6A1DC3),
             reason: '${s.id}.typeString');
@@ -344,7 +274,6 @@ void main() {
         AppStyle.sakura,
         AppStyle.mint,
         AppStyle.lilac,
-        AppStyle.honey,
       ]) {
         expect(s.tokens.typeString.fill, const Color(0xFFC7B0EA),
             reason: '${s.id}.typeString');
@@ -377,7 +306,7 @@ void main() {
   });
 
   group('appThemeForStyle', () {
-    test('theme extension is identical to the style tokens (all 17)', () {
+    test('theme extension is identical to the style tokens (all 12)', () {
       for (final s in AppStyle.values) {
         final theme = appThemeForStyle(s);
         expect(identical(theme.extension<AppTokens>(), s.tokens),
@@ -400,7 +329,7 @@ void main() {
           AppTokens.dark), isTrue);
     });
 
-    test('smoke: all seventeen themes build with scaffold == tokens.bg', () {
+    test('smoke: all twelve themes build with scaffold == tokens.bg', () {
       for (final s in AppStyle.values) {
         final theme = appThemeForStyle(s);
         expect(theme.scaffoldBackgroundColor, s.tokens.bg, reason: s.id);
@@ -439,11 +368,11 @@ void main() {
     });
 
     test('roundtrip: save then load restores the style', () {
-      appStyle.value = AppStyle.forest;
+      appStyle.value = AppStyle.lagoon;
       saveAppStyle(dir: tmp);
       appStyle.value = AppStyle.parchment;
       loadAppStyle(dir: tmp);
-      expect(appStyle.value, AppStyle.forest);
+      expect(appStyle.value, AppStyle.lagoon);
     });
 
     test('missing file keeps the current style', () {
@@ -465,7 +394,7 @@ void main() {
     });
 
     test('non-map JSON falls back without throwing', () {
-      File('${tmp.path}/theme.json').writeAsStringSync('["forest"]');
+      File('${tmp.path}/theme.json').writeAsStringSync('["lagoon"]');
       loadAppStyle(dir: tmp);
       expect(appStyle.value, AppStyle.parchment);
     });
@@ -479,7 +408,7 @@ void main() {
           '{"style":"midnight"}');
     });
 
-    test('smoke: saving all seventeen styles then load returns the last', () {
+    test('smoke: saving all twelve styles then load returns the last', () {
       for (final s in AppStyle.values) {
         appStyle.value = s;
         saveAppStyle(dir: tmp);

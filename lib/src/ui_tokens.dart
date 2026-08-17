@@ -223,49 +223,10 @@ class AppTokens extends ThemeExtension<AppTokens> {
   );
 
   // ------------------------------------------------- style palettes (v1.3) ---
-  // Six additional named palettes selectable at runtime via AppStyle. Values
-  // are the pixel-QC'd mappings from the bold-recolor mockups (design doc:
+  // Additional named palettes selectable at runtime via AppStyle. Values are
+  // the pixel-QC'd mappings from the bold-recolor mockups (design doc:
   // .kiro/specs/theme-style-selector). `light` (= Parchment) and `dark`
   // (capture layer) above remain untouched.
-
-  /// Forest: deep green surfaces, amber accent.
-  static const AppTokens forest = AppTokens(
-    bg: Color(0xFF1C241E),
-    panel: Color(0xFF232C26),
-    panel2: Color(0xFF2A352D),
-    sidebar: Color(0xFF202A23),
-    border: Color(0xFF3E4C42),
-    hairline: Color(0xFF323E35),
-    text: Color(0xFFF0EDE2),
-    text2: Color(0xFFB8BFB2),
-    text3: Color(0xFF9AA594),
-    accent: Color(0xFFE8A33D),
-    onAccent: Color(0xFF1C241E),
-    hover: Color(0xFF2A352D),
-    selection: Color(0xFF3A4432),
-    focus: Color(0xFFC07F2A),
-    danger: Color(0xFFFF6B5E),
-    success: Color(0xFF57C785),
-    warning: Color(0xFFE8C35A),
-    highlight: Color(0x17FFFFFF),
-    highlightSoft: Color(0x0DFFFFFF),
-    railBg: Color(0xFF171E19),
-    railBgTop: Color(0xFF1B231D),
-    railBgBottom: Color(0xFF131A15),
-    railFg: Color(0xFF9AA594),
-    railFgActive: Color(0xFFF0C778),
-    railActiveBg: Color(0xFF333F2A),
-    railGlow: Color(0x40E8A33D),
-    railIndicatorTop: Color(0xFFE8A33D),
-    railIndicatorBottom: Color(0xFFE8A33D),
-    typeString: _typeDarkString,
-    typeHash: _typeDarkHash,
-    typeList: _typeDarkList,
-    typeSet: _typeDarkSet,
-    typeZset: _typeDarkZset,
-    typeStream: _typeDarkStream,
-    typeJson: _typeDarkJson,
-  );
 
   /// Midnight: deep navy surfaces, bright blue accent.
   static const AppTokens midnight = AppTokens(
@@ -619,45 +580,6 @@ class AppTokens extends ThemeExtension<AppTokens> {
     typeJson: _typeLightJson,
   );
 
-  /// Honey: warm amber-cream surfaces, orange accent.
-  static const AppTokens honey = AppTokens(
-    bg: Color(0xFFFBF6EA),
-    panel: Color(0xFFFEFCF4),
-    panel2: Color(0xFFF5EAD3),
-    sidebar: Color(0xFFF8F1E0),
-    border: Color(0xFFDCC7A2),
-    hairline: Color(0xFFEDDFC2),
-    text: Color(0xFF3A2C14),
-    text2: Color(0xFF6E5A36),
-    text3: Color(0xFF8F7B56),
-    accent: Color(0xFFDE8A12),
-    onAccent: Color(0xFF2E1F04),
-    hover: Color(0xFFF5EAD3),
-    selection: Color(0xFFF6E0B4),
-    focus: Color(0xFFB46C08),
-    danger: Color(0xFFB01E2E),
-    success: Color(0xFF177A46),
-    warning: Color(0xFF8A5A00),
-    highlight: Color(0xD9FFFFFF),
-    highlightSoft: Color(0x8CFFFFFF),
-    railBg: Color(0xFFF4EAD2),
-    railBgTop: Color(0xFFF8EFDC),
-    railBgBottom: Color(0xFFF0E4C8),
-    railFg: Color(0xFF8F7B56),
-    railFgActive: Color(0xFFB46C08),
-    railActiveBg: Color(0xFFF2D9A6),
-    railGlow: Color(0x40DE8A12),
-    railIndicatorTop: Color(0xFFDE8A12),
-    railIndicatorBottom: Color(0xFFDE8A12),
-    typeString: _typeLightString,
-    typeHash: _typeLightHash,
-    typeList: _typeLightList,
-    typeSet: _typeLightSet,
-    typeZset: _typeLightZset,
-    typeStream: _typeLightStream,
-    typeJson: _typeLightJson,
-  );
-
   /// Lagoon: deep teal surfaces, turquoise accent.
   static const AppTokens lagoon = AppTokens(
     bg: Color(0xFF0E1A1C),
@@ -697,84 +619,6 @@ class AppTokens extends ThemeExtension<AppTokens> {
     typeJson: _typeDarkJson,
   );
 
-  /// Wine: deep burgundy surfaces, rose-red accent.
-  static const AppTokens wine = AppTokens(
-    bg: Color(0xFF1F1216),
-    panel: Color(0xFF271820),
-    panel2: Color(0xFF2F1E28),
-    sidebar: Color(0xFF24151C),
-    border: Color(0xFF4A2E3A),
-    hairline: Color(0xFF3A2430),
-    text: Color(0xFFF3E7EB),
-    text2: Color(0xFFC2AAB4),
-    text3: Color(0xFFA08A94),
-    accent: Color(0xFFE05D7C),
-    onAccent: Color(0xFF2E0A16),
-    hover: Color(0xFF2F1E28),
-    selection: Color(0xFF4A2434),
-    focus: Color(0xFFBC3E5E),
-    danger: Color(0xFFFF7A6B),
-    success: Color(0xFF6FD3A0),
-    warning: Color(0xFFE8C98A),
-    highlight: Color(0x17FFFFFF),
-    highlightSoft: Color(0x0DFFFFFF),
-    railBg: Color(0xFF190E13),
-    railBgTop: Color(0xFF1D1218),
-    railBgBottom: Color(0xFF150B10),
-    railFg: Color(0xFFA08A94),
-    railFgActive: Color(0xFFF09AAC),
-    railActiveBg: Color(0xFF3E1F2C),
-    railGlow: Color(0x40E05D7C),
-    railIndicatorTop: Color(0xFFE05D7C),
-    railIndicatorBottom: Color(0xFFE05D7C),
-    typeString: _typeDarkString,
-    typeHash: _typeDarkHash,
-    typeList: _typeDarkList,
-    typeSet: _typeDarkSet,
-    typeZset: _typeDarkZset,
-    typeStream: _typeDarkStream,
-    typeJson: _typeDarkJson,
-  );
-
-  /// Olive: dark moss-green surfaces, chartreuse accent.
-  static const AppTokens olive = AppTokens(
-    bg: Color(0xFF191B14),
-    panel: Color(0xFF212319),
-    panel2: Color(0xFF292C1F),
-    sidebar: Color(0xFF1D1F16),
-    border: Color(0xFF3F4430),
-    hairline: Color(0xFF313626),
-    text: Color(0xFFECEFE0),
-    text2: Color(0xFFB7BDA2),
-    text3: Color(0xFF979D84),
-    accent: Color(0xFFC0D74E),
-    onAccent: Color(0xFF23260F),
-    hover: Color(0xFF292C1F),
-    selection: Color(0xFF3A4022),
-    focus: Color(0xFF9BB22F),
-    danger: Color(0xFFFF6B5E),
-    success: Color(0xFF57C785),
-    warning: Color(0xFFE8C35A),
-    highlight: Color(0x17FFFFFF),
-    highlightSoft: Color(0x0DFFFFFF),
-    railBg: Color(0xFF14160F),
-    railBgTop: Color(0xFF181A12),
-    railBgBottom: Color(0xFF10120C),
-    railFg: Color(0xFF979D84),
-    railFgActive: Color(0xFFD8EA8C),
-    railActiveBg: Color(0xFF33381E),
-    railGlow: Color(0x40C0D74E),
-    railIndicatorTop: Color(0xFFC0D74E),
-    railIndicatorBottom: Color(0xFFC0D74E),
-    typeString: _typeDarkString,
-    typeHash: _typeDarkHash,
-    typeList: _typeDarkList,
-    typeSet: _typeDarkSet,
-    typeZset: _typeDarkZset,
-    typeStream: _typeDarkStream,
-    typeJson: _typeDarkJson,
-  );
-
   /// Neon: near-black cyber surfaces, electric cyan accent.
   static const AppTokens neon = AppTokens(
     bg: Color(0xFF0D0F14),
@@ -805,45 +649,6 @@ class AppTokens extends ThemeExtension<AppTokens> {
     railGlow: Color(0x402BD9E8),
     railIndicatorTop: Color(0xFF2BD9E8),
     railIndicatorBottom: Color(0xFF2BD9E8),
-    typeString: _typeDarkString,
-    typeHash: _typeDarkHash,
-    typeList: _typeDarkList,
-    typeSet: _typeDarkSet,
-    typeZset: _typeDarkZset,
-    typeStream: _typeDarkStream,
-    typeJson: _typeDarkJson,
-  );
-
-  /// Mocha: coffee-brown surfaces, caramel accent.
-  static const AppTokens mocha = AppTokens(
-    bg: Color(0xFF1C1512),
-    panel: Color(0xFF241B17),
-    panel2: Color(0xFF2C221C),
-    sidebar: Color(0xFF201814),
-    border: Color(0xFF463529),
-    hairline: Color(0xFF382A21),
-    text: Color(0xFFF1E6DC),
-    text2: Color(0xFFC0AE9E),
-    text3: Color(0xFF9E8B7A),
-    accent: Color(0xFFD9995B),
-    onAccent: Color(0xFF2A1706),
-    hover: Color(0xFF2C221C),
-    selection: Color(0xFF42301F),
-    focus: Color(0xFFB87A40),
-    danger: Color(0xFFFF7A6B),
-    success: Color(0xFF7FCC8B),
-    warning: Color(0xFFE8C35A),
-    highlight: Color(0x17FFFFFF),
-    highlightSoft: Color(0x0DFFFFFF),
-    railBg: Color(0xFF16100D),
-    railBgTop: Color(0xFF1A1410),
-    railBgBottom: Color(0xFF120D0A),
-    railFg: Color(0xFF9E8B7A),
-    railFgActive: Color(0xFFEFC08E),
-    railActiveBg: Color(0xFF37281B),
-    railGlow: Color(0x40D9995B),
-    railIndicatorTop: Color(0xFFD9995B),
-    railIndicatorBottom: Color(0xFFD9995B),
     typeString: _typeDarkString,
     typeHash: _typeDarkHash,
     typeList: _typeDarkList,
@@ -1472,13 +1277,12 @@ const _typeMonoJson = RedisTypeColors(
     fill: Color(0xFFA6A6A4), fg: Color(0xFF0A0A0A), border: Color(0x660A0A0A));
 
 // ---------------------------------------------------------------------------
-// AppStyle (v1.3): the seventeen selectable named palettes. Parchment is the
-// historical default; forest…mono come from the bold-recolor mockups, and
-// sky…mocha extend the catalogue with five more light and five more dark.
+// AppStyle (v1.3): the twelve selectable named palettes. Parchment is the
+// historical default; midnight…mono come from the bold-recolor mockups, and
+// sky…neon extend the catalogue (mocha/olive/wine/honey/forest retired).
 // ---------------------------------------------------------------------------
 enum AppStyle {
   parchment,
-  forest,
   midnight,
   charcoal,
   brick,
@@ -1488,12 +1292,8 @@ enum AppStyle {
   sakura,
   mint,
   lilac,
-  honey,
   lagoon,
-  wine,
-  olive,
   neon,
-  mocha,
 }
 
 extension AppStyleX on AppStyle {
@@ -1502,8 +1302,6 @@ extension AppStyleX on AppStyle {
     switch (this) {
       case AppStyle.parchment:
         return 'parchment';
-      case AppStyle.forest:
-        return 'forest';
       case AppStyle.midnight:
         return 'midnight';
       case AppStyle.charcoal:
@@ -1522,18 +1320,10 @@ extension AppStyleX on AppStyle {
         return 'mint';
       case AppStyle.lilac:
         return 'lilac';
-      case AppStyle.honey:
-        return 'honey';
       case AppStyle.lagoon:
         return 'lagoon';
-      case AppStyle.wine:
-        return 'wine';
-      case AppStyle.olive:
-        return 'olive';
       case AppStyle.neon:
         return 'neon';
-      case AppStyle.mocha:
-        return 'mocha';
     }
   }
 
@@ -1542,8 +1332,6 @@ extension AppStyleX on AppStyle {
     switch (this) {
       case AppStyle.parchment:
         return 'Parchment';
-      case AppStyle.forest:
-        return 'Forest';
       case AppStyle.midnight:
         return 'Midnight';
       case AppStyle.charcoal:
@@ -1562,22 +1350,14 @@ extension AppStyleX on AppStyle {
         return 'Mint';
       case AppStyle.lilac:
         return 'Lilac';
-      case AppStyle.honey:
-        return 'Honey';
       case AppStyle.lagoon:
         return 'Lagoon';
-      case AppStyle.wine:
-        return 'Wine';
-      case AppStyle.olive:
-        return 'Olive';
       case AppStyle.neon:
         return 'Neon';
-      case AppStyle.mocha:
-        return 'Mocha';
     }
   }
 
-  /// Material scaffold brightness: eight light palettes, nine dark ones.
+  /// Material scaffold brightness: seven light palettes, five dark ones.
   Brightness get brightness {
     switch (this) {
       case AppStyle.parchment:
@@ -1587,17 +1367,12 @@ extension AppStyleX on AppStyle {
       case AppStyle.sakura:
       case AppStyle.mint:
       case AppStyle.lilac:
-      case AppStyle.honey:
         return Brightness.light;
-      case AppStyle.forest:
       case AppStyle.midnight:
       case AppStyle.charcoal:
       case AppStyle.aubergine:
       case AppStyle.lagoon:
-      case AppStyle.wine:
-      case AppStyle.olive:
       case AppStyle.neon:
-      case AppStyle.mocha:
         return Brightness.dark;
     }
   }
@@ -1608,8 +1383,6 @@ extension AppStyleX on AppStyle {
     switch (this) {
       case AppStyle.parchment:
         return AppTokens.light;
-      case AppStyle.forest:
-        return AppTokens.forest;
       case AppStyle.midnight:
         return AppTokens.midnight;
       case AppStyle.charcoal:
@@ -1628,18 +1401,10 @@ extension AppStyleX on AppStyle {
         return AppTokens.mint;
       case AppStyle.lilac:
         return AppTokens.lilac;
-      case AppStyle.honey:
-        return AppTokens.honey;
       case AppStyle.lagoon:
         return AppTokens.lagoon;
-      case AppStyle.wine:
-        return AppTokens.wine;
-      case AppStyle.olive:
-        return AppTokens.olive;
       case AppStyle.neon:
         return AppTokens.neon;
-      case AppStyle.mocha:
-        return AppTokens.mocha;
     }
   }
 

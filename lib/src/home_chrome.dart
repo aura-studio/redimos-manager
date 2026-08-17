@@ -208,7 +208,7 @@ class HomeChrome extends StatelessWidget {
               SizedBox.square(
                 key: const ValueKey('home-topbar-style-slot'),
                 dimension: Dim.ctlH,
-                child: _styleMenu(),
+                child: _styleButton(),
               ),
               const SizedBox(width: 8),
               SizedBox.square(
@@ -552,6 +552,43 @@ class HomeChrome extends StatelessWidget {
     );
   }
 
+  // Topbar twin of the rail R entry: same chrome as the language button (a
+  // Dim.ctlH square), holding a mini swatch of the current palette — bg base
+  // with an accent core. Opens the very same style menu as the rail logo.
+  Widget _styleButton() => Builder(builder: (context) {
+        final t = AppTokens.of(context);
+        final st = appStyle.value.tokens;
+        return Tooltip(
+          message: tr('app.theme'),
+          child: TextButton(
+            key: const ValueKey('home-style-button'),
+            style: _menuButtonStyle(t),
+            onPressed: () => _openStyleMenu(context),
+            child: Center(
+              child: Container(
+                key: const ValueKey('home-style-button-swatch'),
+                width: 16,
+                height: 16,
+                decoration: BoxDecoration(
+                  color: st.bg,
+                  borderRadius: BorderRadius.circular(4),
+                  border: Border.all(color: t.border, width: Dim.borderW),
+                ),
+                alignment: Alignment.center,
+                child: Container(
+                  width: 8,
+                  height: 8,
+                  decoration: BoxDecoration(
+                    color: st.accent,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+      });
+
   Widget _langMenu() => Builder(builder: (context) {
         final t = AppTokens.of(context);
         return PopupMenuButton<AppLang>(
@@ -559,7 +596,7 @@ class HomeChrome extends StatelessWidget {
           initialValue: state.lang,
           tooltip: tr('app.language'),
           padding: EdgeInsets.zero,
-          menuPadding: const EdgeInsets.symmetric(vertical: 4),
+          menuPadding: const EdgeInsets.symmetric(vertical: 6),
           constraints: const BoxConstraints(minWidth: 152, maxWidth: 196),
           position: PopupMenuPosition.under,
           requestFocus: true,
@@ -616,61 +653,64 @@ class HomeChrome extends StatelessWidget {
         label: label,
       );
 
-  // v1.3: theme-style picker. A square swatch button (current palette bg with
-  // an accent core, same chrome as the language button) sitting between
-  // stop-all and the language menu; picking a style swaps the global appStyle
-  // (rebuilding MaterialApp's theme) and persists the choice.
+  // v1.3: theme-style picker. The rail's R logo doubles as the menu button:
+  // clicking it opens the palette list under the logo. Arrow-key navigation
+  // live-previews the focused style (whole window re-themes without saving);
+  // Enter/click commits and persists, Esc/outside-click reverts to the
+  // persisted style.
+  //
+  // showMenu is driven manually instead of PopupMenuButton: that widget always
+  // wraps its child in a Tooltip, and rail items deliberately carry none (the
+  // bubble reads as a black flash over the rail divider).
   Widget _styleMenu() => Builder(builder: (context) {
-        final t = AppTokens.of(context);
-        final st = appStyle.value.tokens;
-        return PopupMenuButton<AppStyle>(
+        return GestureDetector(
           key: const ValueKey('home-style-menu'),
-          initialValue: appStyle.value,
-          tooltip: tr('app.theme'),
-          padding: EdgeInsets.zero,
-          menuPadding: const EdgeInsets.symmetric(vertical: 4),
-          constraints: const BoxConstraints(minWidth: 152, maxWidth: 196),
-          position: PopupMenuPosition.under,
-          requestFocus: true,
-          style: _menuButtonStyle(t),
-          onSelected: (s) {
-            if (s == appStyle.value) return;
-            appStyle.value = s;
-            saveAppStyle();
-          },
-          itemBuilder: (_) => [
-            for (final s in AppStyle.values)
-              _CodexPopupMenuItem<AppStyle>(
-                key: ValueKey('home-style-menu-${s.id}-item'),
-                keyName: 'home-style-menu-${s.id}',
-                value: s,
-                selected: s == appStyle.value,
-                label: s.label,
-              ),
-          ],
-          child: Center(
-            child: Container(
-              key: const ValueKey('home-style-menu-swatch'),
-              width: 16,
-              height: 16,
-              decoration: BoxDecoration(
-                color: st.bg,
-                borderRadius: BorderRadius.circular(4),
-                border: Border.all(color: t.border, width: Dim.borderW),
-              ),
-              alignment: Alignment.center,
-              child: Container(
-                width: 8,
-                height: 8,
-                decoration: BoxDecoration(
-                  color: st.accent,
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-            ),
+          behavior: HitTestBehavior.opaque,
+          onTap: () => _openStyleMenu(context),
+          child: const RedimosLogo(
+            key: ValueKey('main-rail-logo'),
+            size: 36,
           ),
         );
       });
+
+  void _openStyleMenu(BuildContext context) {
+    final box = context.findRenderObject()! as RenderBox;
+    final overlay =
+        Overlay.of(context).context.findRenderObject()! as RenderBox;
+    final pos = box.localToGlobal(Offset.zero, ancestor: overlay);
+    showMenu<AppStyle>(
+      context: context,
+      position: RelativeRect.fromRect(
+        Rect.fromLTWH(pos.dx, pos.dy + box.size.height + 4, box.size.width, 0),
+        Offset.zero & overlay.size,
+      ),
+      constraints: const BoxConstraints(minWidth: 152, maxWidth: 196),
+      menuPadding: const EdgeInsets.symmetric(vertical: 6),
+      items: [
+        for (final s in AppStyle.values)
+          _CodexPopupMenuItem<AppStyle>(
+            key: ValueKey('home-style-menu-${s.id}-item'),
+            keyName: 'home-style-menu-${s.id}',
+            value: s,
+            selected: s == appStyle.value,
+            label: s.label,
+            autofocusWhenSelected: true,
+            onFocused: (v) => appStyle.value = v,
+          ),
+      ],
+    ).then((s) {
+      if (s == null) {
+        // Dismissed (Esc / outside click): revert the live preview to disk.
+        appStyle.value = readAppStyle();
+      } else {
+        appStyle.value = s;
+        // Preview may already have applied s in memory; only persist when it
+        // actually differs from what is on disk.
+        if (s != readAppStyle()) saveAppStyle();
+      }
+    });
+  }
 
   // AppBar action: stop-all / restore toggle. When anything is running it stops
   // all (recording the running set); when nothing is running but a set was
@@ -729,10 +769,7 @@ class HomeChrome extends StatelessWidget {
             SafeArea(
               child: Column(children: [
                 const SizedBox(height: 14),
-                const RedimosLogo(
-                  key: ValueKey('main-rail-logo'),
-                  size: 36,
-                ),
+                _styleMenu(),
                 const SizedBox(height: 12),
                 _railItem(
                   kind: EntityKind.instance,
@@ -1373,6 +1410,8 @@ class _CodexPopupMenuItem<T> extends PopupMenuEntry<T> {
     required this.selected,
     required this.label,
     this.icon,
+    this.onFocused,
+    this.autofocusWhenSelected = false,
   });
 
   final String keyName;
@@ -1380,6 +1419,14 @@ class _CodexPopupMenuItem<T> extends PopupMenuEntry<T> {
   final bool selected;
   final String label;
   final IconData? icon;
+
+  /// Called when keyboard navigation moves focus onto this item. Used by the
+  /// style menu for live preview; null elsewhere.
+  final ValueChanged<T>? onFocused;
+
+  /// When true the selected item takes focus as the menu opens, so the first
+  /// arrow-key press moves straight to the neighbour (style menu only).
+  final bool autofocusWhenSelected;
 
   @override
   double get height => Dim.rowH;
@@ -1401,7 +1448,10 @@ class _CodexPopupMenuItemState<T> extends State<_CodexPopupMenuItem<T>> {
   }
 
   void _setFocused(bool value) {
-    if (_focused != value) setState(() => _focused = value);
+    if (_focused != value) {
+      setState(() => _focused = value);
+      if (value) widget.onFocused?.call(widget.value);
+    }
   }
 
   void _setPressed(bool value) {
@@ -1436,6 +1486,7 @@ class _CodexPopupMenuItemState<T> extends State<_CodexPopupMenuItem<T>> {
             onFocusChange: _setFocused,
             onHighlightChanged: _setPressed,
             canRequestFocus: true,
+            autofocus: widget.selected && widget.autofocusWhenSelected,
             mouseCursor: SystemMouseCursors.click,
             splashFactory: NoSplash.splashFactory,
             splashColor: Colors.transparent,
@@ -1445,6 +1496,10 @@ class _CodexPopupMenuItemState<T> extends State<_CodexPopupMenuItem<T>> {
             child: Container(
               key: ValueKey('${widget.keyName}-row'),
               height: Dim.rowH,
+              // Inset the selection/focus pill so it never paints over the
+              // popup's rounded corners (flush rows read as overflowing the
+              // dropdown at the first/last position).
+              margin: const EdgeInsets.symmetric(horizontal: 6),
               padding: const EdgeInsets.symmetric(horizontal: 8),
               decoration: BoxDecoration(
                 color: background,

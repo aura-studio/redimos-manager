@@ -26,19 +26,30 @@ File? _themeFile({Directory? dir}) {
 Directory? debugPrefsDir;
 
 /// Synchronously restores the persisted style before runApp. Any failure
-/// (missing file, corrupt JSON, unknown id) silently keeps the Parchment
-/// default — theme prefs must never block startup.
+/// (missing file, corrupt JSON, unknown id) silently keeps the current value
+/// (Parchment at startup) — theme prefs must never block startup.
 void loadAppStyle({Directory? dir}) {
+  final parsed = _readAppStyleOrNull(dir: dir);
+  if (parsed != null) appStyle.value = parsed;
+}
+
+/// Reads the persisted style without touching the global notifier — Parchment
+/// on any failure. The style menu uses this to revert keyboard live-preview
+/// when the popup is dismissed without a selection.
+AppStyle readAppStyle({Directory? dir}) =>
+    _readAppStyleOrNull(dir: dir) ?? AppStyle.parchment;
+
+AppStyle? _readAppStyleOrNull({Directory? dir}) {
   final file = _themeFile(dir: dir);
-  if (file == null) return;
+  if (file == null) return null;
   try {
-    if (!file.existsSync()) return;
+    if (!file.existsSync()) return null;
     final raw = jsonDecode(file.readAsStringSync());
-    if (raw is! Map) return;
-    final parsed = AppStyleX.fromId('${raw['style']}');
-    if (parsed != null) appStyle.value = parsed;
+    if (raw is! Map) return null;
+    return AppStyleX.fromId('${raw['style']}');
   } catch (_) {
-    // Corrupt or unreadable file: keep the Parchment default.
+    // Corrupt or unreadable file.
+    return null;
   }
 }
 
