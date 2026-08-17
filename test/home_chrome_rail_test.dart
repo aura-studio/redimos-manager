@@ -195,10 +195,60 @@ void main() {
         find.byKey(const ValueKey('main-rail-endpoint-tile')),
       );
       expect(activeTile.color, tokens.railActiveBg);
-      expect(activeTile.shadowColor, tokens.railGlow);
-      expect(activeTile.elevation, 2);
+      // Snap paint: the default Material animation lerps the tile color from
+      // transparent black through muddy dark frames on every active switch.
+      expect(activeTile.animationDuration, Duration.zero);
+      expect(activeTile.elevation, 0);
       expect(inactiveTile.color, Colors.transparent);
       expect(inactiveTile.elevation, 0);
+
+      // The glow is a plain BoxDecoration shadow (same render path as the
+      // content cards) rather than a Material-elevation PhysicalShape layer.
+      final activeGlow = tester.widget<Container>(
+        find.byKey(const ValueKey('main-rail-instance-glow')),
+      );
+      final activeGlowDecoration = activeGlow.decoration! as BoxDecoration;
+      expect(activeGlowDecoration.boxShadow, hasLength(1));
+      expect(
+        activeGlowDecoration.boxShadow!.single.color,
+        tokens.railGlow,
+      );
+      final inactiveGlow = tester.widget<Container>(
+        find.byKey(const ValueKey('main-rail-endpoint-glow')),
+      );
+      final inactiveGlowDecoration = inactiveGlow.decoration! as BoxDecoration;
+      expect(inactiveGlowDecoration.boxShadow, isNull);
+
+      // Rail items carry no tooltips: the label is already printed under the
+      // icon, and the dark bubble popping/dismissing around clicks read as a
+      // black flash that spilled over the rail's right divider.
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('main-rail')),
+          matching: find.byType(Tooltip),
+        ),
+        findsNothing,
+      );
+
+      // The active tile keeps its apricot paint under the pointer and while
+      // pressed via apricot-over-apricot no-op washes. Live ink features must
+      // never be recoloured to transparent-black: the hover/highlight ink
+      // created while the tile was inactive keeps its creation-time opacity,
+      // so a Colors.transparent swap on activation paints an opaque BLACK
+      // rounded rect over the tile until the pointer leaves and re-enters.
+      final activeAction = tester.widget<InkWell>(
+        find.byKey(const ValueKey('main-rail-instance-action')),
+      );
+      final inactiveAction = tester.widget<InkWell>(
+        find.byKey(const ValueKey('main-rail-endpoint-action')),
+      );
+      expect(activeAction.hoverColor, tokens.railActiveBg);
+      expect(activeAction.highlightColor, tokens.railActiveBg);
+      expect(inactiveAction.hoverColor, tokens.hover);
+      expect(inactiveAction.highlightColor, tokens.selection);
+      // Press feedback is the static highlight wash only — no splash feature.
+      expect(activeAction.splashFactory, NoSplash.splashFactory);
+      expect(inactiveAction.splashFactory, NoSplash.splashFactory);
 
       final indicator = tester.widget<DecoratedBox>(
         find.byKey(const ValueKey('main-rail-instance-indicator')),

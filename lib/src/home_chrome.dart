@@ -224,7 +224,8 @@ class HomeChrome extends StatelessWidget {
       if (isSvc) {
         final s = state.selectedService;
         if (s != null) {
-          entity = s.config.name.isEmpty ? tr('service.unnamed') : s.config.name;
+          entity =
+              s.config.name.isEmpty ? tr('service.unnamed') : s.config.name;
           sub = '${s.config.engine.wire} · :${s.config.port}';
         }
       } else if (isEp) {
@@ -716,20 +717,37 @@ class HomeChrome extends StatelessWidget {
       final t = AppTokens.of(context);
       var focused = false;
       return StatefulBuilder(builder: (context, setRailState) {
-        return Tooltip(
-          message: label,
-          waitDuration: const Duration(milliseconds: 200),
-          child: SizedBox(
-            key: ValueKey('main-rail-$keyName-item'),
-            width: Dim.railW,
-            height: 42,
-            child: Stack(children: [
-              Center(
+        // No Tooltip here: the label is already printed under the icon, and
+        // the dark tooltip bubble popping/dismissing around clicks read as a
+        // black flash that also spilled over the rail's right divider.
+        return SizedBox(
+          key: ValueKey('main-rail-$keyName-item'),
+          width: Dim.railW,
+          height: 42,
+          child: Stack(children: [
+            Center(
+              child: Container(
+                key: ValueKey('main-rail-$keyName-glow'),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(Dim.radiusM),
+                  // The glow rides on a plain BoxDecoration shadow — the same
+                  // render path the content cards already use.
+                  boxShadow: active
+                      ? [
+                          BoxShadow(
+                            color: t.railGlow,
+                            blurRadius: 3,
+                            offset: const Offset(0, 1),
+                          ),
+                        ]
+                      : null,
+                ),
                 child: Material(
                   key: ValueKey('main-rail-$keyName-tile'),
                   color: active ? t.railActiveBg : Colors.transparent,
-                  elevation: active ? 2 : 0,
-                  shadowColor: t.railGlow,
+                  // Snap paint changes: the default 200ms animation lerps
+                  // color from transparent black through a muddy dark gray.
+                  animationDuration: Duration.zero,
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(Dim.radiusM),
                     side: BorderSide(
@@ -737,7 +755,6 @@ class HomeChrome extends StatelessWidget {
                       width: Dim.borderW,
                     ),
                   ),
-                  clipBehavior: Clip.antiAlias,
                   child: Semantics(
                     button: true,
                     enabled: true,
@@ -750,10 +767,20 @@ class HomeChrome extends StatelessWidget {
                         setRailState(() => focused = value);
                       },
                       borderRadius: BorderRadius.circular(Dim.radiusM),
-                      hoverColor: t.hover,
+                      // Never recolour a live ink feature to
+                      // transparent-black: the hover/highlight ink created
+                      // while the tile was inactive keeps its creation-time
+                      // opacity, and swapping its colour to Colors.transparent
+                      // on activation paints an opaque BLACK rounded rect over
+                      // the tile until the pointer leaves and re-enters.
+                      // Apricot-over-apricot is the invisible no-op.
+                      hoverColor: active ? t.railActiveBg : t.hover,
                       focusColor: t.focus.withValues(alpha: 0.16),
-                      highlightColor: t.selection,
+                      highlightColor: active ? t.railActiveBg : t.selection,
                       splashColor: Colors.transparent,
+                      // Press feedback on these tiles is the static highlight
+                      // wash only — no splash feature at all.
+                      splashFactory: NoSplash.splashFactory,
                       child: SizedBox(
                         key: ValueKey('main-rail-$keyName-focus-target'),
                         width: 44,
@@ -778,8 +805,9 @@ class HomeChrome extends StatelessWidget {
                                   letterSpacing: .2,
                                   height: 1,
                                   color: active ? t.railFgActive : t.railFg,
-                                  fontWeight:
-                                      active ? FontWeight.w700 : FontWeight.w600,
+                                  fontWeight: active
+                                      ? FontWeight.w700
+                                      : FontWeight.w600,
                                 ),
                               ),
                             ),
@@ -790,22 +818,22 @@ class HomeChrome extends StatelessWidget {
                   ),
                 ),
               ),
-              if (active)
-                Positioned(
-                  left: 0,
-                  top: 9,
-                  bottom: 9,
-                  width: 2,
-                  child: DecoratedBox(
-                    key: ValueKey('main-rail-$keyName-indicator'),
-                    decoration: BoxDecoration(
-                      color: t.accent,
-                      borderRadius: BorderRadius.circular(1),
-                    ),
+            ),
+            if (active)
+              Positioned(
+                left: 0,
+                top: 9,
+                bottom: 9,
+                width: 2,
+                child: DecoratedBox(
+                  key: ValueKey('main-rail-$keyName-indicator'),
+                  decoration: BoxDecoration(
+                    color: t.accent,
+                    borderRadius: BorderRadius.circular(1),
                   ),
                 ),
-            ]),
-          ),
+              ),
+          ]),
         );
       });
     });
@@ -917,8 +945,7 @@ class HomeChrome extends StatelessWidget {
                   variant: CodexButtonVariant.primary,
                   onPressed: isService ? cb.onNewService : cb.onNewConfig,
                   icon: const Icon(Icons.add, size: 16),
-                  label:
-                      Text(isService ? tr('service.new') : tr('config.new')),
+                  label: Text(isService ? tr('service.new') : tr('config.new')),
                 ),
               ),
             ),
@@ -1257,7 +1284,11 @@ class HomeChrome extends StatelessWidget {
 
   CodexStatus _codexStatus(String status) => switch (status) {
         'running' || 'ready' => CodexStatus.running,
-        'preparing' || 'restarting' || 'degraded' || 'stopping' || 'recovering' =>
+        'preparing' ||
+        'restarting' ||
+        'degraded' ||
+        'stopping' ||
+        'recovering' =>
           CodexStatus.warning,
         'error' || 'failed' || 'exited' || 'stopped' => CodexStatus.danger,
         _ => CodexStatus.neutral,

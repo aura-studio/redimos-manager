@@ -41,18 +41,6 @@ class CodexSurface extends StatelessWidget {
           fit: StackFit.passthrough,
           children: [
             Padding(padding: padding, child: child),
-            if (elevated)
-              Positioned(
-                left: 0,
-                right: 0,
-                top: 0,
-                child: IgnorePointer(
-                  child: SizedBox(
-                    height: Dim.borderW,
-                    child: ColoredBox(color: tokens.highlight),
-                  ),
-                ),
-              ),
             if (sunken)
               Positioned(
                 left: 0,
