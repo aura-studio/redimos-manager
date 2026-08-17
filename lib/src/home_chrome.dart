@@ -553,8 +553,9 @@ class HomeChrome extends StatelessWidget {
   }
 
   // Topbar twin of the rail R entry: same chrome as the language button (a
-  // Dim.ctlH square), holding a mini swatch of the current palette — bg base
-  // with an accent core. Opens the very same style menu as the rail logo.
+  // Dim.ctlH square), holding a painter's palette glyph — outline follows the
+  // theme's text2, the three paint dots follow accent/warning/danger, so the
+  // icon re-colours live with every style. Opens the same menu as the rail.
   Widget _styleButton() => Builder(builder: (context) {
         final t = AppTokens.of(context);
         final st = appStyle.value.tokens;
@@ -565,23 +566,13 @@ class HomeChrome extends StatelessWidget {
             style: _menuButtonStyle(t),
             onPressed: () => _openStyleMenu(context),
             child: Center(
-              child: Container(
-                key: const ValueKey('home-style-button-swatch'),
-                width: 16,
-                height: 16,
-                decoration: BoxDecoration(
-                  color: st.bg,
-                  borderRadius: BorderRadius.circular(4),
-                  border: Border.all(color: t.border, width: Dim.borderW),
-                ),
-                alignment: Alignment.center,
-                child: Container(
-                  width: 8,
-                  height: 8,
-                  decoration: BoxDecoration(
-                    color: st.accent,
-                    borderRadius: BorderRadius.circular(2),
-                  ),
+              child: CustomPaint(
+                key: const ValueKey('home-style-button-palette'),
+                size: const Size(16, 16),
+                painter: _PaletteIconPainter(
+                  outline: t.text2,
+                  fill: st.bg,
+                  dots: [st.accent, st.warning, st.danger],
                 ),
               ),
             ),
@@ -1400,6 +1391,48 @@ class HomeChrome extends StatelessWidget {
         semanticLabel: 'Instance $status',
         glow: true,
       );
+}
+
+/// Painter's-palette glyph for the topbar style button: an oval board with a
+/// thumb hole (even-odd punch-out so the button face shows through) and three
+/// paint dots. All colours come from the active theme, so the glyph re-tints
+/// live on style switch — unlike the former static mini-swatch.
+class _PaletteIconPainter extends CustomPainter {
+  _PaletteIconPainter({
+    required this.outline,
+    required this.fill,
+    required this.dots,
+  });
+
+  final Color outline;
+  final Color fill;
+  final List<Color> dots;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final board = Rect.fromLTWH(1.0, 1.4, size.width - 2.0, size.height - 2.8);
+    const hole = Offset(11.6, 11.2);
+    final body = Path()
+      ..addOval(board)
+      ..addOval(Rect.fromCircle(center: hole, radius: 1.5))
+      ..fillType = PathFillType.evenOdd;
+    canvas.drawPath(body, Paint()..color = fill);
+    canvas.drawPath(
+      body,
+      Paint()
+        ..color = outline
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.1,
+    );
+    const spots = [Offset(5.0, 5.4), Offset(10.6, 4.8), Offset(4.6, 10.2)];
+    for (var i = 0; i < spots.length && i < dots.length; i++) {
+      canvas.drawCircle(spots[i], 1.5, Paint()..color = dots[i]);
+    }
+  }
+
+  @override
+  bool shouldRepaint(_PaletteIconPainter old) =>
+      outline != old.outline || fill != old.fill || dots != old.dots;
 }
 
 class _CodexPopupMenuItem<T> extends PopupMenuEntry<T> {

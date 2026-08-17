@@ -116,7 +116,7 @@ void main() {
     expect(slot, findsOneWidget);
     final button = find.byKey(const ValueKey('home-style-button'));
     expect(find.descendant(of: slot, matching: button), findsOneWidget);
-    expect(find.byKey(const ValueKey('home-style-button-swatch')),
+    expect(find.byKey(const ValueKey('home-style-button-palette')),
         findsOneWidget);
     // Same chrome row: stop slot, style slot, lang slot side by side.
     expect(find.byKey(const ValueKey('home-topbar-stop-slot')), findsOneWidget);
