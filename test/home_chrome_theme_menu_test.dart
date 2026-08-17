@@ -91,13 +91,16 @@ void main() {
     if (tmp.existsSync()) tmp.deleteSync(recursive: true);
   });
 
-  testWidgets('topbar shows the style menu with the current style label',
+  testWidgets('topbar shows the style menu as a square swatch button',
       (tester) async {
     await _pumpChrome(tester);
     expect(find.byKey(const ValueKey('home-topbar-style-slot')),
         findsOneWidget);
     expect(find.byKey(const ValueKey('home-style-menu')), findsOneWidget);
-    expect(find.text('Parchment'), findsOneWidget);
+    final swatch = find.byKey(const ValueKey('home-style-menu-swatch'));
+    expect(swatch, findsOneWidget);
+    final box = tester.widget<Container>(swatch).decoration as BoxDecoration;
+    expect(box.color, AppStyle.parchment.tokens.bg);
     // It sits between stop-all and the language menu.
     final actions =
         tester.getRect(find.byKey(const ValueKey('home-topbar-actions')));
@@ -110,6 +113,8 @@ void main() {
     expect(style.left, greaterThan(stop.left));
     expect(lang.left, greaterThan(style.left));
     expect(actions.contains(style.center), isTrue);
+    // Square slot: same chrome as the language button.
+    expect(style.width, style.height);
   });
 
   testWidgets('opening the menu lists exactly seventeen styles with a selection',
@@ -159,7 +164,11 @@ void main() {
               Theme.of(context).extension<AppTokens>(), s.tokens),
           isTrue,
           reason: s.id);
-      expect(find.text(s.label), findsOneWidget, reason: s.id);
+      final swatch = tester
+          .widget<Container>(
+              find.byKey(const ValueKey('home-style-menu-swatch')))
+          .decoration as BoxDecoration;
+      expect(swatch.color, s.tokens.bg, reason: s.id);
     }
   });
 }

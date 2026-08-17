@@ -205,9 +205,9 @@ class HomeChrome extends StatelessWidget {
                 child: _stopAllButton(t),
               ),
               const SizedBox(width: 8),
-              SizedBox(
+              SizedBox.square(
                 key: const ValueKey('home-topbar-style-slot'),
-                height: Dim.ctlH,
+                dimension: Dim.ctlH,
                 child: _styleMenu(),
               ),
               const SizedBox(width: 8),
@@ -616,11 +616,13 @@ class HomeChrome extends StatelessWidget {
         label: label,
       );
 
-  // v1.3: theme-style picker. A text dropdown (current palette label + ▾)
-  // sitting between stop-all and the language menu; picking a style swaps the
-  // global appStyle (rebuilding MaterialApp's theme) and persists the choice.
+  // v1.3: theme-style picker. A square swatch button (current palette bg with
+  // an accent core, same chrome as the language button) sitting between
+  // stop-all and the language menu; picking a style swaps the global appStyle
+  // (rebuilding MaterialApp's theme) and persists the choice.
   Widget _styleMenu() => Builder(builder: (context) {
         final t = AppTokens.of(context);
+        final st = appStyle.value.tokens;
         return PopupMenuButton<AppStyle>(
           key: const ValueKey('home-style-menu'),
           initialValue: appStyle.value,
@@ -630,15 +632,7 @@ class HomeChrome extends StatelessWidget {
           constraints: const BoxConstraints(minWidth: 152, maxWidth: 196),
           position: PopupMenuPosition.under,
           requestFocus: true,
-          style: _menuButtonStyle(t).copyWith(
-            fixedSize: const WidgetStatePropertyAll(null),
-            minimumSize: const WidgetStatePropertyAll(Size(0, Dim.ctlH)),
-            maximumSize:
-                const WidgetStatePropertyAll(Size(double.infinity, Dim.ctlH)),
-            padding: const WidgetStatePropertyAll(
-              EdgeInsets.symmetric(horizontal: 10),
-            ),
-          ),
+          style: _menuButtonStyle(t),
           onSelected: (s) {
             if (s == appStyle.value) return;
             appStyle.value = s;
@@ -654,15 +648,27 @@ class HomeChrome extends StatelessWidget {
                 label: s.label,
               ),
           ],
-          child: Row(mainAxisSize: MainAxisSize.min, children: [
-            Text(
-              appStyle.value.label,
-              style: Ts.style(
-                  size: Ts.md, weight: FontWeight.w600, color: t.text2),
+          child: Center(
+            child: Container(
+              key: const ValueKey('home-style-menu-swatch'),
+              width: 16,
+              height: 16,
+              decoration: BoxDecoration(
+                color: st.bg,
+                borderRadius: BorderRadius.circular(4),
+                border: Border.all(color: t.border, width: Dim.borderW),
+              ),
+              alignment: Alignment.center,
+              child: Container(
+                width: 8,
+                height: 8,
+                decoration: BoxDecoration(
+                  color: st.accent,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
             ),
-            const SizedBox(width: 4),
-            Text('▾', style: Ts.style(size: Ts.sm, color: t.text3)),
-          ]),
+          ),
         );
       });
 
