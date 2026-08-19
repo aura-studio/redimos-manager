@@ -189,11 +189,11 @@ const _expected = <AppStyle, Map<String, int>>{
 
 void main() {
   group('AppStyle catalogue', () {
-    test('exactly twelve styles with parchment as the default first value',
+    test('exactly twelve styles; parchment leads the enum, midnight the startup',
         () {
       expect(AppStyle.values.length, 12);
       expect(AppStyle.values.first, AppStyle.parchment);
-      expect(appStyle.value, AppStyle.parchment);
+      expect(appStyle.value, AppStyle.midnight);
     });
 
     test('ids are unique and fromId round-trips every style', () {
@@ -349,7 +349,7 @@ void main() {
       appStyle.value = AppStyle.parchment;
     });
 
-    test('smoke: default style is parchment with no prefs file', () {
+    test('smoke: parchment keeps its light token baseline', () {
       expect(AppStyle.parchment.tokens.bg, const Color(0xFFF7F5F0));
     });
   });

@@ -357,12 +357,15 @@ void main() {
       size: const Size(1280, 700),
     );
     await tester.pump();
+    // Configure leads at 0 (v1 convention) - hop to Overview for the probe.
+    key.currentState!.select(1);
+    await tester.pump();
 
     expect(find.text('Reachable'), findsWidgets);
     expect(core.endpointListCalls, 2,
         reason: 'Overview and Browser each load exactly once at mount');
 
-    key.currentState!.select(1);
+    key.currentState!.select(2); // Browser
     await tester.pump();
     await tester.tap(find.text('users').first);
     await tester.pump();
@@ -373,13 +376,13 @@ void main() {
     await tester.pump(const Duration(milliseconds: 16));
     await tester.pump(const Duration(milliseconds: 16));
 
-    key.currentState!.select(0);
+    key.currentState!.select(1); // Overview
     await tester.pump();
     expect(find.text('Reachable'), findsWidgets);
     expect(core.endpointListCalls, 2,
         reason: 'returning to Overview must not re-run its probe');
 
-    key.currentState!.select(1);
+    key.currentState!.select(2); // Browser
     await tester.pump();
     expect(
       find.byKey(const ValueKey('epb-explore-e1-users')),
@@ -549,7 +552,7 @@ void main() {
     await tester.pump();
     expect(core.endpointListCalls, 2);
 
-    key.currentState!.select(1);
+    key.currentState!.select(2); // Browser (Configure leads at 0)
     await tester.pump();
     await tester.tap(find.text('users').first);
     await tester.pump();
@@ -560,7 +563,7 @@ void main() {
       findsOneWidget,
     );
 
-    key.currentState!.select(3);
+    key.currentState!.select(4); // Playground
     await tester.pump();
     final editor = find.descendant(
       of: find.byType(CodeField),
@@ -570,13 +573,14 @@ void main() {
     await tester.pump();
 
     for (var round = 0; round < 4; round++) {
-      for (var index = 0; index < 4; index++) {
+      // 5 screens since the Configure pane joined (v1 configure-first).
+      for (var index = 0; index < 5; index++) {
         key.currentState!.select(index);
         await tester.pump();
       }
     }
 
-    key.currentState!.select(1);
+    key.currentState!.select(2); // Browser
     await tester.pump();
     expect(
       find.byKey(const ValueKey('epb-explore-e1-users')),
@@ -584,7 +588,7 @@ void main() {
       reason: 'the selected table remains mounted after rapid cycling',
     );
 
-    key.currentState!.select(3);
+    key.currentState!.select(4); // Playground
     await tester.pump();
     expect(tester.widget<TextField>(editor).controller!.text,
         'return "endpoint-cycle";');

@@ -308,6 +308,7 @@ class CodexSelectField<T> extends StatefulWidget {
 
 class _CodexSelectFieldState<T> extends State<CodexSelectField<T>> {
   final _fieldKey = GlobalKey<FormFieldState<T>>();
+  final _anchorKey = GlobalKey();
   FocusNode? _focusNode;
 
   FocusNode get _effectiveFocusNode => widget.focusNode ?? _focusNode!;
@@ -352,16 +353,27 @@ class _CodexSelectFieldState<T> extends State<CodexSelectField<T>> {
   @override
   Widget build(BuildContext context) {
     final tokens = AppTokens.of(context);
+    final enabled = widget.enabled && widget.onChanged != null;
+    var textStyle = widget.style ??
+        Ts.themedStyle(
+          Theme.of(context),
+          size: Ts.md,
+          color: tokens.text,
+        );
+    if (!enabled) {
+      textStyle = textStyle.copyWith(color: tokens.text3);
+    }
     return FormField<T>(
       key: _fieldKey,
       initialValue: widget.value,
-      enabled: widget.enabled && widget.onChanged != null,
+      enabled: enabled,
       validator: widget.validator,
       onSaved: widget.onSaved,
       autovalidateMode: widget.autovalidateMode ?? AutovalidateMode.disabled,
       builder: (field) => _FieldWithError(
         errorText: field.errorText,
         child: SizedBox(
+          key: _anchorKey,
           height: Dim.ctlH,
           child: InputDecorator(
             isEmpty: field.value == null,
@@ -371,34 +383,144 @@ class _CodexSelectFieldState<T> extends State<CodexSelectField<T>> {
               widget.decoration.copyWith(errorText: null, error: null),
               hasError: field.hasError,
             ),
-            child: DropdownButtonHideUnderline(
-              child: DropdownButton<T>(
-                value: field.value,
-                items: widget.items,
-                hint: widget.hint,
-                disabledHint: widget.disabledHint,
-                focusNode: _effectiveFocusNode,
-                autofocus: widget.autofocus,
-                isDense: true,
-                isExpanded: true,
-                icon: const Icon(Icons.keyboard_arrow_down, size: 16),
-                dropdownColor: tokens.panel,
-                style: widget.style ??
-                    Ts.themedStyle(
-                      Theme.of(context),
-                      size: Ts.md,
-                      color: tokens.text,
+            child: InkWell(
+              focusNode: _effectiveFocusNode,
+              autofocus: widget.autofocus,
+              canRequestFocus: enabled,
+              mouseCursor: enabled
+                  ? SystemMouseCursors.click
+                  : SystemMouseCursors.basic,
+              onTap: enabled
+                  ? () => _openMenu(context, field, tokens, textStyle)
+                  : null,
+              child: SizedBox.expand(
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    Expanded(
+                      child: DefaultTextStyle(
+                        style: textStyle,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        child: _selectedChild(field, enabled, tokens),
+                      ),
                     ),
-                onChanged: widget.enabled && widget.onChanged != null
-                    ? (next) {
-                        field.didChange(next);
-                        widget.onChanged?.call(next);
-                      }
-                    : null,
+                    const SizedBox(width: 4),
+                    Icon(
+                      Icons.keyboard_arrow_down,
+                      size: 16,
+                      color: tokens.text3,
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _selectedChild(
+    FormFieldState<T> field,
+    bool enabled,
+    AppTokens tokens,
+  ) {
+    final value = field.value;
+    if (value == null) {
+      final placeholder =
+          enabled ? widget.hint : (widget.disabledHint ?? widget.hint);
+      return placeholder ?? const SizedBox.shrink();
+    }
+    for (final item in widget.items) {
+      if (item.value == value) return item.child;
+    }
+    return const SizedBox.shrink();
+  }
+
+  Future<void> _openMenu(
+    BuildContext context,
+    FormFieldState<T> field,
+    AppTokens tokens,
+    TextStyle textStyle,
+  ) async {
+    final box = _anchorKey.currentContext?.findRenderObject() as RenderBox?;
+    final overlay =
+        Overlay.of(context).context.findRenderObject() as RenderBox?;
+    if (box == null || overlay == null) return;
+    final position = RelativeRect.fromRect(
+      Rect.fromPoints(
+        box.localToGlobal(Offset.zero, ancestor: overlay),
+        box.localToGlobal(box.size.bottomRight(Offset.zero),
+            ancestor: overlay),
+      ),
+      Offset.zero & overlay.size,
+    );
+    final selected = await showMenu<T>(
+      context: context,
+      position: position,
+      initialValue: field.value,
+      elevation: 12,
+      shadowColor: Colors.black.withValues(alpha: 0.28),
+      surfaceTintColor: Colors.transparent,
+      color: tokens.panel,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(Dim.radiusS),
+        side: BorderSide(
+          color: Color.lerp(tokens.border, tokens.text, 0.35)!,
+        ),
+      ),
+      constraints: BoxConstraints(
+        minWidth: box.size.width,
+        maxWidth: box.size.width,
+      ),
+      items: [
+        for (final item in widget.items)
+          PopupMenuItem<T>(
+            value: item.value,
+            enabled: item.enabled,
+            height: 32,
+            padding: EdgeInsets.zero,
+            child: _menuRow(item, field.value == item.value, tokens,
+                textStyle),
+          ),
+      ],
+    );
+    if (!mounted) return;
+    _effectiveFocusNode.unfocus();
+    if (selected != null) {
+      field.didChange(selected);
+      widget.onChanged?.call(selected);
+    }
+  }
+
+  Widget _menuRow(
+    DropdownMenuItem<T> item,
+    bool selected,
+    AppTokens tokens,
+    TextStyle textStyle,
+  ) {
+    final child = DefaultTextStyle(
+      style: textStyle,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      child: item.child,
+    );
+    if (!selected) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 10),
+        child: Align(alignment: Alignment.centerLeft, child: child),
+      );
+    }
+    return Container(
+      color: tokens.hover,
+      alignment: Alignment.centerLeft,
+      padding: const EdgeInsets.symmetric(horizontal: 10),
+      child: Row(
+        children: [
+          Expanded(child: child),
+          Icon(Icons.check, size: 14, color: tokens.accent),
+        ],
       ),
     );
   }
@@ -420,7 +542,11 @@ InputDecoration codexInputDecoration(
   return decoration
       .applyDefaults(Theme.of(context).inputDecorationTheme)
       .copyWith(
-        isDense: true,
+        // isDense 使 InputDecorator 的 container 以输入行内在高度(约 18)为下
+        // 限绘制边框，SizedBox(ctlH) 的固定高度画不满。改为非 dense：
+        // minContainerHeight = kMinInteractiveDimension(48)，被盒高截断后
+        // 边框/填充按整盒高度绘制（textarea 走 expands 分支不受影响）。
+        isDense: false,
         filled: true,
         fillColor: tokens.panel,
         contentPadding: const EdgeInsets.symmetric(horizontal: 10),

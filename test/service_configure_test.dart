@@ -13,6 +13,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:redimos_manager/src/i18n.dart';
 import 'package:redimos_manager/src/models.dart';
 import 'package:redimos_manager/src/service_configure.dart';
+import 'package:redimos_manager/src/ui_fields.dart';
 import 'package:redimos_manager/src/ui_theme.dart';
 
 import 'fake_core.dart';
@@ -116,7 +117,9 @@ Future<void> _pump(
 Finder _input(String field) => find.byKey(ValueKey('service-config-$field-input'));
 
 Future<void> _selectIn<T>(WidgetTester tester, String label) async {
-  await tester.tap(find.byType(DropdownButton<T>));
+  await tester.ensureVisible(find.byType(CodexSelectField<T>));
+  await tester.pumpAndSettle();
+  await tester.tap(find.byType(CodexSelectField<T>));
   await tester.pumpAndSettle();
   await tester.tap(find.text(label).last); // menu item (field echo is first)
   await tester.pumpAndSettle();
@@ -285,18 +288,18 @@ void main() {
     await _pump(tester, service: _svc(state: 'running'), core: core);
 
     expect(find.byKey(const ValueKey('service-config-locked-hint')), findsOneWidget);
-    // Disabled selects carry a null onChanged (DropdownButton grammar).
+    // Disabled selects are flagged enabled=false (CodexSelectField grammar).
     expect(
-      tester.widget<DropdownButton<ServiceEngine>>(
-        find.byType(DropdownButton<ServiceEngine>),
-      ).onChanged,
-      isNull,
+      tester.widget<CodexSelectField<ServiceEngine>>(
+        find.byType(CodexSelectField<ServiceEngine>),
+      ).enabled,
+      isFalse,
     );
     expect(
-      tester.widget<DropdownButton<ServiceStorageMode>>(
-        find.byType(DropdownButton<ServiceStorageMode>),
-      ).onChanged,
-      isNull,
+      tester.widget<CodexSelectField<ServiceStorageMode>>(
+        find.byType(CodexSelectField<ServiceStorageMode>),
+      ).enabled,
+      isFalse,
     );
     expect(tester.widget<TextField>(
       find.descendant(of: _input('port'), matching: find.byType(TextField)),

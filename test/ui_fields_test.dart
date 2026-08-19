@@ -236,9 +236,11 @@ void main() {
       expect(tester.widget<TextField>(find.byType(TextField)).enabled, isFalse);
       expect(
         tester
-            .widget<DropdownButton<String>>(find.byType(DropdownButton<String>))
-            .onChanged,
-        isNull,
+            .widget<CodexSelectField<String>>(
+              find.byType(CodexSelectField<String>),
+            )
+            .enabled,
+        isFalse,
       );
       expect(tester.takeException(), isNull);
     });

@@ -72,19 +72,22 @@ Future<void> _pump(WidgetTester tester, Widget child) async {
 
 void _endpointDetailTests() {
   testWidgets(
-      'endpoint keeps exactly four client screens even when its URL matches '
+      'endpoint keeps its client screens even when its URL matches '
       'a running Service\'s port', (tester) async {
     await _pump(
       tester,
       EndpointDetailView(
         core: FakeNativeCore(),
         endpoint: _collidingEndpoint,
-        screenIndex: 0,
+        // Configure (the identity pane) leads at 0; Overview follows.
+        screenIndex: 1,
       ),
     );
 
-    // The four client-side screens, keyed by endpoint ID. (IndexedStack
+    // The client-side screens, keyed by endpoint ID. (IndexedStack
     // off-stages every non-current screen, so look through it.)
+    expect(find.byKey(const ValueKey('ep-config-ep-1'), skipOffstage: false),
+        findsOneWidget);
     expect(find.byKey(const ValueKey('ep-overview-ep-1')), findsOneWidget);
     expect(find.byKey(const ValueKey('ep-browser-ep-1'), skipOffstage: false),
         findsOneWidget);
@@ -122,7 +125,7 @@ void _endpointDetailTests() {
           kind: 'url',
           endpoint: 'http://127.0.0.1:80000',
         ),
-        screenIndex: 0,
+        screenIndex: 1,
       ),
     );
     expect(find.byKey(const ValueKey('ep-overview-ep-2')), findsOneWidget);

@@ -676,6 +676,7 @@ class ServiceConfigEditorState extends State<ServiceConfigEditor> {
           variant: CodexButtonVariant.secondary,
           semanticLabel: tr('home.revert'),
           onPressed: _busy ? null : _reseed,
+          icon: const Icon(Icons.restore, size: 15),
           label: Text(tr('home.revert')),
         ),
         const SizedBox(width: 8),

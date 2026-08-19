@@ -26,6 +26,7 @@ import 'package:redimos_manager/src/playground_page.dart';
 import 'package:redimos_manager/src/service_configure.dart';
 import 'package:redimos_manager/src/service_detail.dart';
 import 'package:redimos_manager/src/services_state.dart';
+import 'package:redimos_manager/src/ui_fields.dart';
 import 'package:redimos_manager/src/ui_theme.dart';
 
 import 'fake_core.dart';
@@ -368,7 +369,7 @@ Future<void> pumpInstBrowseLoaded(WidgetTester t,
 
   // 2) DB picker → DB3 (mockup shows db3): SELECT 3 + a fresh SCAN. The
   //    menu route needs frame pumps to build its items before DB3 is tappable.
-  await t.runAsync(() => t.tap(find.byType(DropdownButton<int>)));
+  await t.runAsync(() => t.tap(find.byType(CodexSelectField<int>)));
   await t.pump();
   await t.pump(const Duration(milliseconds: 200)); // menu enter animation
   await t.runAsync(() async {

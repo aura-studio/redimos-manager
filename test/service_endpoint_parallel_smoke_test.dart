@@ -200,6 +200,9 @@ class _ParallelHarnessState extends State<_ParallelHarness> {
         key: ValueKey('endpoint-detail-${e.id}'),
         core: widget.core,
         endpoint: e,
+        // Configure leads at 0 (v1 convention); keep Overview on stage as
+        // this test did before the pane joined.
+        screenIndex: 1,
       );
     }
     final s = svc.selected;
@@ -344,7 +347,7 @@ void main() {
     expect(core.callLog,
         isNot(contains(anyOf('saveConfig:ep-1', 'saveConfig:ep-2', 'deleteConfig:ep-1'))));
 
-    // 4. NO TAB FLAP: the endpoint page stays a fixed four screens while its
+    // 4. NO TAB FLAP: the endpoint page stays a fixed client-screen set while its
     //    URL's engine is live.
     await _tap(tester, 'pick-ep-ep-1');
     expect(harness.kind, EntityKind.endpoint);

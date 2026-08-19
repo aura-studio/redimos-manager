@@ -8,7 +8,7 @@ import 'ui_tokens.dart';
 /// Currently active UI palette. Mirrors the appLang pattern: a global
 /// ValueNotifier that RedimosManagerApp's AnimatedBuilder listens to, so
 /// setting [appStyle.value] re-themes the whole window on the next frame.
-final ValueNotifier<AppStyle> appStyle = ValueNotifier(AppStyle.parchment);
+final ValueNotifier<AppStyle> appStyle = ValueNotifier(AppStyle.midnight);
 
 /// The prefs file lives under the app's own config dir — never ~/.redimos,
 /// which holds native-core state and credentials we must not touch.
@@ -27,17 +27,17 @@ Directory? debugPrefsDir;
 
 /// Synchronously restores the persisted style before runApp. Any failure
 /// (missing file, corrupt JSON, unknown id) silently keeps the current value
-/// (Parchment at startup) — theme prefs must never block startup.
+/// (Midnight at startup) — theme prefs must never block startup.
 void loadAppStyle({Directory? dir}) {
   final parsed = _readAppStyleOrNull(dir: dir);
   if (parsed != null) appStyle.value = parsed;
 }
 
-/// Reads the persisted style without touching the global notifier — Parchment
+/// Reads the persisted style without touching the global notifier — Midnight
 /// on any failure. The style menu uses this to revert keyboard live-preview
 /// when the popup is dismissed without a selection.
 AppStyle readAppStyle({Directory? dir}) =>
-    _readAppStyleOrNull(dir: dir) ?? AppStyle.parchment;
+    _readAppStyleOrNull(dir: dir) ?? AppStyle.midnight;
 
 AppStyle? _readAppStyleOrNull({Directory? dir}) {
   final file = _themeFile(dir: dir);

@@ -536,19 +536,21 @@ class _HomePageState extends State<HomePage>
   // 'Browser'; the two screens must not share one i18n value. Reuse the
   // existing 'ep.browse' ('Browse') key for the instance side — no new keys.
   static const _instanceTabKeys = [
+    'tab.configure',
     'ep.browse',
     'tab.console',
     'tab.monitor',
     'tab.logs',
-    'tab.playground',
-    'tab.configure'
+    'tab.playground'
   ];
   List<String> _instanceTabLabels() =>
       [for (final k in _instanceTabKeys) tr(k)];
 
-  // Stage 15 (3.1–3.4): the endpoint screens are exactly these four client-
-  // side tabs, always — no engine-derived Monitor/Logs extras.
+  // Stage 15 (3.1–3.4): the endpoint screens — Configure leads (v1
+  // convention), then the four client-side tabs; no engine-derived
+  // Monitor/Logs extras.
   static const _epTabKeys = [
+    'tab.configure',
     'tab.overview',
     'tab.browser',
     'tab.partiql',
@@ -557,11 +559,12 @@ class _HomePageState extends State<HomePage>
   List<String> _epTabLabels() => [for (final k in _epTabKeys) tr(k)];
 
   // Stage 12: the Service detail's four fixed screens (stage 14 fills them).
+  // Configure leads (v1 convention) - config is the primary surface here.
   static const _serviceTabKeys = [
+    'tab.configure',
     'tab.overview',
     'tab.monitor',
-    'tab.logs',
-    'tab.configure'
+    'tab.logs'
   ];
   List<String> _serviceTabLabels() =>
       [for (final k in _serviceTabKeys) tr(k)];
@@ -679,7 +682,7 @@ class _HomePageState extends State<HomePage>
       ));
       unawaited(svc.refresh());
       _selectService(saved.id);
-      svc.selectedTab = 3; // land on Configure (9.5)
+      svc.selectedTab = 0; // land on Configure (9.5) - it leads the tab row
     } on ServiceApiException catch (e) {
       _toast('${tr('home.saveFailed')}: ${e.code}');
     } catch (e) {
@@ -717,74 +720,18 @@ class _HomePageState extends State<HomePage>
         core: _core!,
         endpoint: e,
         screenIndex: _epScreenIndex,
-        onEdit: () => _editEndpoint(e),
+        // v1 configure-first: the Overview header's Edit button jumps to the
+        // Configure tab (index 0) instead of opening the old dialog.
+        onEdit: () => setState(() => _epScreenIndex = 0),
+        onSaveEndpoint: (saved) => _persistEndpointEdit(e, saved),
         browserKey: _epBrowserKey,
       );
 
-  // T11 R4.3/R4.4: edit an endpoint's identity fields and persist the change
-  // to every instance config bound to this endpoint (the same tuple), through
-  // saveConfig so it lands on disk; sibling instances sharing the tuple are
-  // synced one by one.
-  Future<void> _editEndpoint(DdbEndpoint e) async {
-    final nameCtl = TextEditingController(text: e.name);
-    final endpointCtl = TextEditingController(text: e.endpoint);
-    final regionCtl = TextEditingController(text: e.region);
-    final saved = await showDialog<DdbEndpoint>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Edit endpoint'),
-        content: SizedBox(
-          width: 420,
-          child: Column(mainAxisSize: MainAxisSize.min, children: [
-            TextField(
-              controller: nameCtl,
-              decoration:
-                  const InputDecoration(labelText: 'Name', isDense: true),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: endpointCtl,
-              decoration: InputDecoration(
-                  labelText: tr('ep.ovEndpoint'), isDense: true),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: regionCtl,
-              decoration:
-                  InputDecoration(labelText: tr('ep.ovRegion'), isDense: true),
-            ),
-          ]),
-        ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: Text(tr('home.cancel'))),
-          FilledButton(
-            onPressed: () => Navigator.pop(
-                ctx,
-                DdbEndpoint(
-                  id: e.id,
-                  name: nameCtl.text.trim(),
-                  kind: e.kind,
-                  endpoint: endpointCtl.text.trim(),
-                  partitionID: e.partitionID,
-                  region: regionCtl.text.trim(),
-                  accessKeyId: e.accessKeyId,
-                  secretKey: e.secretKey,
-                  sessionToken: e.sessionToken,
-                  source: e.source,
-                )),
-            child: Text(tr('home.save')),
-          ),
-        ],
-      ),
-    );
-    nameCtl.dispose();
-    endpointCtl.dispose();
-    regionCtl.dispose();
-    if (saved == null) return;
-    // Persist: write the edited tuple into every bound instance config (the
-    // endpoint is a dedup view of those tuples, so the write goes through them).
+  // T11 R4.3/R4.4, lifted into the Configure tab: persist an edited
+  // endpoint tuple to every instance config bound to this endpoint (the same
+  // tuple), through saveConfig so it lands on disk; sibling instances sharing
+  // the tuple are synced one by one.
+  Future<void> _persistEndpointEdit(DdbEndpoint e, DdbEndpoint saved) async {
     var synced = 0;
     try {
       for (final c in _configs) {
@@ -821,10 +768,17 @@ class _HomePageState extends State<HomePage>
     }
     final logsConfigId = c.id.startsWith('unsaved-') ? null : c.id;
     final st = _status[c.id];
-    // v2.3 tab order: Browse / Console / Monitor / Logs / Playground /
-    // Configure. The TabController stays (it preserves per-tab state and lets
+    // v1 convention restored: Configure / Browse / Console / Monitor / Logs /
+    // Playground. The TabController stays (it preserves per-tab state and lets
     // flows jump between tabs); only its on-screen chrome moved to the MidBar.
     final screens = <Widget>[
+      // configure (scrolls its own fields, pins the action bar)
+      ConfigEditor(
+        key: _editorKey,
+        config: c,
+        onSave: _save,
+        onDelete: _delete,
+      ),
       // browser — Redis key browser over the proxy (ARDM style)
       BrowserPageView(
         key: _browserKey,
@@ -886,13 +840,6 @@ class _HomePageState extends State<HomePage>
         kind: 'redis',
         running: st?.isRunning ?? false,
       ),
-      // configure (scrolls its own fields, pins the action bar)
-      ConfigEditor(
-        key: _editorKey,
-        config: c,
-        onSave: _save,
-        onDelete: _delete,
-      ),
     ];
     final activeIndex = _tabs.index;
     return TabBarView(
@@ -909,27 +856,28 @@ class _HomePageState extends State<HomePage>
     );
   }
 
-  // Stage 14: the four Service detail tabs are all live. Overview carries the
-  // lifecycle actions; Monitor reads the per-ID history ring; Logs requests
-  // through ServicesState's generation guard; Configure hosts the CRUD editor.
+  // Stage 14: the four Service detail tabs are all live. Configure leads (v1
+  // convention); Overview carries the lifecycle actions; Monitor reads the
+  // per-ID history ring; Logs requests through ServicesState's generation
+  // guard.
   Widget _serviceDetail() {
     final svc = _svcState;
     final s = svc?.selected;
     if (s == null) return Center(child: Text(tr('service.pick')));
     return switch (svc!.selectedTab) {
-      0 => ServiceOverviewTab(
+      1 => ServiceOverviewTab(
           key: ValueKey('service-overview-${s.id}'),
           service: s,
           onStart: () => _serviceLifecycle(s, 'start'),
           onStop: () => _serviceLifecycle(s, 'stop'),
           onRestart: () => _serviceLifecycle(s, 'restart'),
         ),
-      1 => ServiceMonitorTab(
+      2 => ServiceMonitorTab(
           key: ValueKey('service-monitor-${s.id}'),
           service: s,
           history: svc.historyOf(s.id),
         ),
-      2 => ServiceLogsTab(
+      3 => ServiceLogsTab(
           key: ValueKey('service-logs-${s.id}'),
           service: s,
           state: svc,

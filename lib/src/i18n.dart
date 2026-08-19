@@ -82,6 +82,13 @@ const Map<String, Map<AppLang, String>> _strings = {
 
   // --- v1.2 endpoint Overview tab ---
   'ep.ovBackend': {AppLang.en: 'Backend', AppLang.zh: '后端'},
+  'ep.cfgSection': {AppLang.en: 'Endpoint identity', AppLang.zh: '端点身份'},
+  'ep.cfgName': {AppLang.en: 'Endpoint name', AppLang.zh: '端点名称'},
+  'ep.cfgSyncNote': {
+    AppLang.en:
+        'Saving updates every instance config bound to this endpoint (endpoints are a dedup view of those configs).',
+    AppLang.zh: '保存会同步更新绑定此端点的所有实例配置（端点是这些配置的去重视图）。'
+  },
   'ep.ovEndpoint': {AppLang.en: 'Endpoint', AppLang.zh: '端点地址'},
   'ep.ovRegion': {AppLang.en: 'Region', AppLang.zh: '区域'},
   'ep.ovAwsDefault': {

@@ -145,19 +145,19 @@ class _DetailHarnessState extends State<_DetailHarness> {
     final s = svc.selected;
     if (s == null) return const SizedBox.shrink();
     return switch (svc.selectedTab) {
-      0 => ServiceOverviewTab(
+      1 => ServiceOverviewTab(
           key: ValueKey('overview-${s.id}'),
           service: s,
           onStart: () => _life(s, 'start'),
           onStop: () => _life(s, 'stop'),
           onRestart: () => _life(s, 'restart'),
         ),
-      1 => ServiceMonitorTab(
+      2 => ServiceMonitorTab(
           key: ValueKey('monitor-${s.id}'),
           service: s,
           history: svc.historyOf(s.id),
         ),
-      2 => ServiceLogsTab(
+      3 => ServiceLogsTab(
           key: ValueKey('logs-${s.id}'),
           service: s,
           state: svc,
@@ -247,8 +247,10 @@ void main() {
     final core = _SmokeCore();
     core.states['svc-a'] = 'running'; // live: metrics + logs both exercised
     await _pump(tester, core);
+    // Default landing is tab 0 = Configure (v1 convention); hop to Overview.
+    await _tab(tester, 1);
 
-    // --- Tab 0 Overview: per-ID identity ------------------------------------
+    // --- Tab 1 Overview: per-ID identity ------------------------------------
     expect(find.byKey(const ValueKey('overview-svc-a')), findsOneWidget);
     expect(find.text('local-ddb'), findsOneWidget);
     expect(find.text('8000'), findsOneWidget);
@@ -259,8 +261,8 @@ void main() {
     expect(find.text('8001'), findsOneWidget);
     expect(find.text('local-ddb'), findsNothing);
 
-    // --- Tab 1 Monitor: per-ID history ---------------------------------------
-    await _tab(tester, 1);
+    // --- Tab 2 Monitor: per-ID history ---------------------------------------
+    await _tab(tester, 2); // Monitor
     // svc-b never ran → no samples → the explicit empty state.
     expect(find.byKey(const ValueKey('service-monitor-empty')), findsOneWidget);
     await _select(tester, 'svc-a');
@@ -268,16 +270,16 @@ void main() {
     expect(find.byKey(const ValueKey('service-monitor-empty')), findsNothing);
     expect(find.text('10.0%'), findsOneWidget);
 
-    // --- Tab 2 Logs: per-ID lines --------------------------------------------
-    await _tab(tester, 2);
+    // --- Tab 3 Logs: per-ID lines --------------------------------------------
+    await _tab(tester, 3); // Logs
     expect(find.text('alpha boot'), findsOneWidget);
     expect(find.text('beta boot'), findsNothing);
     await _select(tester, 'svc-b');
     expect(find.text('beta boot'), findsOneWidget);
     expect(find.text('alpha boot'), findsNothing);
 
-    // --- Tab 3 Configure: per-ID form -----------------------------------------
-    await _tab(tester, 3);
+    // --- Tab 0 Configure: per-ID form -----------------------------------------
+    await _tab(tester, 0); // Configure
     expect(find.byKey(const ValueKey('configure-svc-b')), findsOneWidget);
     final nameField = tester.widget<TextField>(find.descendant(
       of: find.byKey(const ValueKey('service-config-name-input')),
@@ -292,10 +294,10 @@ void main() {
     ));
     expect(nameFieldA.controller!.text, 'local-ddb');
 
-    // The detail tab is a per-KIND slot: switching Services kept it on 3.
+    // The detail tab is a per-KIND slot: switching Services kept it on 0.
     final harness =
         tester.state<_DetailHarnessState>(find.byType(_DetailHarness));
-    expect(harness.svc.selectedTab, 3);
+    expect(harness.svc.selectedTab, 0);
     expect(tester.takeException(), isNull);
   });
 
@@ -305,7 +307,7 @@ void main() {
     await _pump(tester, core);
 
     // svc-a stopped → Start only affects svc-a.
-    await _tab(tester, 0);
+    await _tab(tester, 1); // Overview (Configure leads the tab row at 0)
     await tester.tap(find.byKey(const ValueKey('service-overview-start')));
     await tester.pump(const Duration(milliseconds: 1));
     await tester.pump();

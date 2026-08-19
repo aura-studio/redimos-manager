@@ -634,6 +634,7 @@ class ConfigEditorState extends State<ConfigEditor>
               );
             }
           },
+          icon: const Icon(Icons.restore, size: 15),
           label: Text(tr('home.revert')),
         ),
         const SizedBox(width: 8),

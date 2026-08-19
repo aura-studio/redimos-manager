@@ -140,7 +140,8 @@ void main() {
     expect(File('${tmp.path}/theme.json').existsSync(), isFalse);
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pumpAndSettle();
-    expect(appStyle.value, AppStyle.parchment);
+    // No prefs file: Esc reverts to the midnight startup default.
+    expect(appStyle.value, AppStyle.midnight);
   });
 
   testWidgets('opening the menu lists exactly twelve styles with a selection',
@@ -178,9 +179,9 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('home-style-menu')));
     await tester.pumpAndSettle();
     await tester
-        .tap(find.byKey(const ValueKey('home-style-menu-parchment-item')));
+        .tap(find.byKey(const ValueKey('home-style-menu-midnight-item')));
     await tester.pumpAndSettle();
-    expect(appStyle.value, AppStyle.parchment);
+    expect(appStyle.value, AppStyle.midnight);
     expect(File('${tmp.path}/theme.json').existsSync(), isFalse);
   });
 
@@ -217,14 +218,18 @@ void main() {
     await _pumpChrome(tester);
     await tester.tap(find.byKey(const ValueKey('home-style-menu')));
     await tester.pumpAndSettle();
+    // Two arrow-downs: midnight is the startup fallback now, so previewing it
+    // would equal readAppStyle() and Enter would skip the write. Charcoal is
+    // the first style that actually differs from disk.
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
     await tester.pump();
-    expect(appStyle.value, AppStyle.midnight);
+    expect(appStyle.value, AppStyle.charcoal);
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pumpAndSettle();
-    expect(appStyle.value, AppStyle.midnight);
+    expect(appStyle.value, AppStyle.charcoal);
     expect(File('${tmp.path}/theme.json').readAsStringSync(),
-        '{"style":"midnight"}');
+        '{"style":"charcoal"}');
   });
 
   testWidgets('Esc after arrow-key preview reverts to the persisted style',

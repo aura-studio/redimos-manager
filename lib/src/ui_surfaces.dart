@@ -41,6 +41,19 @@ class CodexSurface extends StatelessWidget {
           fit: StackFit.passthrough,
           children: [
             Padding(padding: padding, child: child),
+            // 边框叠加层：section 头带等 child 会铺满顶边盖住下层
+            // DecoratedBox 的边框，此处重画一遍保证四边恒可见。
+            Positioned.fill(
+              child: IgnorePointer(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    borderRadius: radius,
+                    border:
+                        Border.all(color: tokens.border, width: Dim.borderW),
+                  ),
+                ),
+              ),
+            ),
             if (sunken)
               Positioned(
                 left: 0,

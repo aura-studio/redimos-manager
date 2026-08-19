@@ -151,9 +151,9 @@ Future<void> _pumpViewer(
 }
 
 Future<void> _selectFormat(WidgetTester tester, String format) async {
-  final dropdown = tester
-      .widget<DropdownButton<String>>(find.byType(DropdownButton<String>));
-  dropdown.onChanged!(format);
+  final select = tester
+      .widget<CodexSelectField<String>>(find.byType(CodexSelectField<String>));
+  select.onChanged!(format);
   await tester.pump();
 }
 
@@ -307,7 +307,9 @@ void main() {
     expect(core.formatCalls, isEmpty);
     expect(
       tester
-          .widget<DropdownButton<String>>(find.byType(DropdownButton<String>))
+          .widget<CodexSelectField<String>>(
+            find.byType(CodexSelectField<String>),
+          )
           .onChanged,
       isNull,
     );

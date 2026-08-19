@@ -9,7 +9,8 @@
 // Stage 15 (requirements 3.1–3.4): an endpoint is CLIENT-side storage access
 // only. Even when its URL points at a Service's port, the engine's process
 // state, metrics, and logs live on the Service entity — nothing here infers a
-// binding from host/port text, and the tab set is a fixed four.
+// binding from host/port text, and the tab set is fixed (Configure leads, per
+// the restored v1 convention, then Overview / Browser / PartiQL / Playground).
 
 import 'package:flutter/material.dart';
 
@@ -19,6 +20,7 @@ import 'models.dart';
 import 'native.dart';
 import 'partiql_page.dart';
 import 'playground_page.dart';
+import 'ui_fields.dart';
 import 'ui_primitives.dart';
 import 'ui_status.dart';
 import 'ui_surfaces.dart';
@@ -32,6 +34,10 @@ class EndpointDetailView extends StatefulWidget {
   final int screenIndex;
   // R4.3: endpoint Edit entry (Overview header button), owned by HomePage.
   final VoidCallback? onEdit;
+  // v1 configure-first: persists an edited identity tuple. Owned by HomePage,
+  // which syncs every bound instance config via saveConfig (the endpoint is a
+  // dedup view of those tuples, so the write goes through them).
+  final Future<void> Function(DdbEndpoint saved)? onSaveEndpoint;
   // T12: HomePage's MidBar "＋ Item" CTA bridge into the Browser screen.
   final GlobalKey? browserKey;
   const EndpointDetailView(
@@ -40,6 +46,7 @@ class EndpointDetailView extends StatefulWidget {
       required this.endpoint,
       this.screenIndex = 0,
       this.onEdit,
+      this.onSaveEndpoint,
       this.browserKey});
 
   @override
@@ -49,11 +56,17 @@ class EndpointDetailView extends StatefulWidget {
 class _EndpointDetailViewState extends State<EndpointDetailView> {
   DdbEndpoint get e => widget.endpoint;
 
-  // Screen list (Overview / Browser / PartiQL / Playground), one per MidBar
-  // tab. Index-matched with HomePage._epTabLabels.
+  // Screen list (Configure / Overview / Browser / PartiQL / Playground), one
+  // per MidBar tab. Index-matched with HomePage._epTabLabels.
   List<Widget> get _screens {
     final cfg = e.toStorageConfig();
     return [
+      // Configure — the endpoint identity editor (leads, per v1 convention).
+      EndpointConfigPane(
+        key: ValueKey('ep-config-${e.id}'),
+        endpoint: e,
+        onSave: widget.onSaveEndpoint,
+      ),
       // Overview — backend metadata + a live reachability probe.
       EndpointOverviewPane(
         key: ValueKey('ep-overview-${e.id}'),
@@ -448,4 +461,225 @@ class _EndpointOverviewPaneState extends State<EndpointOverviewPane>
           ),
         ),
       );
+}
+
+// The endpoint Configure screen (v1 convention: Configure leads the tab row).
+// R4.3/R4.4 lifted into a pane: edit the identity tuple (name / endpoint /
+// region), then persist through HomePage's onSaveEndpoint, which syncs every
+// bound instance config via saveConfig - the endpoint itself is a dedup view
+// of those tuples, so the write goes through them.
+class EndpointConfigPane extends StatefulWidget {
+  final DdbEndpoint endpoint;
+  final Future<void> Function(DdbEndpoint saved)? onSave;
+  const EndpointConfigPane({super.key, required this.endpoint, this.onSave});
+
+  @override
+  State<EndpointConfigPane> createState() => _EndpointConfigPaneState();
+}
+
+class _EndpointConfigPaneState extends State<EndpointConfigPane>
+    with AutomaticKeepAliveClientMixin {
+  late final TextEditingController _name;
+  late final TextEditingController _endpoint;
+  late final TextEditingController _region;
+  bool _busy = false;
+
+  @override
+  bool get wantKeepAlive => true;
+
+  @override
+  void initState() {
+    super.initState();
+    _name = TextEditingController(text: widget.endpoint.name);
+    _endpoint = TextEditingController(text: widget.endpoint.endpoint);
+    _region = TextEditingController(text: widget.endpoint.region);
+  }
+
+  @override
+  void didUpdateWidget(EndpointConfigPane oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Re-seed only when the endpoint itself changes; poll-driven rebuilds
+    // must not clobber in-progress edits (mirrors ServiceConfigEditor 13.2).
+    if (oldWidget.endpoint.id != widget.endpoint.id) _reseed();
+  }
+
+  void _reseed() {
+    final e = widget.endpoint;
+    _name.text = e.name;
+    _endpoint.text = e.endpoint;
+    _region.text = e.region;
+  }
+
+  @override
+  void dispose() {
+    _name.dispose();
+    _endpoint.dispose();
+    _region.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    final e = widget.endpoint;
+    final saved = DdbEndpoint(
+      id: e.id,
+      name: _name.text.trim(),
+      kind: e.kind,
+      endpoint: _endpoint.text.trim(),
+      partitionID: e.partitionID,
+      region: _region.text.trim(),
+      accessKeyId: e.accessKeyId,
+      secretKey: e.secretKey,
+      sessionToken: e.sessionToken,
+      source: e.source,
+    );
+    setState(() => _busy = true);
+    try {
+      await widget.onSave?.call(saved);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context);
+    final t = AppTokens.of(context);
+    return Column(children: [
+      Expanded(
+        child: SingleChildScrollView(
+          key: const ValueKey('ep-config-scroll'),
+          padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 18),
+          child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _section(t, tr('ep.cfgSection'), [
+                  _field(t, _name, tr('ep.cfgName'),
+                      key: const ValueKey('ep-config-name')),
+                  _field(t, _endpoint, tr('ep.ovEndpoint'),
+                      key: const ValueKey('ep-config-endpoint')),
+                  _field(t, _region, tr('ep.ovRegion'),
+                      key: const ValueKey('ep-config-region')),
+                ]),
+                Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Icon(Icons.info_outline, size: 14, color: t.text3),
+                  const SizedBox(width: 8),
+                  Flexible(
+                    child: Text(
+                      tr('ep.cfgSyncNote'),
+                      key: const ValueKey('ep-config-sync-note'),
+                      style: Ts.style(size: Ts.sm, color: t.text3),
+                    ),
+                  ),
+                ]),
+                const SizedBox(height: 16),
+              ]),
+        ),
+      ),
+      _actionBar(t),
+    ]);
+  }
+
+  // Same house grammar as ServiceConfigEditor: numbered-less section card
+  // (head band + ruled body), fields stacked single-column.
+  Widget _section(AppTokens t, String title, List<Widget> fields) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16),
+      child: CodexSurface(
+        key: ValueKey('ep-config-section-${title.hashCode}'),
+        variant: CodexSurfaceVariant.elevated,
+        padding: EdgeInsets.zero,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            ColoredBox(
+              color: t.panel2,
+              child: Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                child: Text(
+                  title.toUpperCase(),
+                  style: Ts.style(
+                    size: Ts.md,
+                    letterSpacing: 0.9,
+                    weight: FontWeight.w700,
+                    color: t.text,
+                  ),
+                ),
+              ),
+            ),
+            const CodexDivider(),
+            Padding(
+              padding: const EdgeInsets.all(14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  for (var i = 0; i < fields.length; i++) ...[
+                    fields[i],
+                    if (i < fields.length - 1) const SizedBox(height: 12),
+                  ],
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _field(AppTokens t, TextEditingController c, String label, {Key? key}) {
+    return Column(
+        key: key,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label.toUpperCase(),
+              style: Ts.style(
+                  size: Ts.xs,
+                  weight: FontWeight.w600,
+                  letterSpacing: 0.5,
+                  color: t.text3,
+                  height: 14 / 11)),
+          const SizedBox(height: 5),
+          CodexTextField(
+            key: key == null ? null : ValueKey('${(key as ValueKey).value}-input'),
+            controller: c,
+            height: Dim.ctlH,
+            style: Ts.style(size: Ts.md, color: t.text, monoFont: true),
+            decoration: const InputDecoration(
+              contentPadding: EdgeInsets.symmetric(horizontal: 10),
+            ),
+          ),
+        ]);
+  }
+
+  Widget _actionBar(AppTokens t) {
+    return Container(
+      key: const ValueKey('ep-config-action-bar'),
+      height: 52,
+      decoration: BoxDecoration(
+        color: t.panel,
+        border: Border(top: BorderSide(color: t.border)),
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 22),
+      child: Row(children: [
+        const Spacer(),
+        CodexButton(
+          key: const ValueKey('ep-config-revert'),
+          variant: CodexButtonVariant.secondary,
+          semanticLabel: tr('home.revert'),
+          onPressed: _busy ? null : _reseed,
+          icon: const Icon(Icons.restore, size: 15),
+          label: Text(tr('home.revert')),
+        ),
+        const SizedBox(width: 8),
+        CodexButton(
+          key: const ValueKey('ep-config-save'),
+          variant: CodexButtonVariant.primary,
+          semanticLabel: tr('home.save'),
+          onPressed: _busy ? null : _save,
+          icon: const Icon(Icons.save_outlined, size: 15),
+          label: Text(tr('home.save')),
+        ),
+      ]),
+    );
+  }
 }

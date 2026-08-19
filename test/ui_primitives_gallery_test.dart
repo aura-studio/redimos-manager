@@ -172,10 +172,8 @@ void _expectIsolatedControlsUseInjectedFont(WidgetTester tester) {
     expectedFont,
   );
 
-  final dropdown = tester.widget<DropdownButton<String>>(
-    find.byType(DropdownButton<String>),
-  );
-  expect(dropdown.style?.fontFamily, expectedFont);
+  final selectContext = tester.element(find.text('All types'));
+  expect(DefaultTextStyle.of(selectContext).style.fontFamily, expectedFont);
 }
 
 Future<void> _writeDiagnosticPngIfRequested(
@@ -405,7 +403,7 @@ class _FieldGallery extends StatelessWidget {
   @override
   Widget build(BuildContext context) => SizedBox(
         key: const ValueKey('gallery-fields'),
-        height: 132,
+        height: 140,
         child: CodexSurface(
           padding: const EdgeInsets.all(10),
           child: Column(

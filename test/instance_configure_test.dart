@@ -56,14 +56,16 @@ Finder _fieldWithText(WidgetTester tester, String text) =>
       (widget) => widget is TextField && widget.controller?.text == text,
     );
 
-DropdownButton<String> _dropdownWithValue(
+CodexSelectField<String> _selectWithValue(
   WidgetTester tester,
   String value,
 ) =>
     tester
-        .widgetList<DropdownButton<String>>(find.byType(DropdownButton<String>))
+        .widgetList<CodexSelectField<String>>(
+          find.byType(CodexSelectField<String>),
+        )
         .firstWhere(
-          (dropdown) => dropdown.value == value,
+          (select) => select.value == value,
         );
 
 void main() {
@@ -226,8 +228,8 @@ void main() {
       '--max-clients 256\ntrace\n--latency-mode strict value',
     );
 
-    _dropdownWithValue(tester, 'native').onChanged!('docker');
-    _dropdownWithValue(tester, 'v2').onChanged!('v1');
+    _selectWithValue(tester, 'native').onChanged!('docker');
+    _selectWithValue(tester, 'v2').onChanged!('v1');
     await tester.pump();
 
     await tester.tap(find.widgetWithText(FilledButton, tr('home.save')));
