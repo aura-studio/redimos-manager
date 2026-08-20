@@ -429,6 +429,8 @@ const Map<String, Map<AppLang, String>> _strings = {
   'home.accessKeyId': {AppLang.en: 'AccessKeyID', AppLang.zh: '访问密钥 ID'},
   'home.addFlag': {AppLang.en: 'Add flag', AppLang.zh: '添加参数'},
   'home.adopted': {AppLang.en: 'adopted', AppLang.zh: '已接管'},
+  'home.alreadyRunning': {AppLang.en: 'Another Redimos Manager instance is already running.', AppLang.zh: '另一个 Redimos Manager 实例正在运行。'},
+  'home.alreadyRunningHint': {AppLang.en: 'Close it first, then relaunch.', AppLang.zh: '请先关闭它，再重新启动。'},
   'home.auth': {AppLang.en: 'Auth', AppLang.zh: '认证'},
   'home.autoCreate': {AppLang.en: 'AutoCreate', AppLang.zh: '自动建表'},
   'home.autoRestart': {AppLang.en: 'AutoRestart', AppLang.zh: '自动重启'},

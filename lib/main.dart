@@ -583,6 +583,26 @@ class _HomePageState extends State<HomePage>
 
   Widget _errorScaffold() {
     final t = AppTokens.of(context);
+    // The single-instance lock failure (native/singleinstance.go) is not a
+    // missing or broken native library — showing the dylib build instructions
+    // for it sends users chasing a rebuild when all they need is to close the
+    // other window. Give it its own screen instead.
+    if ('$_loadError'.contains('already running')) {
+      return Scaffold(
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(32),
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              Icon(Icons.error_outline, size: 48, color: t.danger),
+              const SizedBox(height: 16),
+              Text(tr('home.alreadyRunning')),
+              const SizedBox(height: 8),
+              Text(tr('home.alreadyRunningHint')),
+            ]),
+          ),
+        ),
+      );
+    }
     return Scaffold(
       body: Center(
         child: Padding(
