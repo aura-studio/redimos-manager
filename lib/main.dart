@@ -16,6 +16,11 @@ import 'src/partiql_page.dart';
 import 'src/table_page.dart';
 
 void main() {
+  // A second launch hands off to the running instance instead of erroring:
+  // the core tells the holder to come to the front and this process exits
+  // before any window is created. The dylib stays loaded in-process, so the
+  // later NativeCore() re-open reuses the same (already locked) handle.
+  if (NativeCore.preflightInstanceHandoff()) exit(0);
   _loadThemeMode();
   runApp(const RedimosManagerApp());
 }
