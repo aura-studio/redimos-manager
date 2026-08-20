@@ -536,7 +536,29 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     );
   }
 
-  Widget _errorScaffold() => Scaffold(
+  Widget _errorScaffold() {
+    // The single-instance lock failure (native/singleinstance.go) is not a
+    // missing or broken native library — showing the dylib build instructions
+    // for it sends users chasing a rebuild when all they need is to close the
+    // other window (reported against the v1.1.3 release). Give it its own
+    // screen instead.
+    if ('$_loadError'.contains('already running')) {
+      return const Scaffold(
+        body: Center(
+          child: Padding(
+            padding: EdgeInsets.all(32),
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              Icon(Icons.error_outline, size: 48, color: Colors.redAccent),
+              SizedBox(height: 16),
+              Text('Another Redimos Manager instance is already running.'),
+              SizedBox(height: 8),
+              Text('Close it first, then relaunch.'),
+            ]),
+          ),
+        ),
+      );
+    }
+    return Scaffold(
         body: Center(
           child: Padding(
             padding: const EdgeInsets.all(32),
@@ -560,6 +582,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
           ),
         ),
       );
+  }
 
   // AppBar action: stop-all / restore toggle. When anything is running it stops
   // all (recording the running set); when nothing is running but a set was
