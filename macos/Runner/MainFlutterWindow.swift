@@ -16,7 +16,7 @@ class MainFlutterWindow: NSWindow {
       let y = vf.origin.y + (vf.height - h) / 2
       self.setFrame(NSRect(x: x, y: y, width: w, height: h), display: true)
     }
-    self.minSize = NSSize(width: 900, height: 600)
+    self.minSize = NSSize(width: 1280, height: 800)
     self.center()
     // Enable native full screen: the green (zoom) traffic-light button takes the
     // window full screen (⌥-click still does classic zoom). .fullScreenPrimary

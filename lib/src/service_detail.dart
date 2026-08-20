@@ -1,22 +1,25 @@
-// Stage 14: the three read-side Service detail tabs — Overview / Monitor /
-// Logs. Configure lives in service_configure.dart (stage 13).
+// v1.2: the two read-side Service detail tabs — Monitor / Logs. Configure
+// lives in service_configure.dart. The Overview tab (lifecycle buttons) is
+// gone: start/stop live on the sidebar cards only, and restart has no entry
+// point anywhere (requirements 4.3, 8.1).
 //
-// House grammar: numbered-free info tiles (monitor_widgets.dart), shared
-// status paint (ui_status.dart), shared button primitive (ui_primitives.dart).
+// House grammar: monitor_widgets.dart tiles (SparkTile/InfoTile), shared
+// status paint (ui_status.dart), severity parsing reused from logs_page.dart.
 // Everything is ID-addressed: Monitor reads ONE Service's ring buffer, Logs
 // requests ONE Service's lines through ServicesState's generation guard, so a
-// stale reply for a previously selected Service is dropped silently (9.6).
+// stale reply for a previously selected Service is dropped silently.
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 
 import 'i18n.dart';
+import 'logs_page.dart' show parseLogLevel, levelColor;
 import 'models.dart';
 import 'monitor_widgets.dart';
 import 'services_state.dart';
 import 'ui_primitives.dart';
 import 'ui_states.dart';
-import 'ui_status.dart';
 import 'ui_surfaces.dart';
 import 'ui_tokens.dart';
 
@@ -24,7 +27,7 @@ import 'ui_tokens.dart';
 // Shared helpers
 // ---------------------------------------------------------------------------
 
-/// One localized label per lifecycle state (9.7 distinct status rendering).
+/// One localized label per lifecycle state (distinct status rendering).
 String serviceStateLabel(ServiceState s) => switch (s) {
       ServiceState.stopped => tr('svc.state.stopped'),
       ServiceState.preparing => tr('svc.state.preparing'),
@@ -36,239 +39,37 @@ String serviceStateLabel(ServiceState s) => switch (s) {
       ServiceState.recovering => tr('svc.state.recovering'),
     };
 
-/// State → status paint. Transitional states share the warning tone; the
-/// terminal-good state owns success; failures own the error tone.
-CodexStatus serviceStatusOf(ServiceState s) => switch (s) {
-      ServiceState.running => CodexStatus.running,
-      ServiceState.preparing ||
-      ServiceState.restarting ||
-      ServiceState.stopping ||
-      ServiceState.recovering =>
-        CodexStatus.warning,
-      ServiceState.stopped => CodexStatus.neutral,
-      ServiceState.failed || ServiceState.error => CodexStatus.error,
-    };
+/// The engine default host port applied when a Service configures 0.
+int serviceDefaultPort(ServiceEngine e) =>
+    e == ServiceEngine.localStack ? 4566 : 8000;
 
-/// Engine-conditional data location (mirrors the Configure editor's reading).
-String serviceDataLocation(ServiceConfig c) => switch (c.storage.mode) {
-      ServiceStorageMode.memory => tr('svc.location.memory'),
-      ServiceStorageMode.managed => tr('svc.location.managed'),
-      ServiceStorageMode.custom => c.engine == ServiceEngine.java
-          ? (c.storage.path.isEmpty ? tr('svc.storage.custom') : c.storage.path)
-          : (c.storage.volume.isEmpty
-              ? tr('svc.storage.custom')
-              : c.storage.volume),
-    };
-
-String _uptimeLabel(String startedAtRfc3339) {
-  if (startedAtRfc3339.isEmpty) return tr('svc.neverStarted');
+/// Uptime tile value: 「3m 16s」 style; 「—」 when never started.
+String serviceUptimeValue(String startedAtRfc3339, {DateTime? now}) {
+  if (startedAtRfc3339.isEmpty) return '—';
   final started = DateTime.tryParse(startedAtRfc3339);
-  if (started == null) return tr('svc.neverStarted');
-  final d = DateTime.now().difference(started);
-  if (d.isNegative) return tr('svc.neverStarted');
-  final h = d.inHours;
-  final m = d.inMinutes.remainder(60);
-  final s = d.inSeconds.remainder(60);
-  if (h > 0) return '${h}h ${m.toString().padLeft(2, '0')}m';
-  if (m > 0) return '${m}m ${s.toString().padLeft(2, '0')}s';
-  return '${s}s';
+  if (started == null) return '—';
+  final d = (now ?? DateTime.now()).difference(started);
+  if (d.isNegative) return '—';
+  return fmtUptime(d.inSeconds);
 }
 
-// ---------------------------------------------------------------------------
-// Overview (14.1)
-// ---------------------------------------------------------------------------
+/// Latency tile value: probe RTT or 「—」 until a probe succeeds.
+String serviceLatencyValue(double? latencyMs) => latencyMs == null
+    ? '—'
+    : '${latencyMs < 10 ? latencyMs.toStringAsFixed(1) : latencyMs.round().toString()} ms';
 
-class ServiceOverviewTab extends StatelessWidget {
-  final ServiceInfo service;
-  final VoidCallback onStart;
-  final VoidCallback onStop;
-  final VoidCallback onRestart;
-
-  const ServiceOverviewTab({
-    super.key,
-    required this.service,
-    required this.onStart,
-    required this.onStop,
-    required this.onRestart,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final t = AppTokens.of(context);
-    final cfg = service.config;
-    final rt = service.runtime;
-    final state = rt.state;
-
-    // 9.7 valid actions per state: start only from a cold/failed state, stop
-    // only while live, restart only while running. Transitional states accept
-    // no action — the buttons stay visible but disabled.
-    final canStart = state == ServiceState.stopped ||
-        state == ServiceState.failed ||
-        state == ServiceState.error;
-    final canStop = rt.isLive;
-    final canRestart = state == ServiceState.running;
-
-    final identity = cfg.engine == ServiceEngine.java
-        ? (rt.pid > 0 ? 'PID ${rt.pid}' : tr('svc.neverStarted'))
-        : (rt.containerId.isEmpty
-            ? tr('svc.neverStarted')
-            : rt.containerId.length > 12
-                ? rt.containerId.substring(0, 12)
-                : rt.containerId);
-
-    return SingleChildScrollView(
-      key: const ValueKey('service-overview-scroll'),
-      padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 18),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        // Header: name + distinct status badge for every lifecycle state.
-        Row(children: [
-          Flexible(
-            child: Text(
-              cfg.name.isEmpty ? tr('service.unnamed') : cfg.name,
-              key: const ValueKey('service-overview-name'),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: Ts.style(size: Ts.lg, weight: FontWeight.w700, color: t.text),
-            ),
-          ),
-          const SizedBox(width: 10),
-          CodexStatusBadge(
-            key: const ValueKey('service-overview-state-badge'),
-            status: serviceStatusOf(state),
-            label: serviceStateLabel(state),
-          ),
-        ]),
-        // 9.8: a lifecycle failure renders in-context — never replaces the shell.
-        if (rt.error.isNotEmpty)
-          Padding(
-            padding: const EdgeInsets.only(top: 12),
-            child: CodexSurface(
-              key: const ValueKey('service-overview-error'),
-              variant: CodexSurfaceVariant.elevated,
-              padding: const EdgeInsets.all(12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    '${tr('svc.lastError')}${rt.errorCode.isEmpty ? '' : ' · ${rt.errorCode}'}',
-                    style: Ts.style(
-                        size: Ts.sm, weight: FontWeight.w700, color: t.danger),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(rt.error,
-                      style: Ts.style(size: Ts.sm, color: t.text, monoFont: true)),
-                ],
-              ),
-            ),
-          ),
-        const SizedBox(height: 16),
-        tileGrid([
-          InfoTile(
-            key: const ValueKey('service-overview-engine'),
-            label: tr('svc.engine').toUpperCase(),
-            value: cfg.engine.wire,
-          ),
-          InfoTile(
-            key: const ValueKey('service-overview-port'),
-            label: tr('svc.port').toUpperCase(),
-            value: '${cfg.port}',
-          ),
-          InfoTile(
-            key: const ValueKey('service-overview-location'),
-            label: tr('svc.dataLocation').toUpperCase(),
-            value: serviceDataLocation(cfg),
-          ),
-          InfoTile(
-            key: const ValueKey('service-overview-uptime'),
-            label: tr('svc.uptime').toUpperCase(),
-            value: _uptimeLabel(rt.startedAt),
-          ),
-          InfoTile(
-            key: const ValueKey('service-overview-identity'),
-            label: tr('svc.runtimeIdentity').toUpperCase(),
-            value: identity,
-          ),
-          // Readiness / health keep status paint even when stopped: the
-          // badges simply read "not ready" / "unhealthy".
-          CodexSurface(
-            key: const ValueKey('service-overview-readiness'),
-            variant: CodexSurfaceVariant.elevated,
-            padding: const EdgeInsets.fromLTRB(14, 11, 14, 12),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(tr('svc.readiness').toUpperCase(),
-                    style:
-                        Ts.style(size: Ts.xs, letterSpacing: 0.4, color: t.text3)),
-                const SizedBox(height: 6),
-                CodexStatusIndicator(
-                  status: rt.ready ? CodexStatus.success : CodexStatus.neutral,
-                  label: rt.ready ? tr('svc.ready') : tr('svc.notReady'),
-                ),
-              ],
-            ),
-          ),
-          CodexSurface(
-            key: const ValueKey('service-overview-health'),
-            variant: CodexSurfaceVariant.elevated,
-            padding: const EdgeInsets.fromLTRB(14, 11, 14, 12),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(tr('svc.health').toUpperCase(),
-                    style:
-                        Ts.style(size: Ts.xs, letterSpacing: 0.4, color: t.text3)),
-                const SizedBox(height: 6),
-                CodexStatusIndicator(
-                  status: rt.healthy ? CodexStatus.success : CodexStatus.neutral,
-                  label: rt.healthy ? tr('svc.healthy') : tr('svc.unhealthy'),
-                ),
-              ],
-            ),
-          ),
-        ]),
-        const SizedBox(height: 16),
-        Row(children: [
-          CodexButton(
-            key: const ValueKey('service-overview-start'),
-            variant: CodexButtonVariant.primary,
-            semanticLabel: tr('svc.start'),
-            onPressed: canStart ? onStart : null,
-            icon: const Icon(Icons.play_arrow, size: 15),
-            label: Text(tr('svc.start')),
-          ),
-          const SizedBox(width: 8),
-          CodexButton(
-            key: const ValueKey('service-overview-stop'),
-            variant: CodexButtonVariant.secondary,
-            semanticLabel: tr('svc.stop'),
-            onPressed: canStop ? onStop : null,
-            icon: const Icon(Icons.stop, size: 15),
-            label: Text(tr('svc.stop')),
-          ),
-          const SizedBox(width: 8),
-          CodexButton(
-            key: const ValueKey('service-overview-restart'),
-            variant: CodexButtonVariant.secondary,
-            semanticLabel: tr('svc.restart'),
-            onPressed: canRestart ? onRestart : null,
-            icon: const Icon(Icons.refresh, size: 15),
-            label: Text(tr('svc.restart')),
-          ),
-        ]),
-      ]),
-    );
-  }
-}
+/// Port tile value: 0 renders the engine's effective default port (7.3).
+String servicePortValue(ServiceConfig c) =>
+    '${c.port == 0 ? serviceDefaultPort(c.engine) : c.port}';
 
 // ---------------------------------------------------------------------------
-// Monitor (14.2)
+// Monitor (requirement 7: three spark cards over seven info tiles)
 // ---------------------------------------------------------------------------
 
-class ServiceMonitorTab extends StatelessWidget {
+class ServiceMonitorTab extends StatefulWidget {
   final ServiceInfo service;
 
-  /// The ring buffer for THIS Service ID only — never a shared buffer (9.3).
+  /// The ring buffer for THIS Service ID only — never a shared buffer.
   final ServiceHistory history;
 
   const ServiceMonitorTab({
@@ -278,108 +79,190 @@ class ServiceMonitorTab extends StatelessWidget {
   });
 
   @override
+  State<ServiceMonitorTab> createState() => _ServiceMonitorTabState();
+}
+
+class _ServiceMonitorTabState extends State<ServiceMonitorTab> {
+  // Dismissal is per-error-text: dismissing one error never hides a NEW one
+  // (requirement 8.2).
+  String? _dismissedError;
+
+  @override
   Widget build(BuildContext context) {
     final t = AppTokens.of(context);
-    if (history.isEmpty) {
-      // A stopped/never-sampled Service shows the explicit no-data state.
-      return Padding(
-        padding: const EdgeInsets.all(16),
-        child: CodexStateShell(
-          key: const ValueKey('service-monitor-empty'),
-          state: CodexContentState.empty,
-          content: const SizedBox.shrink(),
-          message: tr('svc.monitorEmpty'),
-          icon: Icon(Icons.monitor_heart_outlined, size: 24, color: t.text3),
-        ),
-      );
-    }
-    final cpu = history.cpuPercent.last;
-    final mem = history.memMb.last;
-    final disk = history.diskBytesPerSec.last;
+    final service = widget.service;
+    final history = widget.history;
+    final cfg = service.config;
+    final rt = service.runtime;
+
+    final live = history.isNotEmpty;
+    final cpu = live ? history.cpuPercent.last : null;
+    final mem = live ? history.memMb.last : null;
+    final disk = live ? history.diskBytesPerSec.last : null;
+
+    final err = rt.error;
+    final showBanner = err.isNotEmpty && err != _dismissedError;
+
     return SingleChildScrollView(
       key: const ValueKey('service-monitor-scroll'),
       padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 18),
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        SparkTile(
-          key: const ValueKey('service-monitor-cpu'),
-          label: tr('svc.cpu'),
-          value: '${cpu.toStringAsFixed(1)}%',
-          data: history.cpuPercent,
-          color: t.accent,
-          width: null, // stretch: the Column hands down a tight width
-          sparkHeight: 52, // stretched tiles need the tall band (main.dart spark())
-        ),
-        const SizedBox(height: 12),
-        SparkTile(
-          key: const ValueKey('service-monitor-mem'),
-          label: tr('svc.memory'),
-          value: '${mem.toStringAsFixed(0)} MB',
-          data: history.memMb,
-          color: t.success,
-          width: null,
-          sparkHeight: 52,
-        ),
-        const SizedBox(height: 12),
-        SparkTile(
-          key: const ValueKey('service-monitor-disk'),
-          label: tr('svc.disk'),
-          value: '${disk.toStringAsFixed(0)} B/s',
-          data: history.diskBytesPerSec,
-          color: t.warning,
-          width: null,
-          sparkHeight: 52,
-        ),
-        const SizedBox(height: 12),
-        // Health / readiness strip: the current probe state next to the charts.
-        CodexSurface(
-          key: const ValueKey('service-monitor-probes'),
-          variant: CodexSurfaceVariant.elevated,
-          padding: const EdgeInsets.all(12),
-          child: Row(children: [
-            CodexStatusIndicator(
-              status: service.runtime.ready
-                  ? CodexStatus.success
-                  : CodexStatus.neutral,
-              label:
-                  service.runtime.ready ? tr('svc.ready') : tr('svc.notReady'),
+        // Startup/runtime failure surfaces at the top of Monitor — Overview no
+        // longer exists, so this banner is the error's only home (8.2).
+        if (showBanner)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: CodexSurface(
+              key: const ValueKey('service-monitor-error-banner'),
+              variant: CodexSurfaceVariant.elevated,
+              padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+              child: Row(children: [
+                Icon(Icons.error_outline, size: 16, color: t.danger),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '${tr('svc.lastError')}${rt.errorCode.isEmpty ? '' : ' · ${rt.errorCode}'}',
+                        style: Ts.style(
+                            size: Ts.sm, weight: FontWeight.w700, color: t.danger),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(err,
+                          style: Ts.style(
+                              size: Ts.sm, color: t.text, monoFont: true)),
+                    ],
+                  ),
+                ),
+                IconButton(
+                  key: const ValueKey('service-monitor-error-dismiss'),
+                  icon: Icon(Icons.close, size: 14, color: t.text3),
+                  tooltip: '',
+                  onPressed: () => setState(() => _dismissedError = err),
+                ),
+              ]),
             ),
-            const SizedBox(width: 16),
-            CodexStatusIndicator(
-              status: service.runtime.healthy
-                  ? CodexStatus.success
-                  : CodexStatus.neutral,
-              label: service.runtime.healthy
-                  ? tr('svc.healthy')
-                  : tr('svc.unhealthy'),
+          ),
+        // Top row: three spark cards — CPU / Memory / Disk I/O (7.1). They
+        // stay on ONE line at 1280px (7.4): Expanded thirds, never wrapping.
+        Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Expanded(
+            child: SparkTile(
+              key: const ValueKey('service-monitor-cpu'),
+              label: tr('svc.cpu'),
+              value: cpu == null ? '—' : '${cpu.toStringAsFixed(1)}%',
+              data: history.cpuPercent,
+              color: t.accent,
+              width: null,
+              sparkHeight: 52,
             ),
-          ]),
-        ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: SparkTile(
+              key: const ValueKey('service-monitor-mem'),
+              label: tr('svc.memory'),
+              value: mem == null ? '—' : '${mem.toStringAsFixed(0)} MB',
+              data: history.memMb,
+              color: t.success,
+              width: null,
+              sparkHeight: 52,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: SparkTile(
+              key: const ValueKey('service-monitor-disk'),
+              label: tr('svc.disk'),
+              value: disk == null ? '—' : fmtRate(disk),
+              data: history.diskBytesPerSec,
+              color: t.warning,
+              width: null,
+              sparkHeight: 52,
+            ),
+          ),
+        ]),
+        const SizedBox(height: 12),
+        // Bottom rows: seven info tiles in fixed order (7.2); the 4-column
+        // grid wraps into two rows at 1280px without overflow (7.4).
+        tileGrid([
+          InfoTile(
+            key: const ValueKey('service-monitor-uptime'),
+            label: tr('svc.uptime').toUpperCase(),
+            value: serviceUptimeValue(rt.startedAt),
+          ),
+          InfoTile(
+            key: const ValueKey('service-monitor-restarts'),
+            label: tr('svc.restarts').toUpperCase(),
+            value: '${rt.restarts}',
+          ),
+          InfoTile(
+            key: const ValueKey('service-monitor-latency'),
+            label: tr('svc.latency').toUpperCase(),
+            value: serviceLatencyValue(rt.latencyMs),
+          ),
+          InfoTile(
+            key: const ValueKey('service-monitor-status'),
+            label: tr('svc.status').toUpperCase(),
+            value: serviceStateLabel(rt.state),
+            valueColor: switch (rt.state) {
+              ServiceState.running => t.success,
+              ServiceState.failed || ServiceState.error => t.danger,
+              ServiceState.stopped => t.text3,
+              _ => t.warning,
+            },
+          ),
+          InfoTile(
+            key: const ValueKey('service-monitor-health'),
+            label: tr('svc.health').toUpperCase(),
+            value: rt.ready ? tr('svc.ready') : tr('svc.notReady'),
+            valueColor: rt.ready ? t.success : t.warning,
+          ),
+          InfoTile(
+            key: const ValueKey('service-monitor-port'),
+            label: tr('svc.port').toUpperCase(),
+            value: servicePortValue(cfg),
+          ),
+          InfoTile(
+            key: const ValueKey('service-monitor-engine'),
+            label: tr('svc.engine').toUpperCase(),
+            value: ddbEngineLabel(cfg.engine.wire),
+            fitReference: ddbEngineLabel('docker'),
+          ),
+        ]),
       ]),
     );
   }
 }
 
 // ---------------------------------------------------------------------------
-// Logs (14.3)
+// Logs (requirement 10: severity colouring + auto-scroll)
 // ---------------------------------------------------------------------------
 
 class ServiceLogsTab extends StatefulWidget {
   final ServiceInfo service;
 
   /// State owner: requestLogs() carries the generation guard that discards a
-  /// stale reply after the selection changed (9.6, 12.4).
+  /// stale reply after the selection changed.
   final ServicesState state;
 
   const ServiceLogsTab({super.key, required this.service, required this.state});
 
   @override
-  State<ServiceLogsTab> createState() => _ServiceLogsTabState();
+  State<ServiceLogsTab> createState() => ServiceLogsTabState();
 }
 
-class _ServiceLogsTabState extends State<ServiceLogsTab> {
+class ServiceLogsTabState extends State<ServiceLogsTab> {
   List<String> _lines = const [];
   String? _error;
   bool _loading = false;
+
+  final ScrollController scroll = ScrollController();
+
+  /// Follow the tail while the view sits at the bottom; a manual scroll up
+  /// pauses following until the user returns to the bottom (10.2, 10.3).
+  bool autoScroll = true;
 
   String get _id => widget.service.id;
 
@@ -396,8 +279,15 @@ class _ServiceLogsTabState extends State<ServiceLogsTab> {
       // Selection changed: reset the view first, then load the new target.
       _lines = const [];
       _error = null;
+      autoScroll = true;
       _load();
     }
+  }
+
+  @override
+  void dispose() {
+    scroll.dispose();
+    super.dispose();
   }
 
   Future<void> _load() async {
@@ -405,19 +295,39 @@ class _ServiceLogsTabState extends State<ServiceLogsTab> {
     setState(() => _loading = true);
     try {
       final lines = await widget.state.requestLogs(_id);
-      if (lines == null || !mounted) return; // stale — drop silently (9.6)
+      if (lines == null || !mounted) return; // stale — drop silently
       setState(() {
         _lines = lines;
         _error = null;
       });
+      _maybeAutoscroll();
     } on ServiceApiException catch (e) {
-      // Error is preserved IN CONTEXT; previous lines stay visible (14.3).
+      // Error is preserved IN CONTEXT; previous lines stay visible.
       if (mounted) setState(() => _error = '${e.code}: ${e.message}');
     } catch (e) {
       if (mounted) setState(() => _error = '$e');
     } finally {
       if (mounted) setState(() => _loading = false);
     }
+  }
+
+  void _maybeAutoscroll() {
+    if (!autoScroll) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !scroll.hasClients) return;
+      scroll.jumpTo(scroll.position.maxScrollExtent);
+    });
+  }
+
+  bool _onScrollNotification(ScrollNotification n) {
+    if (n is UserScrollNotification) {
+      // forward == the content moves down == the user scrolled UP.
+      if (n.direction == ScrollDirection.forward) autoScroll = false;
+    } else if (n is ScrollUpdateNotification && scroll.hasClients) {
+      final p = scroll.position;
+      if (p.pixels >= p.maxScrollExtent - 24) autoScroll = true;
+    }
+    return false;
   }
 
   Future<void> _copy() async {
@@ -428,7 +338,7 @@ class _ServiceLogsTabState extends State<ServiceLogsTab> {
   }
 
   void _clearView() {
-    // View-only clear: the core-side log buffer is untouched (9.4).
+    // View-only clear: the core-side log buffer is untouched.
     setState(() => _lines = const []);
   }
 
@@ -436,7 +346,7 @@ class _ServiceLogsTabState extends State<ServiceLogsTab> {
   Widget build(BuildContext context) {
     final t = AppTokens.of(context);
     return Column(children: [
-      // Action row: refresh / copy / clear-view.
+      // Action row: refresh / copy / clear-view (10.4).
       Container(
         key: const ValueKey('service-logs-actions'),
         height: 44,
@@ -494,17 +404,27 @@ class _ServiceLogsTabState extends State<ServiceLogsTab> {
                 ),
               )
             : SelectionArea(
-                child: ListView.builder(
-                  key: const ValueKey('service-logs-list'),
-                  padding: const EdgeInsets.fromLTRB(22, 4, 22, 16),
-                  itemCount: _lines.length,
-                  itemBuilder: (context, i) => Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 1),
-                    child: Text(
-                      _lines[i],
-                      style: Ts.style(
-                          size: Ts.sm, color: t.text, monoFont: true),
-                    ),
+                child: NotificationListener<ScrollNotification>(
+                  onNotification: _onScrollNotification,
+                  child: ListView.builder(
+                    key: const ValueKey('service-logs-list'),
+                    controller: scroll,
+                    padding: const EdgeInsets.fromLTRB(22, 4, 22, 16),
+                    itemCount: _lines.length,
+                    itemBuilder: (context, i) {
+                      final line = _lines[i];
+                      // Severity colouring (10.1): the instance Logs parser is
+                      // the single source of truth for level → token.
+                      final color = levelColor(parseLogLevel(line), t);
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 1),
+                        child: Text(
+                          line,
+                          style: Ts.style(
+                              size: Ts.sm, color: color, monoFont: true),
+                        ),
+                      );
+                    },
                   ),
                 ),
               ),

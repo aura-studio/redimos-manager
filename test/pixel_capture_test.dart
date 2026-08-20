@@ -219,10 +219,9 @@ List<String> get _epTabLabels => [
       tr('tab.playground'),
     ];
 
-/// Stage 16.1: mirrors HomePage._serviceTabKeys — the Service detail's four
-/// fixed screens.
+/// v1.2: mirrors HomePage._serviceTabKeys — the Service detail's three
+/// fixed screens (Overview was removed).
 List<String> get _serviceTabLabels => [
-      tr('tab.overview'),
       tr('tab.monitor'),
       tr('tab.logs'),
       tr('tab.configure'),
@@ -437,32 +436,12 @@ void main() {
     );
 
     testWidgets(
-      'capture svc-overview-running $theme',
+      'capture svc-monitor-error $theme',
       (t) => _capture(
         t,
-        'svc-overview-running',
+        'svc-monitor-error',
         dark,
-        fx.pumpSvcOverviewRunning,
-        chrome: _captureChrome(
-          dark: dark,
-          kind: EntityKind.service,
-          tabLabels: _serviceTabLabels,
-          tabIndex: 0,
-          selectedConfigId: null,
-          selectedEndpointId: null,
-          services: [fx.fixtureServiceRunning(), _captureSvcLocalstack()],
-          selectedServiceId: 'svc-1',
-        ),
-      ),
-    );
-
-    testWidgets(
-      'capture svc-overview-failed $theme',
-      (t) => _capture(
-        t,
-        'svc-overview-failed',
-        dark,
-        fx.pumpSvcOverviewFailed,
+        fx.pumpSvcMonitorError,
         chrome: _captureChrome(
           dark: dark,
           kind: EntityKind.service,
@@ -487,7 +466,7 @@ void main() {
           dark: dark,
           kind: EntityKind.service,
           tabLabels: _serviceTabLabels,
-          tabIndex: 1,
+          tabIndex: 0,
           selectedConfigId: null,
           selectedEndpointId: null,
           services: [fx.fixtureServiceRunning(), _captureSvcLocalstack()],
@@ -507,7 +486,7 @@ void main() {
           dark: dark,
           kind: EntityKind.service,
           tabLabels: _serviceTabLabels,
-          tabIndex: 2,
+          tabIndex: 1,
           selectedConfigId: null,
           selectedEndpointId: null,
           services: [fx.fixtureServiceRunning(), _captureSvcLocalstack()],
@@ -527,7 +506,7 @@ void main() {
           dark: dark,
           kind: EntityKind.service,
           tabLabels: _serviceTabLabels,
-          tabIndex: 3,
+          tabIndex: 2,
           selectedConfigId: null,
           selectedEndpointId: null,
           services: [fx.fixtureServiceRunning(), _captureSvcLocalstack()],

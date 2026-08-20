@@ -563,11 +563,11 @@ class _HomePageState extends State<HomePage>
   ];
   List<String> _epTabLabels() => [for (final k in _epTabKeys) tr(k)];
 
-  // Stage 12: the Service detail's four fixed screens (stage 14 fills them).
-  // Configure leads (v1 convention) - config is the primary surface here.
+  // v1.2: the Service detail's three fixed screens — Configure leads (v1
+  // convention), then Monitor and Logs. Overview and its lifecycle buttons are
+  // gone; start/stop live on the sidebar cards only (requirement 8).
   static const _serviceTabKeys = [
     'tab.configure',
-    'tab.overview',
     'tab.monitor',
     'tab.logs'
   ];
@@ -881,28 +881,20 @@ class _HomePageState extends State<HomePage>
     );
   }
 
-  // Stage 14: the four Service detail tabs are all live. Configure leads (v1
-  // convention); Overview carries the lifecycle actions; Monitor reads the
-  // per-ID history ring; Logs requests through ServicesState's generation
-  // guard.
+  // v1.2: the three Service detail screens. Configure leads (v1 convention);
+  // Monitor carries the live tiles + error banner; Logs requests through
+  // ServicesState's generation guard. Start/stop live on the sidebar cards.
   Widget _serviceDetail() {
     final svc = _svcState;
     final s = svc?.selected;
     if (s == null) return Center(child: Text(tr('service.pick')));
     return switch (svc!.selectedTab) {
-      1 => ServiceOverviewTab(
-          key: ValueKey('service-overview-${s.id}'),
-          service: s,
-          onStart: () => _serviceLifecycle(s, 'start'),
-          onStop: () => _serviceLifecycle(s, 'stop'),
-          onRestart: () => _serviceLifecycle(s, 'restart'),
-        ),
-      2 => ServiceMonitorTab(
+      1 => ServiceMonitorTab(
           key: ValueKey('service-monitor-${s.id}'),
           service: s,
           history: svc.historyOf(s.id),
         ),
-      3 => ServiceLogsTab(
+      2 => ServiceLogsTab(
           key: ValueKey('service-logs-${s.id}'),
           service: s,
           state: svc,
@@ -919,29 +911,6 @@ class _HomePageState extends State<HomePage>
           },
         ),
     };
-  }
-
-  // Overview lifecycle actions: typed by op, errors toast in the Service's
-  // context (9.8), and the next snapshot paints the resulting state.
-  void _serviceLifecycle(ServiceInfo s, String op) {
-    final core = _core;
-    final svc = _svcState;
-    if (core == null || svc == null) return;
-    try {
-      switch (op) {
-        case 'start':
-          core.serviceStart(s.id);
-        case 'stop':
-          core.serviceStop(s.id);
-        case 'restart':
-          core.serviceRestart(s.id);
-      }
-    } on ServiceApiException catch (e) {
-      _toast('${s.config.name}: ${e.code}');
-    } catch (e) {
-      _toast('${s.config.name}: $e');
-    }
-    unawaited(svc.refresh());
   }
 }
 

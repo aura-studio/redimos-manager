@@ -605,32 +605,17 @@ Future<void> pumpSvcEmpty(WidgetTester t,
   await t.pump(const Duration(milliseconds: 50));
 }
 
-Future<void> pumpSvcOverviewRunning(WidgetTester t,
+/// v1.2: Overview is gone — a lifecycle failure now surfaces as the Monitor
+/// tab's dismissible error banner (requirement 8.2).
+Future<void> pumpSvcMonitorError(WidgetTester t,
     {required bool dark, Key? shotKey, Widget Function(Widget)? chrome}) async {
   await pumpScreen(t,
       dark: dark,
       shotKey: shotKey,
       chrome: chrome,
-      child: ServiceOverviewTab(
-        service: fixtureServiceRunning(),
-        onStart: () {},
-        onStop: () {},
-        onRestart: () {},
-      ));
-  await t.pump(const Duration(milliseconds: 50));
-}
-
-Future<void> pumpSvcOverviewFailed(WidgetTester t,
-    {required bool dark, Key? shotKey, Widget Function(Widget)? chrome}) async {
-  await pumpScreen(t,
-      dark: dark,
-      shotKey: shotKey,
-      chrome: chrome,
-      child: ServiceOverviewTab(
+      child: ServiceMonitorTab(
         service: fixtureServiceFailed(),
-        onStart: () {},
-        onStop: () {},
-        onRestart: () {},
+        history: ServiceHistory(0), // no samples yet — tiles render '—'
       ));
   await t.pump(const Duration(milliseconds: 50));
 }

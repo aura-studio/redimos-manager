@@ -38,6 +38,7 @@ class ServiceHistory {
   final List<double> diskBytesPerSec = [];
 
   bool get isEmpty => cpuPercent.isEmpty;
+  bool get isNotEmpty => !isEmpty;
 
   void sample(ServiceMetrics m) {
     _push(cpuPercent, m.cpuPercent);

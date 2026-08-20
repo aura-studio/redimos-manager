@@ -141,24 +141,87 @@ void main() {
     expect(find.byKey(const ValueKey('service-config-path')), findsOneWidget);
     expect(find.byKey(const ValueKey('service-config-volume')), findsNothing);
 
-    // LocalStack: SERVICES option replaces heap; containers own a VOLUME.
+    // LocalStack: SERVICES option replaces heap; LocalStack owns its storage,
+    // so the storage select disappears behind an explanation row (2.4).
     await _selectIn<ServiceEngine>(tester, tr('svc.engine.localstack'));
     expect(find.byKey(const ValueKey('service-config-heap')), findsNothing);
     expect(find.byKey(const ValueKey('service-config-services')), findsOneWidget);
     expect(find.byKey(const ValueKey('service-config-path')), findsNothing);
-    expect(find.byKey(const ValueKey('service-config-volume')), findsOneWidget);
+    expect(find.byKey(const ValueKey('service-config-volume')), findsNothing);
+    expect(find.byKey(const ValueKey('service-config-storage')), findsNothing);
+    expect(find.byKey(const ValueKey('service-config-localstack-storage')),
+        findsOneWidget);
 
-    // Docker: neither engine option renders; volume stays for custom storage.
+    // Docker: neither engine option renders; volume returns for custom storage.
     await _selectIn<ServiceEngine>(tester, tr('svc.engine.docker'));
     expect(find.byKey(const ValueKey('service-config-heap')), findsNothing);
     expect(find.byKey(const ValueKey('service-config-services')), findsNothing);
     expect(find.byKey(const ValueKey('service-config-volume')), findsOneWidget);
+    expect(find.byKey(const ValueKey('service-config-localstack-storage')),
+        findsNothing);
 
-    // Non-custom storage hides the location field entirely.
-    await _selectIn<ServiceStorageMode>(tester, tr('svc.storage.managed'));
+    // In-memory storage hides the location field entirely.
+    await _selectIn<ServiceStorageMode>(tester, tr('svc.storage.memory'));
     expect(find.byKey(const ValueKey('service-config-path')), findsNothing);
     expect(find.byKey(const ValueKey('service-config-volume')), findsNothing);
     expect(core.savedConfigs, isEmpty);
+    expect(tester.takeException(), isNull);
+  });
+
+  // ---- v1.2 storage field matrix (4.9): 3 engines × storage modes ----------
+
+  testWidgets('storage fields follow the engine × mode matrix', (tester) async {
+    final core = _ScriptedCore();
+    await _pump(tester, service: _svc(), core: core);
+
+    // Java × In-memory: no location field at all.
+    expect(find.byKey(const ValueKey('service-config-path')), findsNothing);
+    expect(find.byKey(const ValueKey('service-config-volume')), findsNothing);
+
+    // Java × Persisted: the PATH field only.
+    await _selectIn<ServiceStorageMode>(tester, tr('svc.storage.persisted'));
+    expect(find.byKey(const ValueKey('service-config-path')), findsOneWidget);
+    expect(find.byKey(const ValueKey('service-config-volume')), findsNothing);
+
+    // Docker × Persisted: the VOLUME field only, prefilled for an existing
+    // ID — the reuse-or-create name (2.2).
+    await _selectIn<ServiceEngine>(tester, tr('svc.engine.docker'));
+    expect(find.byKey(const ValueKey('service-config-path')), findsNothing);
+    expect(find.byKey(const ValueKey('service-config-volume')), findsOneWidget);
+    final volumeCtl = tester.widget<TextField>(
+      find.descendant(of: _input('volume'), matching: find.byType(TextField)),
+    ).controller!;
+    expect(volumeCtl.text, 'redimos-service-svc-a-data');
+
+    // Docker × In-memory: location fields vanish again.
+    await _selectIn<ServiceStorageMode>(tester, tr('svc.storage.memory'));
+    expect(find.byKey(const ValueKey('service-config-volume')), findsNothing);
+
+    // LocalStack: no storage select at all — just the managed explanation,
+    // and never a path/volume field (2.4).
+    await _selectIn<ServiceEngine>(tester, tr('svc.engine.localstack'));
+    expect(find.byKey(const ValueKey('service-config-storage')), findsNothing);
+    expect(find.byKey(const ValueKey('service-config-path')), findsNothing);
+    expect(find.byKey(const ValueKey('service-config-volume')), findsNothing);
+    expect(find.byKey(const ValueKey('service-config-localstack-storage')),
+        findsOneWidget);
+    expect(core.savedConfigs, isEmpty);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('port 0 names the engine default port under the field',
+      (tester) async {
+    final core = _ScriptedCore();
+    await _pump(tester, service: _svc(port: 0), core: core);
+
+    final hint = find.byKey(const ValueKey('service-config-port-default'));
+    expect(hint, findsOneWidget);
+    final hintText = find.descendant(of: hint, matching: find.byType(Text));
+    expect(tester.widget<Text>(hintText).data, contains('8000'));
+
+    // LocalStack's default port is 4566 (1.3).
+    await _selectIn<ServiceEngine>(tester, tr('svc.engine.localstack'));
+    expect(tester.widget<Text>(hintText).data, contains('4566'));
     expect(tester.takeException(), isNull);
   });
 
@@ -203,9 +266,9 @@ void main() {
     expect(find.byKey(const ValueKey('service-config-port-error')), findsOneWidget);
     expect(core.savedConfigs, isEmpty);
 
-    // Custom storage without the engine's required location.
+    // Persisted storage without the engine's required location.
     await tester.enterText(_input('port'), '8000');
-    await _selectIn<ServiceStorageMode>(tester, tr('svc.storage.custom'));
+    await _selectIn<ServiceStorageMode>(tester, tr('svc.storage.persisted'));
     await tester.enterText(_input('path'), '');
     await tester.tap(find.byKey(const ValueKey('service-config-save')));
     await tester.pump();

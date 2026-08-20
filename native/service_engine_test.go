@@ -635,7 +635,7 @@ func TestLocalstackBuildLaunch(t *testing.T) {
 // Volume and container ownership (fake docker)
 // ---------------------------------------------------------------------------
 
-func TestEnsureServiceVolumeProvesOwnership(t *testing.T) {
+func TestEnsureServiceVolumeReuseOrCreate(t *testing.T) {
 	fake, state := fakeDocker(t)
 	sc := svc("aaa111", ServiceEngineDockerDDB, 9201,
 		ServiceStorage{Mode: ServiceStorageManaged, Volume: "redimos-service-aaa111-data"}, nil)
@@ -678,11 +678,17 @@ func TestEnsureServiceVolumeProvesOwnership(t *testing.T) {
 		t.Error("owned volume must not be recreated")
 	}
 
-	// exists but owned by someone else → hard error, never mounted
+	// exists, whatever the labels say → reused (v1.1.5 docker semantics: a
+	// user-named volume mounts exactly as `docker run -v` would), no recreate
 	stranger := svc("zzz999", ServiceEngineDockerDDB, 9299,
 		ServiceStorage{Mode: ServiceStorageManaged, Volume: "redimos-service-aaa111-data"}, nil)
-	if err := ensureServiceVolume(fake, stranger); err == nil || !strings.Contains(err.Error(), "ownership") {
-		t.Fatalf("stranger volume must be refused, got %v", err)
+	before = readCalls(t, state)
+	if err := ensureServiceVolume(fake, stranger); err != nil {
+		t.Fatalf("existing named volume must be reused, got %v", err)
+	}
+	after = readCalls(t, state)
+	if strings.Count(after, "volume create") != strings.Count(before, "volume create") {
+		t.Error("existing volume must not be recreated on reuse")
 	}
 }
 

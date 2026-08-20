@@ -137,20 +137,18 @@ func parseVolumeLabels(out []byte) (map[string]string, error) {
 	return vs[0].Labels, nil
 }
 
-// ensureServiceVolume guarantees the Service's volume exists AND is provably
-// ours. An existing volume whose labels don't match exactly is a hard error —
-// mounting an unproven volume could expose another workload's data.
+// ensureServiceVolume guarantees the Service's volume exists, with v1.1.5
+// docker semantics: a volume the user named is reused when present — labelled
+// or not — and created (stamped with the ownership quartet) when absent. The
+// labels therefore gate DELETION (removeOwnedServiceVolume) but never reuse:
+// mounting an existing named volume is exactly what `docker run -v` has
+// always meant.
 func ensureServiceVolume(dockerPath string, sc ServiceConfig) error {
 	name := sc.Storage.Volume
 	inspectCmd := exec.Command(dockerPath, "volume", "inspect", name)
 	hideWindow(inspectCmd)
-	out, err := inspectCmd.Output()
-	if err == nil {
-		labels, perr := parseVolumeLabels(out)
-		if perr == nil && serviceLabelsMatch(labels, sc) {
-			return nil // exists and provably ours
-		}
-		return fmt.Errorf("volume %q exists without matching ownership labels", name)
+	if err := inspectCmd.Run(); err == nil {
+		return nil // exists → reuse
 	}
 	args := []string{"volume", "create"}
 	for _, l := range serviceLabelPairs(sc) {

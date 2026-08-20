@@ -194,8 +194,21 @@ func TestAbiServiceLifecycleTransitions(t *testing.T) {
 		t.Fatalf("start must succeed: %+v", env)
 	}
 	info, _ := env["service"].(serviceInfo)
-	if info.Runtime.State != "running" || !info.Runtime.Ready {
-		t.Errorf("post-start envelope must show running/ready: %+v", info.Runtime)
+	if info.Runtime.State != "running" || !info.Runtime.Healthy {
+		t.Errorf("post-start envelope must show running/healthy: %+v", info.Runtime)
+	}
+	// Ready is proven by the ListTables probe, not by the lifecycle state: a
+	// freshly started Service is healthy but not yet ready.
+	if info.Runtime.Ready {
+		t.Errorf("ready must stay false until a probe proves it: %+v", info.Runtime)
+	}
+	rt, _ := m.svcRuntime(sc.ID)
+	in := rt.instance()
+	in.mu.Lock()
+	in.ddbProbeOK = true
+	in.mu.Unlock()
+	if got := m.serviceInfoFor(sc); !got.Runtime.Ready {
+		t.Errorf("ready must flip once the probe proves the service: %+v", got.Runtime)
 	}
 
 	// start while running → invalid_transition.

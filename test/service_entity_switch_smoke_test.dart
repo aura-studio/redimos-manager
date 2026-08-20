@@ -38,7 +38,7 @@ ServiceInfo _svc(String id, String name, {int port = 8000}) =>
 
 const _instanceTabs = ['Browse', 'Console', 'Monitor', 'Logs', 'Play', 'Conf'];
 const _endpointTabs = ['Overview', 'Browser', 'PartiQL', 'Playground'];
-const _serviceTabs = ['Overview', 'Monitor', 'Logs', 'Configure'];
+const _serviceTabs = ['Configure', 'Monitor', 'Logs'];
 
 /// Mirrors HomePage's per-kind selection model: three independent
 /// (selectedId, tabIndex) slots + the active kind. Nothing here ever clears
@@ -192,17 +192,17 @@ void main() {
     await tester.pump();
     expect(_shellGeometry(tester), shell);
 
-    // --- Service: select the second card, tab 3 ---
+    // --- Service: select the second card, tab 2 ---
     await tester.tap(find.byKey(const ValueKey('main-rail-service-action')));
     await tester.pump();
     expect(find.text('local-ddb'), findsOneWidget);
     expect(find.text('stage-ddb'), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('entity-card-svc-b-action')));
     await tester.pump();
-    await tester.tap(find.byKey(const ValueKey('home-midbar-tab-3-action')));
+    await tester.tap(find.byKey(const ValueKey('home-midbar-tab-2-action')));
     await tester.pump();
     expect(harness.serviceId, 'svc-b');
-    expect(harness.serviceTab, 3);
+    expect(harness.serviceTab, 2);
     expect(
       _decorationColor(tester, 'svc-b'),
       AppTokens.forBrightness(Brightness.dark).selection,
@@ -234,8 +234,8 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('main-rail-service-action')));
     await tester.pump();
     expect(harness.serviceId, 'svc-b'); // selection survived the round-trip
-    expect(harness.serviceTab, 3);
-    expect(_activeTabLabel(_serviceTabs[3]), findsOneWidget);
+    expect(harness.serviceTab, 2);
+    expect(_activeTabLabel(_serviceTabs[2]), findsOneWidget);
     expect(_shellGeometry(tester), shell);
     expect(tester.takeException(), isNull);
   });

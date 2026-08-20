@@ -93,7 +93,34 @@ class ServiceConfigEditorState extends State<ServiceConfigEditor> {
     _servicesOpt = TextEditingController(
         text: (c.engineOptions['SERVICES'] ?? '').toString());
     _engine = c.engine;
-    _storageMode = c.storage.mode;
+    _storageMode = _displayStorageMode(c);
+    _prefillVolume();
+  }
+
+  /// v1.1.5 storage mapping: the form offers In-memory / Persisted only.
+  /// `managed` is read for legacy data and displays as Persisted — saving
+  /// persists whatever the location fields hold (custom), except LocalStack,
+  /// whose storage stays core-managed.
+  ServiceStorageMode _displayStorageMode(ServiceConfig c) =>
+      c.storage.mode == ServiceStorageMode.memory
+          ? ServiceStorageMode.memory
+          : ServiceStorageMode.custom;
+
+  /// Docker Persisted default volume: `redimos-service-<id>-data` — reused
+  /// when present, created when absent (requirement 3).
+  void _prefillVolume() {
+    if (_engine == ServiceEngine.java ||
+        _storageMode != ServiceStorageMode.custom) {
+      return;
+    }
+    if (_volume.text.trim().isNotEmpty) {
+      return;
+    }
+    final id = widget.service.id;
+    if (id.isEmpty) {
+      return;
+    }
+    _volume.text = 'redimos-service-$id-data';
   }
 
   @override
@@ -123,7 +150,8 @@ class ServiceConfigEditorState extends State<ServiceConfigEditor> {
     _servicesOpt.text = (c.engineOptions['SERVICES'] ?? '').toString();
     setState(() {
       _engine = c.engine;
-      _storageMode = c.storage.mode;
+      _storageMode = _displayStorageMode(c);
+      _prefillVolume();
       _clearErrors();
     });
   }
@@ -155,7 +183,8 @@ class ServiceConfigEditorState extends State<ServiceConfigEditor> {
         widget.peers.any((p) => p.config.port != 0 && p.config.port == port)) {
       _portError = tr('svc.portTaken');
     }
-    if (_storageMode == ServiceStorageMode.custom) {
+    if (_storageMode == ServiceStorageMode.custom &&
+        _engine != ServiceEngine.localStack) {
       if (_engine == ServiceEngine.java && _path.text.trim().isEmpty) {
         _storageError = tr('svc.pathRequired');
       } else if (_engine != ServiceEngine.java &&
@@ -183,13 +212,16 @@ class ServiceConfigEditorState extends State<ServiceConfigEditor> {
       name: _name.text.trim(),
       engine: _engine,
       port: int.tryParse(_port.text.trim()) ?? 0,
-      storage: ServiceStorage(
-        mode: _storageMode,
-        // Keep only the location field the selected engine reads; the other
-        // one stays out of the persisted payload.
-        path: _engine == ServiceEngine.java ? _path.text.trim() : '',
-        volume: _engine != ServiceEngine.java ? _volume.text.trim() : '',
-      ),
+      storage: _engine == ServiceEngine.localStack
+          // LocalStack storage is core-managed; the UI exposes no fields (2.4).
+          ? ServiceStorage(mode: ServiceStorageMode.managed)
+          : ServiceStorage(
+              mode: _storageMode,
+              // Keep only the location field the selected engine reads; the
+              // other one stays out of the persisted payload.
+              path: _engine == ServiceEngine.java ? _path.text.trim() : '',
+              volume: _engine != ServiceEngine.java ? _volume.text.trim() : '',
+            ),
       engineOptions: options,
       desiredRunning: c.desiredRunning, // lifecycle-owned, never form-owned
     );
@@ -435,8 +467,10 @@ class ServiceConfigEditorState extends State<ServiceConfigEditor> {
                   (ServiceEngine.dockerDynamodb, tr('svc.engine.docker')),
                   (ServiceEngine.localStack, tr('svc.engine.localstack')),
                 ],
-                onChanged: (v) =>
-                    setState(() => _engine = v ?? ServiceEngine.java),
+                onChanged: (v) => setState(() {
+                  _engine = v ?? ServiceEngine.java;
+                  _prefillVolume();
+                }),
               ),
               _field(t, _port, tr('svc.port'),
                   key: const ValueKey('service-config-port'),
@@ -444,34 +478,66 @@ class ServiceConfigEditorState extends State<ServiceConfigEditor> {
                   enabled: !_locked,
                   placeholder: tr('svc.portHint'),
                   error: _portError),
+              // 0 = engine default: name the effective port (1.3).
+              if (_port.text.trim() == '0')
+                Padding(
+                  key: const ValueKey('service-config-port-default'),
+                  padding: const EdgeInsets.only(top: 18),
+                  child: Text(
+                    '${tr('svc.portDefault')} ${_engine == ServiceEngine.localStack ? 4566 : 8000}',
+                    style: Ts.style(size: Ts.sm, color: t.text3),
+                  ),
+                ),
             ]),
             _section(t, '2', tr('svc.storageSection'), [
-              _selectField<ServiceStorageMode>(
-                t,
-                tr('svc.storage'),
-                key: const ValueKey('service-config-storage'),
-                value: _storageMode,
-                enabled: !_locked,
-                items: [
-                  (ServiceStorageMode.memory, tr('svc.storage.memory')),
-                  (ServiceStorageMode.managed, tr('svc.storage.managed')),
-                  (ServiceStorageMode.custom, tr('svc.storage.custom')),
-                ],
-                onChanged: (v) => setState(
-                    () => _storageMode = v ?? ServiceStorageMode.memory),
-              ),
-              // Engine-conditional location for custom storage (java owns a
-              // directory path; container engines own a volume name).
-              if (_storageMode == ServiceStorageMode.custom)
-                _engine == ServiceEngine.java
-                    ? _field(t, _path, tr('svc.storage.path'),
-                        key: const ValueKey('service-config-path'),
-                        enabled: !_locked,
-                        error: _storageError)
-                    : _field(t, _volume, tr('svc.storage.volume'),
-                        key: const ValueKey('service-config-volume'),
-                        enabled: !_locked,
-                        error: _storageError),
+              if (_engine == ServiceEngine.localStack)
+                // LocalStack owns its storage; the UI only explains it (2.4).
+                Padding(
+                  key: const ValueKey('service-config-localstack-storage'),
+                  padding: const EdgeInsets.symmetric(vertical: 6),
+                  child: Row(children: [
+                    Icon(Icons.storage_outlined, size: 15, color: t.text3),
+                    const SizedBox(width: 8),
+                    Flexible(
+                      child: Text(
+                        tr('svc.storage.localstackManaged'),
+                        style: Ts.style(size: Ts.md, color: t.text2),
+                      ),
+                    ),
+                  ]),
+                )
+              else ...[
+                _selectField<ServiceStorageMode>(
+                  t,
+                  tr('svc.storage'),
+                  key: const ValueKey('service-config-storage'),
+                  value: _storageMode,
+                  enabled: !_locked,
+                  items: [
+                    (ServiceStorageMode.memory, tr('svc.storage.memory')),
+                    (ServiceStorageMode.custom, tr('svc.storage.persisted')),
+                  ],
+                  onChanged: (v) => setState(() {
+                    _storageMode = v ?? ServiceStorageMode.memory;
+                    _prefillVolume();
+                  }),
+                ),
+                // Engine-conditional location for Persisted storage (java owns
+                // a directory path; the docker engine owns a volume name that
+                // is reused when present and created when absent).
+                if (_storageMode == ServiceStorageMode.custom)
+                  _engine == ServiceEngine.java
+                      ? _field(t, _path, tr('svc.storage.path'),
+                          key: const ValueKey('service-config-path'),
+                          enabled: !_locked,
+                          placeholder: tr('svc.storage.pathHint'),
+                          error: _storageError)
+                      : _field(t, _volume, tr('svc.storage.volume'),
+                          key: const ValueKey('service-config-volume'),
+                          enabled: !_locked,
+                          placeholder: tr('svc.storage.volumeHint'),
+                          error: _storageError),
+              ],
               // Engine-conditional options: JVM heap for the Java engine, the
               // SERVICES list for LocalStack. Docker DynamoDB Local has none.
               if (_engine == ServiceEngine.java)

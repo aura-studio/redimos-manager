@@ -119,6 +119,8 @@ type serviceRuntimeInfo struct {
 	StartedAt   string              `json:"startedAt,omitempty"`
 	Ready       bool                `json:"ready"`
 	Healthy     bool                `json:"healthy"`
+	Restarts    int                 `json:"restarts"`
+	LatencyMs   *float64            `json:"latencyMs"` // null until a probe succeeds
 	ErrorCode   string              `json:"errorCode,omitempty"`
 	Error       string              `json:"error,omitempty"`
 	Metrics     *serviceMetricsInfo `json:"metrics,omitempty"`
@@ -158,11 +160,16 @@ func (m *manager) serviceInfoFor(sc ServiceConfig) serviceInfo {
 	if in.exitMsg != "" {
 		info.Runtime.ErrorCode = svcErrorCode(errors.New(in.exitMsg))
 	}
-	// Readiness is proven at start (the port accepted connections); a running
-	// Service IS the healthy/ready state — the local engines expose no richer
-	// health signal.
-	info.Runtime.Ready = st == "running"
+	// Readiness is PROVEN by the live ListTables probe (probeServicesLoop): a
+	// running Service whose probe fails is Running but not Ready. Healthy mirrors
+	// the lifecycle state — the local engines expose no richer health signal.
+	info.Runtime.Ready = st == "running" && in.ddbProbeOK
 	info.Runtime.Healthy = st == "running"
+	info.Runtime.Restarts = in.restarts
+	if in.ddbProbeOK {
+		lat := in.ddbLatencyMs
+		info.Runtime.LatencyMs = &lat
+	}
 	if st == "running" {
 		info.Runtime.Metrics = &serviceMetricsInfo{
 			CPUPercent:      in.cpuPercent,

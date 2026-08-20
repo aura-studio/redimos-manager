@@ -206,7 +206,8 @@ type instance struct {
 	prevDurCount float64   // previous cumulative duration count
 	prevMtxAt    time.Time // timestamp of the previous successful scrape
 
-	// Local DynamoDB latency probe (filled by the ddb probe in scraperLoop; role "ddb" only).
+	// Local DynamoDB latency probe (filled by the probe loops; legacy ddb
+	// singleton and Service children alike).
 	ddbProbeOK   bool
 	ddbLatencyMs float64
 }
@@ -315,13 +316,15 @@ func newManager() *manager {
 	go m.samplerLoop()
 	go m.scraperLoop()
 	go m.probeDdbLoop()
+	go m.probeServicesLoop()
 	return m
 }
 
 // samplerLoop refreshes per-child CPU/memory stats every 2s so rm_status stays
 // a cheap cached read. Plain processes are sampled via the OS (procstats_*);
-// containerised children via `docker stats`. A restarted child (new pid)
-// resets its CPU baseline.
+// containerised children via `docker stats`; Services via their engine
+// adapters (sampleServices). A restarted child (new pid) resets its CPU
+// baseline.
 func (m *manager) samplerLoop() {
 	numCPU := float64(runtime.NumCPU())
 	t := time.NewTicker(2 * time.Second)
@@ -384,6 +387,29 @@ func (m *manager) samplerLoop() {
 			in.prevSampleAt = now
 			in.mu.Unlock()
 		}
+		m.sampleServices()
+	}
+}
+
+// sampleServices runs each live Service through its OWN engine adapter's
+// sample method (java → sampleProcess delta math, docker/localstack →
+// `docker stats`), so Services and legacy children share no sampling code
+// path beyond the primitives. A sampling error skips this round and keeps the
+// previous values.
+func (m *manager) sampleServices() {
+	m.mu.Lock()
+	cfgs := append([]ServiceConfig(nil), m.st.Services...)
+	m.mu.Unlock()
+	for _, sc := range cfgs {
+		rt, ok := m.svcRuntime(sc.ID)
+		if !ok {
+			continue
+		}
+		ad, err := serviceEngineFor(sc.Engine)
+		if err != nil {
+			continue
+		}
+		_ = ad.sample(m, sc, rt.instance())
 	}
 }
 

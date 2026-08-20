@@ -1,11 +1,12 @@
-// Stage 14.4: widget / boundary tests for the four Service detail tabs.
+// v1.2: widget / boundary tests for the three Service detail tabs.
 //
-// Covers: the full lifecycle-state matrix on Overview (distinct badge +
-// valid actions per state, 9.7), identity tiles + in-context error banner
-// (9.8), Monitor's per-ID history and no-data state (9.3), and Logs'
+// Covers: Monitor's per-ID history, its '—' tiles before samples exist, and
+// the dismissible error banner that replaced Overview's in-context error
+// (8.2 — dismiss is per-error-text, a NEW error re-surfaces); Logs'
 // refresh/copy/clear-view interactions, error preservation, and the
-// stale-response guard across selection switches (9.4, 9.6). Scripted core —
-// no dylib needed.
+// stale-response guard across selection switches (10.4, 10.5). The Overview
+// tab and its lifecycle-action matrix are gone by design (4.3): start/stop
+// live on the sidebar cards only. Scripted core — no dylib needed.
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -15,9 +16,8 @@ import 'package:redimos_manager/src/i18n.dart';
 import 'package:redimos_manager/src/models.dart';
 import 'package:redimos_manager/src/service_detail.dart';
 import 'package:redimos_manager/src/services_state.dart';
-import 'package:redimos_manager/src/ui_primitives.dart';
-import 'package:redimos_manager/src/ui_status.dart';
 import 'package:redimos_manager/src/ui_theme.dart';
+import 'package:redimos_manager/src/ui_tokens.dart';
 
 import 'fake_core.dart';
 
@@ -26,9 +26,6 @@ import 'fake_core.dart';
 // ---------------------------------------------------------------------------
 
 class _ScriptedCore extends FakeNativeCore {
-  final startCalls = <String>[];
-  final stopCalls = <String>[];
-  final restartCalls = <String>[];
   final Map<String, List<String>> linesBy = {};
   ServiceApiException? logsError;
 
@@ -37,30 +34,6 @@ class _ScriptedCore extends FakeNativeCore {
     final err = logsError;
     if (err != null) throw err;
     return linesBy[id] ?? const [];
-  }
-
-  @override
-  ServiceInfo serviceStart(String id) {
-    startCalls.add(id);
-    return ServiceInfo.fromJson({
-      'config': {'id': id, 'name': id, 'engine': 'java', 'port': 8000},
-      'runtime': {'state': 'running', 'ready': true, 'healthy': true},
-    });
-  }
-
-  @override
-  ServiceInfo serviceStop(String id) {
-    stopCalls.add(id);
-    return ServiceInfo.fromJson({
-      'config': {'id': id, 'name': id, 'engine': 'java', 'port': 8000},
-      'runtime': {'state': 'stopped'},
-    });
-  }
-
-  @override
-  ServiceInfo serviceRestart(String id) {
-    restartCalls.add(id);
-    return serviceStart(id);
   }
 }
 
@@ -109,183 +82,99 @@ Future<void> _pump(WidgetTester tester, Widget child) async {
   await tester.pump();
 }
 
-bool _enabled(WidgetTester tester, String key) =>
-    tester
-        .widget<CodexButton>(find.byKey(ValueKey(key)))
-        .onPressed !=
-    null;
-
 void main() {
   setUp(() => appLang.value = AppLang.en);
   tearDown(() => appLang.value = AppLang.en);
 
-  // ---- 14.1 Overview: lifecycle-state matrix --------------------------------
+  // ---- Monitor: error banner (the in-context error's only home now, 8.2) ----
 
-  testWidgets('overview renders a distinct badge per lifecycle state',
+  testWidgets('monitor renders a lifecycle failure as a dismissible banner',
       (tester) async {
-    final labels = <String>{};
-    final paints = <CodexStatus>{};
-    for (final state in ServiceState.values) {
-      await _pump(
-        tester,
-        ServiceOverviewTab(
-          service: _svc(state: state.name),
-          onStart: () {},
-          onStop: () {},
-          onRestart: () {},
-        ),
-      );
-      final badge = tester.widget<CodexStatusBadge>(
-        find.byKey(const ValueKey('service-overview-state-badge')),
-      );
-      expect(badge.label, serviceStateLabel(state));
-      labels.add(badge.label);
-      paints.add(badge.status);
-    }
-    // Every one of the 8 states owns a distinct label (9.7).
-    expect(labels.length, ServiceState.values.length);
-    expect(tester.takeException(), isNull);
-  });
-
-  testWidgets('overview enables exactly the valid actions per state',
-      (tester) async {
-    final starts = <String>[];
-    final stops = <String>[];
-    final restarts = <String>[];
-
-    Future<void> pumpState(String state) => _pump(
-          tester,
-          ServiceOverviewTab(
-            service: _svc(state: state),
-            onStart: () => starts.add(state),
-            onStop: () => stops.add(state),
-            onRestart: () => restarts.add(state),
-          ),
+    ServiceInfo svc(String error, String code) => _svc(
+          state: 'failed',
+          error: error,
+          errorCode: code,
         );
 
-    // stopped: only Start.
-    await pumpState('stopped');
-    expect(_enabled(tester, 'service-overview-start'), isTrue);
-    expect(_enabled(tester, 'service-overview-stop'), isFalse);
-    expect(_enabled(tester, 'service-overview-restart'), isFalse);
-    await tester.tap(find.byKey(const ValueKey('service-overview-start')));
-    expect(starts, ['stopped']);
-
-    // preparing / restarting: live states accept Stop (cancel) but no Start
-    // or Restart.
-    for (final s in ['preparing', 'restarting']) {
-      await pumpState(s);
-      expect(_enabled(tester, 'service-overview-start'), isFalse, reason: s);
-      expect(_enabled(tester, 'service-overview-stop'), isTrue, reason: s);
-      expect(_enabled(tester, 'service-overview-restart'), isFalse, reason: s);
-    }
-
-    // stopping / recovering: transitional states outside the live set accept
-    // no action (matches the card-level isLive toggle grammar).
-    for (final s in ['stopping', 'recovering']) {
-      await pumpState(s);
-      expect(_enabled(tester, 'service-overview-start'), isFalse, reason: s);
-      expect(_enabled(tester, 'service-overview-stop'), isFalse, reason: s);
-      expect(_enabled(tester, 'service-overview-restart'), isFalse, reason: s);
-    }
-
-    // running: Stop + Restart only.
-    await pumpState('running');
-    expect(_enabled(tester, 'service-overview-start'), isFalse);
-    expect(_enabled(tester, 'service-overview-stop'), isTrue);
-    expect(_enabled(tester, 'service-overview-restart'), isTrue);
-    await tester.tap(find.byKey(const ValueKey('service-overview-stop')));
-    await tester.tap(find.byKey(const ValueKey('service-overview-restart')));
-    expect(stops, ['running']);
-    expect(restarts, ['running']);
-
-    // failed / error: Start is the recovery path.
-    for (final s in ['failed', 'error']) {
-      await pumpState(s);
-      expect(_enabled(tester, 'service-overview-start'), isTrue, reason: s);
-      expect(_enabled(tester, 'service-overview-stop'), isFalse, reason: s);
-      expect(_enabled(tester, 'service-overview-restart'), isFalse, reason: s);
-    }
-    expect(starts, ['stopped']);
-    expect(tester.takeException(), isNull);
-  });
-
-  testWidgets('overview tiles name identity, port, location, and runtime',
-      (tester) async {
-    // Java engine: runtime identity is the PID.
     await _pump(
       tester,
-      ServiceOverviewTab(
-        service: _svc(state: 'running', pid: 4242, ready: true, healthy: true),
-        onStart: () {},
-        onStop: () {},
-        onRestart: () {},
+      ServiceMonitorTab(
+        service: svc('port 8000 already in use', 'port_in_use'),
+        history: ServiceHistory(90),
       ),
     );
-    expect(find.text('java'), findsOneWidget);
-    expect(find.text('8000'), findsOneWidget);
-    expect(find.text('PID 4242'), findsOneWidget);
-    expect(find.text(tr('svc.ready')), findsOneWidget);
-    expect(find.text(tr('svc.healthy')), findsOneWidget);
-
-    // Container engine: runtime identity is the short container ID.
-    await _pump(
-      tester,
-      ServiceOverviewTab(
-        service: _svc(
-          engine: 'docker',
-          state: 'running',
-          containerId: 'abcdef1234567890',
-        ),
-        onStart: () {},
-        onStop: () {},
-        onRestart: () {},
-      ),
-    );
-    expect(find.text('abcdef123456'), findsOneWidget); // truncated to 12
-    expect(tester.takeException(), isNull);
-  });
-
-  testWidgets('a lifecycle failure renders in-context, not shell-replacing',
-      (tester) async {
-    await _pump(
-      tester,
-      ServiceOverviewTab(
-        service: _svc(
-          state: 'failed',
-          error: 'port 8000 already in use',
-          errorCode: 'port_in_use',
-        ),
-        onStart: () {},
-        onStop: () {},
-        onRestart: () {},
-      ),
-    );
-    final banner = find.byKey(const ValueKey('service-overview-error'));
+    final banner = find.byKey(const ValueKey('service-monitor-error-banner'));
     expect(banner, findsOneWidget);
-    expect(find.descendant(of: banner, matching: find.textContaining('port_in_use')),
+    expect(
+        find.descendant(
+            of: banner, matching: find.textContaining('port_in_use')),
         findsOneWidget);
     expect(
       find.descendant(
-          of: banner, matching: find.textContaining('port 8000 already in use')),
+          of: banner,
+          matching: find.textContaining('port 8000 already in use')),
       findsOneWidget,
     );
-    // The rest of the overview is still fully present (9.8).
-    expect(find.byKey(const ValueKey('service-overview-start')), findsOneWidget);
-    expect(find.byKey(const ValueKey('service-overview-port')), findsOneWidget);
+    // The rest of the monitor is still fully present (in-context, 8.2).
+    expect(find.byKey(const ValueKey('service-monitor-cpu')), findsOneWidget);
+    expect(find.byKey(const ValueKey('service-monitor-port')), findsOneWidget);
+
+    // Dismiss hides THIS error...
+    await tester.tap(find.byKey(const ValueKey('service-monitor-error-dismiss')));
+    await tester.pump();
+    expect(banner, findsNothing);
+
+    // ...but a NEW error re-surfaces (dismissal is per-error-text).
+    await _pump(
+      tester,
+      ServiceMonitorTab(
+        service: svc('java exited with code 1', 'spawn_failed'),
+        history: ServiceHistory(90),
+      ),
+    );
+    expect(banner, findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
-  // ---- 14.2 Monitor ----------------------------------------------------------
+  testWidgets('a running Service without error shows no banner',
+      (tester) async {
+    await _pump(
+      tester,
+      ServiceMonitorTab(
+        service: _svc(state: 'running', ready: true, healthy: true),
+        history: ServiceHistory(90),
+      ),
+    );
+    expect(find.byKey(const ValueKey('service-monitor-error-banner')),
+        findsNothing);
+    expect(tester.takeException(), isNull);
+  });
 
-  testWidgets('monitor shows the no-data state until samples exist',
+  // ---- Monitor: tiles ---------------------------------------------------------
+
+  testWidgets('monitor renders placeholder tiles until samples exist',
       (tester) async {
     await _pump(
       tester,
       ServiceMonitorTab(service: _svc(), history: ServiceHistory(90)),
     );
-    expect(find.byKey(const ValueKey('service-monitor-empty')), findsOneWidget);
-    expect(find.byKey(const ValueKey('service-monitor-cpu')), findsNothing);
+    // All ten tiles are present from the first frame; the three spark cards
+    // read '—' while the ring buffer is empty (7.2 fixed order).
+    for (final k in [
+      'service-monitor-cpu',
+      'service-monitor-mem',
+      'service-monitor-disk',
+      'service-monitor-uptime',
+      'service-monitor-restarts',
+      'service-monitor-latency',
+      'service-monitor-status',
+      'service-monitor-health',
+      'service-monitor-port',
+      'service-monitor-engine',
+    ]) {
+      expect(find.byKey(ValueKey(k)), findsOneWidget, reason: k);
+    }
+    expect(find.text('—'), findsWidgets);
     expect(tester.takeException(), isNull);
   });
 
@@ -302,7 +191,6 @@ void main() {
     );
     expect(find.text('12.5%'), findsOneWidget);
     expect(find.text('256 MB'), findsOneWidget);
-    expect(find.byKey(const ValueKey('service-monitor-empty')), findsNothing);
 
     // The OTHER Service's buffer never leaks into this view (9.3).
     await _pump(
@@ -312,6 +200,48 @@ void main() {
     expect(find.text('77.0%'), findsOneWidget);
     expect(find.text('512 MB'), findsOneWidget);
     expect(find.text('12.5%'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('the ten-tile monitor fits 1280×800 without overflow (6.8)',
+      (tester) async {
+    final hist = ServiceHistory(90);
+    for (var i = 0; i < 60; i++) {
+      hist.sample(ServiceMetrics(
+        cpuPercent: 10 + i * 0.2,
+        memBytes: 300 * 1024 * 1024,
+        diskBytesPerSec: 900,
+      ));
+    }
+    await _pump(
+      tester,
+      ServiceMonitorTab(
+        // Worst case: banner + live sparklines + every tile populated.
+        service: _svc(
+          state: 'failed',
+          error: 'bind tcp 0.0.0.0:8000: address already in use',
+          errorCode: 'port_in_use',
+        ),
+        history: hist,
+      ),
+    );
+    expect(find.byKey(const ValueKey('service-monitor-error-banner')),
+        findsOneWidget);
+    for (final k in [
+      'service-monitor-cpu',
+      'service-monitor-mem',
+      'service-monitor-disk',
+      'service-monitor-uptime',
+      'service-monitor-restarts',
+      'service-monitor-latency',
+      'service-monitor-status',
+      'service-monitor-health',
+      'service-monitor-port',
+      'service-monitor-engine',
+    ]) {
+      expect(find.byKey(ValueKey(k)), findsOneWidget, reason: k);
+    }
+    // A RenderFlex overflow would surface as a test exception (7.4).
     expect(tester.takeException(), isNull);
   });
 
@@ -426,6 +356,61 @@ void main() {
     final stale = state.requestLogs('svc-a');
     await tester.pump(const Duration(milliseconds: 1));
     expect(await stale, isNull);
+    expect(tester.takeException(), isNull);
+  });
+
+  // ---- Logs: severity colouring + auto-scroll (8.4) --------------------------
+
+  testWidgets('log lines are coloured by severity, error reads danger',
+      (tester) async {
+    final core = _ScriptedCore()
+      ..linesBy['svc-a'] = [
+        '2026-08-20T12:00:00Z ERROR port in use',
+        '2026-08-20T12:00:01Z WARN slow query',
+        '2026-08-20T12:00:02Z INFO ready',
+        'plain line without a level token',
+      ];
+    final state = ServicesState(core)..select('svc-a');
+    addTearDown(state.dispose);
+    await _pump(tester, ServiceLogsTab(service: _svc(), state: state));
+    await tester.pump(const Duration(milliseconds: 1));
+
+    final tokens = appTheme(Brightness.dark).extension<AppTokens>()!;
+    Color colorOf(String line) => tester.widget<Text>(find.text(line)).style!.color!;
+    expect(colorOf('2026-08-20T12:00:00Z ERROR port in use'), tokens.danger);
+    expect(colorOf('2026-08-20T12:00:01Z WARN slow query'), tokens.warning);
+    expect(colorOf('2026-08-20T12:00:02Z INFO ready'), tokens.text2);
+    expect(colorOf('plain line without a level token'), tokens.text3);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('auto-scroll follows the tail; scrolling up pauses it (8.4)',
+      (tester) async {
+    final core = _ScriptedCore()
+      ..linesBy['svc-a'] = List.generate(400, (i) => 'log line $i');
+    final state = ServicesState(core)..select('svc-a');
+    addTearDown(state.dispose);
+    await _pump(tester, ServiceLogsTab(service: _svc(), state: state));
+    await tester.pump(const Duration(milliseconds: 1)); // load lands
+    await tester.pump(); // post-frame jumpTo(maxScrollExtent)
+
+    final logState =
+        tester.state<ServiceLogsTabState>(find.byType(ServiceLogsTab));
+    // Default: following is ON and the view sits at the tail (10.2).
+    expect(logState.autoScroll, isTrue);
+    expect(logState.scroll.position.pixels,
+        logState.scroll.position.maxScrollExtent);
+
+    // A manual scroll UP pauses following (10.3).
+    await tester.drag(
+        find.byKey(const ValueKey('service-logs-list')), const Offset(0, 300));
+    await tester.pump();
+    expect(logState.autoScroll, isFalse);
+
+    // Returning to the bottom resumes following.
+    logState.scroll.jumpTo(logState.scroll.position.maxScrollExtent);
+    await tester.pump();
+    expect(logState.autoScroll, isTrue);
     expect(tester.takeException(), isNull);
   });
 }

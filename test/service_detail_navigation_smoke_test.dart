@@ -1,10 +1,11 @@
-// Stage 14.5: four-tab navigation + lifecycle smoke test.
+// v1.2: three-tab navigation + lifecycle smoke test.
 //
-// A harness mirrors HomePage's Service detail routing (four tabs over ONE
-// ServicesState + ID-keyed detail widgets) with a stateful scripted core,
-// then proves that switching the selected Service swaps content, logs,
-// metrics, and lifecycle actions cleanly — nothing from Service A ever leaks
-// into Service B's view, and lifecycle ops address exactly one ID.
+// A harness mirrors HomePage's Service detail routing (three tabs —
+// Configure/Monitor/Logs — over ONE ServicesState + ID-keyed detail widgets,
+// start/stop on the sidebar cards, restart removed) with a stateful scripted
+// core, then proves that switching the selected Service swaps content, logs,
+// and metrics cleanly — nothing from Service A ever leaks into Service B's
+// view, and lifecycle ops address exactly one ID.
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -135,8 +136,6 @@ class _DetailHarnessState extends State<_DetailHarness> {
         widget.core.serviceStart(s.id);
       case 'stop':
         widget.core.serviceStop(s.id);
-      case 'restart':
-        widget.core.serviceRestart(s.id);
     }
     svc.refresh();
   }
@@ -145,19 +144,12 @@ class _DetailHarnessState extends State<_DetailHarness> {
     final s = svc.selected;
     if (s == null) return const SizedBox.shrink();
     return switch (svc.selectedTab) {
-      1 => ServiceOverviewTab(
-          key: ValueKey('overview-${s.id}'),
-          service: s,
-          onStart: () => _life(s, 'start'),
-          onStop: () => _life(s, 'stop'),
-          onRestart: () => _life(s, 'restart'),
-        ),
-      2 => ServiceMonitorTab(
+      1 => ServiceMonitorTab(
           key: ValueKey('monitor-${s.id}'),
           service: s,
           history: svc.historyOf(s.id),
         ),
-      3 => ServiceLogsTab(
+      2 => ServiceLogsTab(
           key: ValueKey('logs-${s.id}'),
           service: s,
           state: svc,
@@ -179,9 +171,10 @@ class _DetailHarnessState extends State<_DetailHarness> {
   @override
   Widget build(BuildContext context) {
     return Column(children: [
-      // "Sidebar": two selection targets.
+      // "Sidebar": two selection targets, each with its own start/stop pair —
+      // v1.2 moved lifecycle out of the detail tabs onto the cards (4.3).
       Row(children: [
-        for (final id in ['svc-a', 'svc-b'])
+        for (final id in ['svc-a', 'svc-b']) ...[
           CodexButton(
             key: ValueKey('smoke-select-$id'),
             variant: CodexButtonVariant.secondary,
@@ -189,10 +182,25 @@ class _DetailHarnessState extends State<_DetailHarness> {
             onPressed: () => svc.select(id),
             label: Text(id),
           ),
+          CodexButton(
+            key: ValueKey('smoke-start-$id'),
+            variant: CodexButtonVariant.ghost,
+            semanticLabel: 'start $id',
+            onPressed: () => _life(svc.serviceById(id)!, 'start'),
+            label: const Icon(Icons.play_arrow, size: 12),
+          ),
+          CodexButton(
+            key: ValueKey('smoke-stop-$id'),
+            variant: CodexButtonVariant.ghost,
+            semanticLabel: 'stop $id',
+            onPressed: () => _life(svc.serviceById(id)!, 'stop'),
+            label: const Icon(Icons.stop, size: 12),
+          ),
+        ],
       ]),
-      // "MidBar": the four Service tabs.
+      // "MidBar": the three Service tabs (Configure/Monitor/Logs).
       Row(children: [
-        for (var i = 0; i < 4; i++)
+        for (var i = 0; i < 3; i++)
           CodexButton(
             key: ValueKey('smoke-tab-$i'),
             variant: svc.selectedTab == i
@@ -242,62 +250,55 @@ void main() {
   setUp(() => appLang.value = AppLang.en);
   tearDown(() => appLang.value = AppLang.en);
 
-  testWidgets('four tabs render per-ID content with zero cross-talk',
+  testWidgets('three tabs render per-ID content with zero cross-talk',
       (tester) async {
     final core = _SmokeCore();
     core.states['svc-a'] = 'running'; // live: metrics + logs both exercised
     await _pump(tester, core);
-    // Default landing is tab 0 = Configure (v1 convention); hop to Overview.
+    // Default landing is tab 0 = Configure (v1 convention); hop to Monitor.
     await _tab(tester, 1);
 
-    // --- Tab 1 Overview: per-ID identity ------------------------------------
-    expect(find.byKey(const ValueKey('overview-svc-a')), findsOneWidget);
-    expect(find.text('local-ddb'), findsOneWidget);
-    expect(find.text('8000'), findsOneWidget);
-
-    await _select(tester, 'svc-b');
-    expect(find.byKey(const ValueKey('overview-svc-b')), findsOneWidget);
-    expect(find.text('stage-ddb'), findsOneWidget);
-    expect(find.text('8001'), findsOneWidget);
-    expect(find.text('local-ddb'), findsNothing);
-
-    // --- Tab 2 Monitor: per-ID history ---------------------------------------
-    await _tab(tester, 2); // Monitor
-    // svc-b never ran → no samples → the explicit empty state.
-    expect(find.byKey(const ValueKey('service-monitor-empty')), findsOneWidget);
-    await _select(tester, 'svc-a');
+    // --- Tab 1 Monitor: per-ID history ---------------------------------------
+    expect(find.byKey(const ValueKey('monitor-svc-a')), findsOneWidget);
     // svc-a is running with metrics → its own sparkline value renders.
-    expect(find.byKey(const ValueKey('service-monitor-empty')), findsNothing);
     expect(find.text('10.0%'), findsOneWidget);
 
-    // --- Tab 3 Logs: per-ID lines --------------------------------------------
-    await _tab(tester, 3); // Logs
-    expect(find.text('alpha boot'), findsOneWidget);
-    expect(find.text('beta boot'), findsNothing);
     await _select(tester, 'svc-b');
+    expect(find.byKey(const ValueKey('monitor-svc-b')), findsOneWidget);
+    // svc-b never ran → no samples → its metrics never leak from svc-a.
+    expect(find.text('10.0%'), findsNothing);
+
+    // --- Tab 2 Logs: per-ID lines --------------------------------------------
+    await _tab(tester, 2); // Logs
     expect(find.text('beta boot'), findsOneWidget);
     expect(find.text('alpha boot'), findsNothing);
+    await _select(tester, 'svc-a');
+    expect(find.text('alpha boot'), findsOneWidget);
+    expect(find.text('beta boot'), findsNothing);
 
     // --- Tab 0 Configure: per-ID form -----------------------------------------
     await _tab(tester, 0); // Configure
-    expect(find.byKey(const ValueKey('configure-svc-b')), findsOneWidget);
-    final nameField = tester.widget<TextField>(find.descendant(
-      of: find.byKey(const ValueKey('service-config-name-input')),
-      matching: find.byType(TextField),
-    ));
-    expect(nameField.controller!.text, 'stage-ddb');
-    await _select(tester, 'svc-a');
     expect(find.byKey(const ValueKey('configure-svc-a')), findsOneWidget);
     final nameFieldA = tester.widget<TextField>(find.descendant(
       of: find.byKey(const ValueKey('service-config-name-input')),
       matching: find.byType(TextField),
     ));
     expect(nameFieldA.controller!.text, 'local-ddb');
+    await _select(tester, 'svc-b');
+    expect(find.byKey(const ValueKey('configure-svc-b')), findsOneWidget);
+    final nameField = tester.widget<TextField>(find.descendant(
+      of: find.byKey(const ValueKey('service-config-name-input')),
+      matching: find.byType(TextField),
+    ));
+    expect(nameField.controller!.text, 'stage-ddb');
 
     // The detail tab is a per-KIND slot: switching Services kept it on 0.
     final harness =
         tester.state<_DetailHarnessState>(find.byType(_DetailHarness));
     expect(harness.svc.selectedTab, 0);
+    // v1.2: the Overview tab and its restart entry point are gone entirely.
+    expect(find.byKey(const ValueKey('service-overview-restart')),
+        findsNothing);
     expect(tester.takeException(), isNull);
   });
 
@@ -306,38 +307,32 @@ void main() {
     final core = _SmokeCore();
     await _pump(tester, core);
 
-    // svc-a stopped → Start only affects svc-a.
-    await _tab(tester, 1); // Overview (Configure leads the tab row at 0)
-    await tester.tap(find.byKey(const ValueKey('service-overview-start')));
+    // svc-a stopped → the sidebar Start only affects svc-a.
+    await tester.tap(find.byKey(const ValueKey('smoke-start-svc-a')));
     await tester.pump(const Duration(milliseconds: 1));
     await tester.pump();
     expect(core.startCalls, ['svc-a']);
     expect(core.states['svc-a'], 'running');
     expect(core.states['svc-b'], 'stopped'); // sibling untouched
 
-    // svc-b gets its own lifecycle: start, then restart svc-a, then stop b.
-    await _select(tester, 'svc-b');
-    await tester.tap(find.byKey(const ValueKey('service-overview-start')));
+    // svc-b gets its own lifecycle: start, then stop — restart is gone (4.3).
+    await tester.tap(find.byKey(const ValueKey('smoke-start-svc-b')));
     await tester.pump(const Duration(milliseconds: 1));
     await tester.pump();
     expect(core.states['svc-b'], 'running');
     expect(core.states['svc-a'], 'running'); // a kept running
 
-    await _select(tester, 'svc-a');
-    await tester.tap(find.byKey(const ValueKey('service-overview-restart')));
-    await tester.pump(const Duration(milliseconds: 1));
-    await tester.pump();
-    expect(core.restartCalls, ['svc-a']);
-
-    await _select(tester, 'svc-b');
-    await tester.tap(find.byKey(const ValueKey('service-overview-stop')));
+    await tester.tap(find.byKey(const ValueKey('smoke-stop-svc-b')));
     await tester.pump(const Duration(milliseconds: 1));
     await tester.pump();
     expect(core.stopCalls, ['svc-b']);
     expect(core.states['svc-b'], 'stopped');
     expect(core.states['svc-a'], 'running'); // never cross-addressed
+    expect(core.restartCalls, isEmpty); // no restart path exists anymore
 
-    // The badge on b's overview reads the stopped state.
+    // The Monitor tab reads the stopped state from svc-b's own snapshot.
+    await _tab(tester, 1);
+    await _select(tester, 'svc-b');
     expect(find.text(tr('svc.state.stopped')), findsOneWidget);
     expect(tester.takeException(), isNull);
   });

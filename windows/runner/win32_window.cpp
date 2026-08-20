@@ -219,6 +219,17 @@ Win32Window::MessageHandler(HWND hwnd,
     case WM_DWMCOLORIZATIONCOLORCHANGED:
       UpdateTheme(hwnd);
       return 0;
+
+    case WM_GETMINMAXINFO: {
+      // v1.2: the Service Monitor layout needs a floor — dragging smaller
+      // stops at 1280x800 (DPI-scaled), matching the macOS minSize.
+      auto* info = reinterpret_cast<MINMAXINFO*>(lparam);
+      UINT dpi = GetDpiForWindow(hwnd);
+      double scale_factor = dpi == 0 ? 1.0 : dpi / 96.0;
+      info->ptMinTrackSize.x = Scale(1280, scale_factor);
+      info->ptMinTrackSize.y = Scale(800, scale_factor);
+      return 0;
+    }
   }
 
   return DefWindowProc(window_handle_, message, wparam, lparam);

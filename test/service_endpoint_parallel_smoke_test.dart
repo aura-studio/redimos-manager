@@ -207,12 +207,12 @@ class _ParallelHarnessState extends State<_ParallelHarness> {
     }
     final s = svc.selected;
     if (s == null) return const Text('no service');
-    return ServiceOverviewTab(
-      key: ValueKey('service-overview-${s.id}'),
+    // v1.2: the Service detail leads with Monitor — lifecycle buttons moved
+    // to the sidebar cards, so the detail pane has no start/stop surface.
+    return ServiceMonitorTab(
+      key: ValueKey('service-monitor-${s.id}'),
       service: s,
-      onStart: () => startService(s.id),
-      onStop: () => stopService(s.id),
-      onRestart: () {},
+      history: svc.historyOf(s.id),
     );
   }
 
@@ -255,6 +255,13 @@ class _ParallelHarnessState extends State<_ParallelHarness> {
           semanticLabel: 'start svc-a',
           onPressed: () => startService('svc-a'),
           label: const Text('start-a'),
+        ),
+        CodexButton(
+          key: const ValueKey('stop-svc-a'),
+          variant: CodexButtonVariant.secondary,
+          semanticLabel: 'stop svc-a',
+          onPressed: () => stopService('svc-a'),
+          label: const Text('stop-a'),
         ),
         CodexButton(
           key: const ValueKey('delete-svc-a'),
@@ -336,7 +343,7 @@ void main() {
     await _tap(tester, 'pick-svc-svc-a');
     expect(harness.kind, EntityKind.service);
     expect(harness.selectedEndpointId, 'ep-1'); // preserved
-    expect(find.byKey(const ValueKey('service-overview-svc-a')), findsOneWidget);
+    expect(find.byKey(const ValueKey('service-monitor-svc-a')), findsOneWidget);
     expect(find.byKey(const ValueKey('endpoint-detail-ep-1')), findsNothing);
 
     // 3. NO LIFECYCLE CASCADE: starting the Service leaves both endpoints

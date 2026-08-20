@@ -30,6 +30,7 @@ package main
 import (
 	"errors"
 	"sync"
+	"time"
 )
 
 // Sentinel errors for the ID-addressed lifecycle surface.
@@ -142,6 +143,12 @@ func (m *manager) serviceExited(id string, gen uint64, msg string, failed bool) 
 		in.status = "stopped"
 	}
 	in.exitMsg = msg
+	// A stopped child has no live resource sample: zero the monitors so the
+	// next run starts from a clean baseline instead of the dead process's
+	// last numbers.
+	in.cpuPercent, in.memBytes, in.diskPerSec = 0, 0, 0
+	in.prevBusy, in.prevDisk, in.prevSampleAt = 0, 0, time.Time{}
+	in.ddbProbeOK, in.ddbLatencyMs = false, 0
 	in.mu.Unlock()
 }
 

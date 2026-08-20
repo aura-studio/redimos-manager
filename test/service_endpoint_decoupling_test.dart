@@ -352,11 +352,9 @@ void _serviceDetailShortcutAudit() {
     await _pump(
       tester,
       Column(children: [
-        Expanded(child: ServiceOverviewTab(
+        Expanded(child: ServiceMonitorTab(
           service: s,
-          onStart: () {},
-          onStop: () {},
-          onRestart: () {},
+          history: ServiceHistory(90),
         )),
       ]),
     );
@@ -367,7 +365,7 @@ void _serviceDetailShortcutAudit() {
       tr('ep.browse'),
     ]) {
       expect(find.text(label), findsNothing,
-          reason: 'Service Overview must not offer "$label"');
+          reason: 'Service Monitor must not offer "$label"');
     }
 
     // Logs tab: actions are refresh/copy/clear only.

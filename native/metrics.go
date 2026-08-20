@@ -24,6 +24,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -111,6 +112,63 @@ func (m *manager) probeDdbLatency() {
 	// spawn()'s reset. Compare startMicro, not port: autoRestart re-spawns in
 	// place on this same instance and never changes port, so a port check would
 	// pass for exactly the restart it is meant to catch.
+	if in.status != "running" || in.startMicro != startMicro {
+		return
+	}
+	if err != nil {
+		in.ddbProbeOK = false
+		return
+	}
+	in.ddbProbeOK, in.ddbLatencyMs = true, ms
+}
+
+// probeServicesLoop is the per-Service twin of probeDdbLoop: every running
+// Service gets the same synthetic ListTables RTT probe on its own 3s ticker.
+// Services are probed concurrently — a wedged engine (paused container) must
+// not stall its siblings' Health/Latency tiles.
+func (m *manager) probeServicesLoop() {
+	t := time.NewTicker(3 * time.Second)
+	for range t.C {
+		m.mu.Lock()
+		cfgs := append([]ServiceConfig(nil), m.st.Services...)
+		m.mu.Unlock()
+		var wg sync.WaitGroup
+		for _, sc := range cfgs {
+			rt, ok := m.svcRuntime(sc.ID)
+			if !ok {
+				continue
+			}
+			wg.Add(1)
+			go func(sc ServiceConfig, rt *serviceRuntime) {
+				defer wg.Done()
+				m.probeServiceLatency(sc, rt)
+			}(sc, rt)
+		}
+		wg.Wait()
+	}
+}
+
+// probeServiceLatency measures one Service's request RTT, mirroring
+// probeDdbLatency: the endpoint is CONSTRUCTED from the live child's port (a
+// loopback probe, never a user endpoint), and the write-back proves the child
+// did not restart during the unlocked I/O by comparing startMicro.
+func (m *manager) probeServiceLatency(sc ServiceConfig, rt *serviceRuntime) {
+	in := rt.instance()
+	if in == nil {
+		return
+	}
+	in.mu.Lock()
+	running, port, startMicro := in.status == "running", in.port, in.startMicro
+	in.mu.Unlock()
+	if !running || port <= 0 {
+		return
+	}
+	cfg := &Config{Endpoint: fmt.Sprintf("http://127.0.0.1:%d", port)}
+	start := time.Now()
+	_, err := ddbCall(cfg, "ListTables", map[string]any{"Limit": float64(1)})
+	ms := float64(time.Since(start).Microseconds()) / 1000
+	in.mu.Lock()
+	defer in.mu.Unlock()
 	if in.status != "running" || in.startMicro != startMicro {
 		return
 	}

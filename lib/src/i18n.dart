@@ -219,17 +219,40 @@ const Map<String, Map<AppLang, String>> _strings = {
   'svc.storageSection': {AppLang.en: 'Storage & options', AppLang.zh: '存储与选项'},
   'svc.name': {AppLang.en: 'Service name', AppLang.zh: '服务名称'},
   'svc.engine': {AppLang.en: 'Engine', AppLang.zh: '引擎'},
-  'svc.engine.java': {AppLang.en: 'Java DynamoDB Local', AppLang.zh: 'Java DynamoDB Local'},
-  'svc.engine.docker': {AppLang.en: 'Docker DynamoDB Local', AppLang.zh: 'Docker DynamoDB Local'},
-  'svc.engine.localstack': {AppLang.en: 'LocalStack', AppLang.zh: 'LocalStack'},
+  'svc.engine.java': {AppLang.en: 'Java · local', AppLang.zh: 'Java · 本地'},
+  'svc.engine.docker': {
+    AppLang.en: 'Docker · dynamodb-local',
+    AppLang.zh: 'Docker · dynamodb-local'
+  },
+  'svc.engine.localstack': {
+    AppLang.en: 'Docker · LocalStack',
+    AppLang.zh: 'Docker · LocalStack'
+  },
   'svc.port': {AppLang.en: 'Host port', AppLang.zh: '宿主端口'},
   'svc.portHint': {AppLang.en: '0 = engine default', AppLang.zh: '0 = 引擎默认端口'},
+  'svc.portDefault': {
+    AppLang.en: 'Engine default port:',
+    AppLang.zh: '引擎默认端口：'
+  },
   'svc.storage': {AppLang.en: 'Storage mode', AppLang.zh: '存储模式'},
-  'svc.storage.memory': {AppLang.en: 'Memory', AppLang.zh: '内存'},
+  'svc.storage.memory': {AppLang.en: 'In-memory', AppLang.zh: '内存'},
   'svc.storage.managed': {AppLang.en: 'Managed', AppLang.zh: '受管'},
   'svc.storage.custom': {AppLang.en: 'Custom', AppLang.zh: '自定义'},
+  'svc.storage.persisted': {AppLang.en: 'Persisted', AppLang.zh: '持久化'},
   'svc.storage.path': {AppLang.en: 'Data path', AppLang.zh: '数据路径'},
+  'svc.storage.pathHint': {
+    AppLang.en: 'Default: <app data>/services/<id>/ddb-data',
+    AppLang.zh: '默认：<应用数据>/services/<id>/ddb-data'
+  },
   'svc.storage.volume': {AppLang.en: 'Volume name', AppLang.zh: '卷名'},
+  'svc.storage.volumeHint': {
+    AppLang.en: 'Reused when present, created when absent',
+    AppLang.zh: '存在则复用，不存在则新建'
+  },
+  'svc.storage.localstackManaged': {
+    AppLang.en: 'Storage is managed by LocalStack',
+    AppLang.zh: '存储由 LocalStack 管理'
+  },
   'svc.heap': {AppLang.en: 'JVM heap', AppLang.zh: 'JVM 堆内存'},
   'svc.heapHint': {AppLang.en: 'e.g. 512m', AppLang.zh: '如 512m'},
   'svc.servicesOpt': {AppLang.en: 'LocalStack services', AppLang.zh: 'LocalStack 服务清单'},
@@ -246,12 +269,12 @@ const Map<String, Map<AppLang, String>> _strings = {
     AppLang.zh: '端口已被其他服务占用'
   },
   'svc.pathRequired': {
-    AppLang.en: 'Custom storage needs a data path',
-    AppLang.zh: '自定义存储需要数据路径'
+    AppLang.en: 'Persisted storage needs a data path',
+    AppLang.zh: '持久化存储需要数据路径'
   },
   'svc.volumeRequired': {
-    AppLang.en: 'Custom storage needs a volume name',
-    AppLang.zh: '自定义存储需要卷名'
+    AppLang.en: 'Persisted storage needs a volume name',
+    AppLang.zh: '持久化存储需要卷名'
   },
   'svc.saved': {AppLang.en: 'Service saved', AppLang.zh: '服务已保存'},
   'svc.saveFailed': {AppLang.en: 'Save failed', AppLang.zh: '保存失败'},
@@ -321,9 +344,9 @@ const Map<String, Map<AppLang, String>> _strings = {
   'svc.healthy': {AppLang.en: 'Healthy', AppLang.zh: '健康'},
   'svc.unhealthy': {AppLang.en: 'Unhealthy', AppLang.zh: '不健康'},
   'svc.neverStarted': {AppLang.en: 'Never started', AppLang.zh: '从未启动'},
-  'svc.start': {AppLang.en: 'Start', AppLang.zh: '启动'},
-  'svc.stop': {AppLang.en: 'Stop', AppLang.zh: '停止'},
-  'svc.restart': {AppLang.en: 'Restart', AppLang.zh: '重启'},
+  'svc.restarts': {AppLang.en: 'Restarts', AppLang.zh: '重启次数'},
+  'svc.latency': {AppLang.en: 'Latency', AppLang.zh: '延迟'},
+  'svc.status': {AppLang.en: 'Status', AppLang.zh: '状态'},
   'svc.lastError': {AppLang.en: 'Last error', AppLang.zh: '最近错误'},
   'svc.monitorEmpty': {
     AppLang.en: 'No metrics yet — samples appear while the Service is running',
