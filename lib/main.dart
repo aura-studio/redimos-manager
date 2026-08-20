@@ -26,6 +26,11 @@ import 'src/ui_theme.dart';
 import 'src/ui_tokens.dart';
 
 void main() {
+  // A second launch hands off to the running instance instead of erroring:
+  // the core tells the holder to come to the front and this process exits
+  // before any window is created. The dylib stays loaded in-process, so the
+  // later NativeCore() re-open reuses the same (already locked) handle.
+  if (NativeCore.preflightInstanceHandoff()) exit(0);
   loadAppLang();
   loadAppStyle();
   runApp(const RedimosManagerApp());

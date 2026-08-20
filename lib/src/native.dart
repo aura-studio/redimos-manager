@@ -107,6 +107,29 @@ class NativeCore {
     return 'redimos_core.so';
   }
 
+  /// Pre-runApp single-instance handoff probe. Runs before runApp from
+  /// main(): loading the core acquires the single-instance lock, and when it
+  /// is already held the core asks the running manager to come to the front
+  /// and reports `lockError: "handoff: ..."`. Returns true only in that case
+  /// — the caller must exit(0) before any window is created. Any other
+  /// outcome (no lock, other errors, dylib missing) returns false so the
+  /// normal boot / error screens behave exactly as before.
+  static bool preflightInstanceHandoff() {
+    try {
+      final lib = DynamicLibrary.open(_resolveLibraryPath());
+      final load = lib.lookupFunction<_StrNativeFn, _StrDartFn>('rm_load');
+      final free = lib.lookupFunction<_FreeNativeFn, _FreeDartFn>('rm_free');
+      final p = load();
+      final s = p.toDartString();
+      free(p);
+      final j = jsonDecode(s);
+      final lockError = j is Map ? j['lockError']?.toString() : null;
+      return lockError != null && lockError.startsWith('handoff:');
+    } catch (_) {
+      return false;
+    }
+  }
+
   // ---- raw call helpers ----
   String _call0(_StrDartFn fn) {
     final p = fn();
