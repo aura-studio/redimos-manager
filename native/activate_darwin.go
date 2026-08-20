@@ -9,17 +9,16 @@ package main
 #include <dispatch/dispatch.h>
 #import <AppKit/AppKit.h>
 
-// The old activation API left the SDK headers on macOS 14; declare it so the
-// fallback branch below still compiles against older deployment targets.
-@interface NSApplication (RedimosCompat)
-- (BOOL)activateWithOptions:(NSUInteger)options;
-@end
-
 // activateSelfApp brings this process's own windows to the front. It runs
 // inside the lock HOLDER (the control server is in-process), so "self" is
 // exactly the manager whose window must surface. Dispatching onto the main
 // queue is safe from the listener goroutine: AppKit calls must happen on the
 // main thread and the app's main run loop drains dispatch's main queue.
+//
+// Re-activation goes through `open` on our own bundle — the same LaunchServices
+// path a Dock/icon click uses, which targets the already-running instance and
+// is honoured even while another app is frontmost (a direct [NSApp activate]
+// from a background process is throttled on macOS 14+ and silently no-ops).
 static void activateSelfApp() {
 	dispatch_async(dispatch_get_main_queue(), ^{
 		[NSApp unhide:nil];
@@ -28,15 +27,13 @@ static void activateSelfApp() {
 				[w deminiaturize:nil];
 			}
 		}
-		if ([NSApp respondsToSelector:@selector(activate)]) {
-			[NSApp activate]; // macOS 14+
-		} else {
-			// NSApplicationActivateIgnoringOtherApps == 1 << 1
-			[NSApp activateWithOptions:(1 << 1)];
-		}
 		if ([NSApp mainWindow]) {
 			[[NSApp mainWindow] makeKeyAndOrderFront:nil];
 		}
+		NSTask *t = [[NSTask alloc] init];
+		t.launchPath = @"/usr/bin/open";
+		t.arguments = @[ [NSBundle mainBundle].bundlePath ];
+		[t launch];
 	});
 }
 */
