@@ -219,7 +219,7 @@ const Map<String, Map<AppLang, String>> _strings = {
   'svc.engineSection': {AppLang.en: 'Engine', AppLang.zh: '引擎'},
   'svc.storageSection': {AppLang.en: 'Storage', AppLang.zh: '存储'},
   'svc.name': {AppLang.en: 'Service name', AppLang.zh: '服务名称'},
-  'svc.engine': {AppLang.en: 'Engine', AppLang.zh: '引擎'},
+  'svc.engine': {AppLang.en: 'Engine type', AppLang.zh: '引擎类型'},
   'svc.engine.java': {AppLang.en: 'Java · local', AppLang.zh: 'Java · 本地'},
   'svc.engine.docker': {
     AppLang.en: 'Docker · dynamodb-local',
