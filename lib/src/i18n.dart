@@ -215,8 +215,9 @@ const Map<String, Map<AppLang, String>> _strings = {
   'service.pick': {AppLang.en: 'Pick a service', AppLang.zh: '选择一个服务'},
 
   // --- v1.2 Service Configure (CRUD form + safe delete) ---
-  'svc.identitySection': {AppLang.en: 'Identity', AppLang.zh: '身份'},
-  'svc.storageSection': {AppLang.en: 'Storage & options', AppLang.zh: '存储与选项'},
+  'svc.identitySection': {AppLang.en: 'Service', AppLang.zh: '服务'},
+  'svc.engineSection': {AppLang.en: 'Engine', AppLang.zh: '引擎'},
+  'svc.storageSection': {AppLang.en: 'Storage', AppLang.zh: '存储'},
   'svc.name': {AppLang.en: 'Service name', AppLang.zh: '服务名称'},
   'svc.engine': {AppLang.en: 'Engine', AppLang.zh: '引擎'},
   'svc.engine.java': {AppLang.en: 'Java · local', AppLang.zh: 'Java · 本地'},

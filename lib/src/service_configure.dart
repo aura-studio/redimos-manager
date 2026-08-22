@@ -456,22 +456,6 @@ class ServiceConfigEditorState extends State<ServiceConfigEditor> {
               _field(t, _name, tr('svc.name'),
                   key: const ValueKey('service-config-name'),
                   error: _nameError),
-              _selectField<ServiceEngine>(
-                t,
-                tr('svc.engine'),
-                key: const ValueKey('service-config-engine'),
-                value: _engine,
-                enabled: !_locked,
-                items: [
-                  (ServiceEngine.java, tr('svc.engine.java')),
-                  (ServiceEngine.dockerDynamodb, tr('svc.engine.docker')),
-                  (ServiceEngine.localStack, tr('svc.engine.localstack')),
-                ],
-                onChanged: (v) => setState(() {
-                  _engine = v ?? ServiceEngine.java;
-                  _prefillVolume();
-                }),
-              ),
               _field(t, _port, tr('svc.port'),
                   key: const ValueKey('service-config-port'),
                   number: true,
@@ -489,7 +473,35 @@ class ServiceConfigEditorState extends State<ServiceConfigEditor> {
                   ),
                 ),
             ]),
-            _section(t, '2', tr('svc.storageSection'), [
+            _section(t, '2', tr('svc.engineSection'), [
+              _selectField<ServiceEngine>(
+                t,
+                tr('svc.engine'),
+                key: const ValueKey('service-config-engine'),
+                value: _engine,
+                enabled: !_locked,
+                items: [
+                  (ServiceEngine.java, tr('svc.engine.java')),
+                  (ServiceEngine.dockerDynamodb, tr('svc.engine.docker')),
+                  (ServiceEngine.localStack, tr('svc.engine.localstack')),
+                ],
+                onChanged: (v) => setState(() {
+                  _engine = v ?? ServiceEngine.java;
+                  _prefillVolume();
+                }),
+              ),
+              // Engine-conditional options: JVM heap for the Java engine, the
+              // SERVICES list for LocalStack. Docker DynamoDB Local has none.
+              if (_engine == ServiceEngine.java)
+                _field(t, _heap, tr('svc.heap'),
+                    key: const ValueKey('service-config-heap'),
+                    placeholder: tr('svc.heapHint')),
+              if (_engine == ServiceEngine.localStack)
+                _field(t, _servicesOpt, tr('svc.servicesOpt'),
+                    key: const ValueKey('service-config-services'),
+                    placeholder: tr('svc.servicesOptHint')),
+            ]),
+            _section(t, '3', tr('svc.storageSection'), [
               if (_engine == ServiceEngine.localStack)
                 // LocalStack owns its storage; the UI only explains it (2.4).
                 Padding(
@@ -538,16 +550,6 @@ class ServiceConfigEditorState extends State<ServiceConfigEditor> {
                           placeholder: tr('svc.storage.volumeHint'),
                           error: _storageError),
               ],
-              // Engine-conditional options: JVM heap for the Java engine, the
-              // SERVICES list for LocalStack. Docker DynamoDB Local has none.
-              if (_engine == ServiceEngine.java)
-                _field(t, _heap, tr('svc.heap'),
-                    key: const ValueKey('service-config-heap'),
-                    placeholder: tr('svc.heapHint')),
-              if (_engine == ServiceEngine.localStack)
-                _field(t, _servicesOpt, tr('svc.servicesOpt'),
-                    key: const ValueKey('service-config-services'),
-                    placeholder: tr('svc.servicesOptHint')),
             ]),
             if (_formError != null)
               Padding(
