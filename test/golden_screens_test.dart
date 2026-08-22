@@ -162,41 +162,29 @@ void main() {
         find.byType(MaterialApp), matchesGoldenFile('goldens/inst-config-${dark ? 'dark' : 'light'}.png'));
   });
 
-  screen('ep-overview', (t, dark) async {
+  screen('ep-config', (t, dark) async {
     await _pumpScreen(t,
         dark: dark,
-        child: EndpointOverviewPane(
-          core: _core,
+        child: EndpointConfigPane(
           endpoint: _endpoint,
-          config: _cfg(),
-          onEdit: () {},
+          onSave: (_) async {},
+          onDelete: () async {},
         ));
-    // Zero-duration pumps only: the probe measures DateTime.now() around
-    // epListTables, so advancing the fake clock before it completes would
-    // paint a machine-dependent "N ms" and flake the golden. Microtasks still
-    // run, so the probe finishes at fake-time 0 → a stable "0 ms".
     await t.pump();
     await t.pump();
     await expectLater(
-        find.byType(MaterialApp), matchesGoldenFile('goldens/ep-overview-${dark ? 'dark' : 'light'}.png'));
+        find.byType(MaterialApp), matchesGoldenFile('goldens/ep-config-${dark ? 'dark' : 'light'}.png'));
   });
 
   screen('ep-browser', (t, dark) async {
     await _pumpScreen(t,
         dark: dark,
-        child: EndpointBrowserView(
+        child: EndpointTablesView(
           core: _core,
           config: _endpoint.toStorageConfig(),
           endpoint: _endpoint,
         ));
     await t.pump(const Duration(milliseconds: 50)); // epListTables resolves
-    // Select a table in the sidebar so the Explorer pane renders the flat
-    // item table. Note the pump order: the first pump inflates TablePageView
-    // (its _loadMeta schedules a 16ms delay DURING the frame), the second
-    // advances the clock far enough for both _loadMeta's and _run's delays.
-    await t.tap(find.text('users').first);
-    await t.pump();
-    await t.pump(const Duration(milliseconds: 50));
     await t.pump();
     await expectLater(
         find.byType(MaterialApp), matchesGoldenFile('goldens/ep-browser-${dark ? 'dark' : 'light'}.png'));

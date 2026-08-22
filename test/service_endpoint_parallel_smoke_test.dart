@@ -290,6 +290,12 @@ Future<void> _pump(WidgetTester tester, _ParallelCore core) async {
   await tester.pump(); // rebuild
   await tester.pump(const Duration(milliseconds: 1)); // fire zero-timers
   await tester.pump();
+  // Flush the endpoint Table screen's deferred metadata/scan loads (16ms
+  // delays) so no timer outlives the widget tree.
+  await tester.pump(const Duration(milliseconds: 50));
+  await tester.pump(const Duration(milliseconds: 16));
+  await tester.pump(const Duration(milliseconds: 16));
+  await tester.pump();
 }
 
 Future<void> _tap(WidgetTester tester, String key) async {
@@ -357,9 +363,14 @@ void main() {
     // 4. NO TAB FLAP: the endpoint page stays a fixed client-screen set while its
     //    URL's engine is live.
     await _tap(tester, 'pick-ep-ep-1');
+    // The kind switch remounts the endpoint detail; flush its deferred loads.
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.pump(const Duration(milliseconds: 16));
+    await tester.pump(const Duration(milliseconds: 16));
     expect(harness.kind, EntityKind.endpoint);
     expect(find.byKey(const ValueKey('endpoint-detail-ep-1')), findsOneWidget);
-    expect(find.byKey(const ValueKey('ep-overview-ep-1')), findsOneWidget);
+    expect(find.byKey(const ValueKey('ep-tables-ep-1'), skipOffstage: false),
+        findsOneWidget);
     expect(find.byKey(const ValueKey('ep-ddbmon-ep-1'), skipOffstage: false),
         findsNothing);
     expect(find.byKey(const ValueKey('ep-ddblog-ep-1'), skipOffstage: false),

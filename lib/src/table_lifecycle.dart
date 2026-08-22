@@ -1,6 +1,6 @@
 // Shared table-lifecycle operations (Purge items / Recreate / Provision /
 // Delete table) with their friction-ladder confirm dialogs, hosted by the
-// endpoint Browser's Tables sidebar (EndpointBrowserView) — the single surface
+// endpoint's Endpoint tab (EndpointTablesView) — the single surface
 // for table lifecycle since the instance's storage tabs were trimmed
 // (2026-08-05).
 //

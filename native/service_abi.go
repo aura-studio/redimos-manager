@@ -31,6 +31,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -113,17 +114,21 @@ type serviceMetricsInfo struct {
 // serviceRuntimeInfo is the transient half of a Service: rebuilt by
 // reconcile/probes, never persisted.
 type serviceRuntimeInfo struct {
-	State       string              `json:"state"`
-	PID         int                 `json:"pid,omitempty"`
-	ContainerID string              `json:"containerId,omitempty"`
-	StartedAt   string              `json:"startedAt,omitempty"`
-	Ready       bool                `json:"ready"`
-	Healthy     bool                `json:"healthy"`
-	Restarts    int                 `json:"restarts"`
-	LatencyMs   *float64            `json:"latencyMs"` // null until a probe succeeds
-	ErrorCode   string              `json:"errorCode,omitempty"`
-	Error       string              `json:"error,omitempty"`
-	Metrics     *serviceMetricsInfo `json:"metrics,omitempty"`
+	State       string `json:"state"`
+	PID         int    `json:"pid,omitempty"`
+	ContainerID string `json:"containerId,omitempty"`
+	StartedAt   string `json:"startedAt,omitempty"`
+	Ready       bool   `json:"ready"`
+	Healthy     bool   `json:"healthy"`
+	Restarts    int    `json:"restarts"`
+	// ErrorCount is the number of ERROR-severity lines currently held in the
+	// log buffer — the same rule as the Logs screen's ERROR chip, so the two
+	// always agree. -1 while no runtime exists.
+	ErrorCount int64               `json:"errorCount"`
+	LatencyMs  *float64            `json:"latencyMs"` // null until a probe succeeds
+	ErrorCode  string              `json:"errorCode,omitempty"`
+	Error      string              `json:"error,omitempty"`
+	Metrics    *serviceMetricsInfo `json:"metrics,omitempty"`
 }
 
 // serviceInfo is the full list/detail payload: config + runtime.
@@ -135,7 +140,7 @@ type serviceInfo struct {
 // serviceInfoFor assembles one Service's wire shape. The runtime half is a
 // best-effort snapshot: a Service with no runtime yet reports stopped.
 func (m *manager) serviceInfoFor(sc ServiceConfig) serviceInfo {
-	info := serviceInfo{Config: sc, Runtime: serviceRuntimeInfo{State: "stopped"}}
+	info := serviceInfo{Config: sc, Runtime: serviceRuntimeInfo{State: "stopped", ErrorCount: -1}}
 	rt, ok := m.svcRuntime(sc.ID)
 	if !ok {
 		return info
@@ -166,6 +171,9 @@ func (m *manager) serviceInfoFor(sc ServiceConfig) serviceInfo {
 	info.Runtime.Ready = st == "running" && in.ddbProbeOK
 	info.Runtime.Healthy = st == "running"
 	info.Runtime.Restarts = in.restarts
+	// Counted under in.mu (held for the whole snapshot): the Monitor tile and
+	// the Logs screen's ERROR chip share this exact rule.
+	info.Runtime.ErrorCount = countErrorLines(in.logs)
 	if in.ddbProbeOK {
 		lat := in.ddbLatencyMs
 		info.Runtime.LatencyMs = &lat
@@ -178,6 +186,24 @@ func (m *manager) serviceInfoFor(sc ServiceConfig) serviceInfo {
 		}
 	}
 	return info
+}
+
+// svcLogLevelRe mirrors logs_page.dart's _levelRe: the first word-bounded
+// severity token on a line decides its bucket.
+var svcLogLevelRe = regexp.MustCompile(`(?i)\b(error|err|warn|warning|info|debug|trace|fatal)\b`)
+
+// countErrorLines counts lines whose first severity token lands in the error
+// bucket (error/err/fatal) — identical to Dart's parseLogLevel, so the Monitor
+// "errors" tile always equals the Logs screen's ERROR chip count.
+func countErrorLines(logs []string) int64 {
+	var n int64
+	for _, line := range logs {
+		switch strings.ToLower(svcLogLevelRe.FindString(line)) {
+		case "error", "err", "fatal":
+			n++
+		}
+	}
+	return n
 }
 
 // serviceInfos lists every Service in stable display order (design: the list

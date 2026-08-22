@@ -97,7 +97,7 @@ const _instanceTabs = [
   'Configure',
 ];
 
-const _endpointTabs = ['Overview', 'Browser', 'PartiQL', 'Playground'];
+const _endpointTabs = ['Configure', 'Endpoint', 'Table'];
 
 List<String> _localizedTabs(EntityKind kind) => kind == EntityKind.instance
     ? [
@@ -109,10 +109,9 @@ List<String> _localizedTabs(EntityKind kind) => kind == EntityKind.instance
         tr('tab.configure'),
       ]
     : [
-        tr('tab.overview'),
-        tr('tab.browser'),
-        tr('tab.partiql'),
-        tr('tab.playground'),
+        tr('tab.configure'),
+        tr('tab.endpoint'),
+        tr('tab.table'),
       ];
 
 final _screens = <_ScreenCase>[
@@ -179,23 +178,22 @@ final _screens = <_ScreenCase>[
     ],
   ),
   _ScreenCase(
-    name: 'endpoint overview',
-    pump: fx.pumpEpOverview,
+    name: 'endpoint config',
+    pump: fx.pumpEpConfig,
     kind: EntityKind.endpoint,
     tabLabels: _endpointTabs,
     tabIndex: 0,
-    anchors: () => [find.byKey(const ValueKey('endpoint-overview-scroll'))],
+    anchors: () => [find.byKey(const ValueKey('ep-config-scroll'))],
   ),
   _ScreenCase(
-    name: 'endpoint browser',
+    name: 'endpoint tables',
     pump: fx.pumpEpBrowser,
     kind: EntityKind.endpoint,
     tabLabels: _endpointTabs,
     tabIndex: 1,
     anchors: () => [
-      find.byKey(const ValueKey('endpoint-browser-sidebar-header')),
-      find.byKey(const ValueKey('endpoint-browser-sidebar-footer')),
-      find.byKey(const ValueKey('table-page-state')),
+      find.byKey(const ValueKey('endpoint-tables-header')),
+      find.byKey(const ValueKey('endpoint-tables-footer')),
     ],
   ),
 ];

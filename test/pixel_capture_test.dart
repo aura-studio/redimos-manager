@@ -213,10 +213,9 @@ List<String> get _instTabLabels => [
     ];
 
 List<String> get _epTabLabels => [
-      tr('tab.overview'),
-      tr('tab.browser'),
-      tr('tab.partiql'),
-      tr('tab.playground'),
+      tr('tab.configure'),
+      tr('tab.endpoint'),
+      tr('tab.table'),
     ];
 
 /// v1.2: mirrors HomePage._serviceTabKeys — the Service detail's three
@@ -379,12 +378,12 @@ void main() {
     );
 
     testWidgets(
-      'capture ep-overview $theme',
+      'capture ep-config $theme',
       (t) => _capture(
         t,
-        'ep-overview',
+        'ep-config',
         dark,
-        fx.pumpEpOverview,
+        fx.pumpEpConfig,
         chrome: _captureChrome(
           dark: dark,
           kind: EntityKind.endpoint,

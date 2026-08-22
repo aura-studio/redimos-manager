@@ -1,16 +1,16 @@
 // The right pane when an Endpoint (a DynamoDB backend, deduped across the
-// instances that share it) is selected in the sidebar. Endpoints have no proxy,
-// so instead of the instance's proxy-oriented tabs they get the storage views
-// bound directly to the backend: Browser (the v1.2 R7 merge — a Tables sidebar
-// + item Explorer in one two-pane view), PartiQL, and a DynamoDB Playground.
-// On an AWS endpoint every view is read-only (the native layer re-guards writes
+// instances that share it) is selected in the sidebar. Three screens, v1
+// convention restored: Configure leads (a two-mode identity editor — local
+// Endpoint URL vs online AWS credentials), then the storage views split the
+// way v1 had them: the Endpoint page (every table on the backend) and the
+// Table page (item browser/editor for the selected table). On an AWS
+// endpoint the Table view is read-only (the native layer re-guards writes
 // regardless).
 //
 // Stage 15 (requirements 3.1–3.4): an endpoint is CLIENT-side storage access
 // only. Even when its URL points at a Service's port, the engine's process
-// state, metrics, and logs live on the Service entity — nothing here infers a
-// binding from host/port text, and the tab set is fixed (Configure leads, per
-// the restored v1 convention, then Overview / Browser / PartiQL / Playground).
+// state, metrics, and logs live on the Service entity — nothing here infers
+// a binding from host/port text.
 
 import 'package:flutter/material.dart';
 
@@ -18,11 +18,9 @@ import 'endpoint_browser.dart';
 import 'i18n.dart';
 import 'models.dart';
 import 'native.dart';
-import 'partiql_page.dart';
-import 'playground_page.dart';
+import 'table_page.dart';
 import 'ui_fields.dart';
 import 'ui_primitives.dart';
-import 'ui_status.dart';
 import 'ui_surfaces.dart';
 import 'ui_tokens.dart';
 
@@ -32,22 +30,26 @@ class EndpointDetailView extends StatefulWidget {
   // v2.3: the active screen index, driven by the HomePage-level MidBar tabs
   // (the per-view TabBar was lifted up so instance and endpoint chrome match).
   final int screenIndex;
-  // R4.3: endpoint Edit entry (Overview header button), owned by HomePage.
-  final VoidCallback? onEdit;
   // v1 configure-first: persists an edited identity tuple. Owned by HomePage,
   // which syncs every bound instance config via saveConfig (the endpoint is a
   // dedup view of those tuples, so the write goes through them).
   final Future<void> Function(DdbEndpoint saved)? onSaveEndpoint;
-  // T12: HomePage's MidBar "＋ Item" CTA bridge into the Browser screen.
-  final GlobalKey? browserKey;
+  // Deletes every instance config bound to this endpoint's tuple (the core
+  // stops each running instance first). Owned by HomePage.
+  final Future<void> Function()? onDeleteEndpoint;
+  // The Endpoint page's row tap bridges into the Table page: HomePage owns
+  // both the screen index and the selected-table state (v1 _browseTable).
+  final String? selectedTable;
+  final void Function(String table)? onOpenTable;
   const EndpointDetailView(
       {super.key,
       required this.core,
       required this.endpoint,
       this.screenIndex = 0,
-      this.onEdit,
       this.onSaveEndpoint,
-      this.browserKey});
+      this.onDeleteEndpoint,
+      this.selectedTable,
+      this.onOpenTable});
 
   @override
   State<EndpointDetailView> createState() => _EndpointDetailViewState();
@@ -56,8 +58,8 @@ class EndpointDetailView extends StatefulWidget {
 class _EndpointDetailViewState extends State<EndpointDetailView> {
   DdbEndpoint get e => widget.endpoint;
 
-  // Screen list (Configure / Overview / Browser / PartiQL / Playground), one
-  // per MidBar tab. Index-matched with HomePage._epTabLabels.
+  // Screen list (Configure / Endpoint / Table), one per MidBar tab.
+  // Index-matched with HomePage._epTabLabels.
   List<Widget> get _screens {
     final cfg = e.toStorageConfig();
     return [
@@ -66,34 +68,23 @@ class _EndpointDetailViewState extends State<EndpointDetailView> {
         key: ValueKey('ep-config-${e.id}'),
         endpoint: e,
         onSave: widget.onSaveEndpoint,
+        onDelete: widget.onDeleteEndpoint,
       ),
-      // Overview — backend metadata + a live reachability probe.
-      EndpointOverviewPane(
-        key: ValueKey('ep-overview-${e.id}'),
-        core: widget.core,
-        endpoint: e,
-        config: cfg,
-        onEdit: widget.onEdit,
-      ),
-      // Browser — the Tables list + item Explorer in one two-pane view.
-      EndpointBrowserView(
-        key: widget.browserKey ?? ValueKey('ep-browser-${e.id}'),
+      // Endpoint — every table on this backend (v1 EndpointPageView shape).
+      EndpointTablesView(
+        key: ValueKey('ep-tables-${e.id}'),
         core: widget.core,
         config: cfg,
         endpoint: e,
+        onOpenTable: widget.onOpenTable,
       ),
-      // PartiQL — statement editor bound to the endpoint
-      PartiqlPageView(
-        key: ValueKey('ep-partiql-${e.id}'),
+      // Table — the item browser/editor for the selected table.
+      TablePageView(
+        key: ValueKey('ep-table-${e.id}'),
         core: widget.core,
         config: cfg,
-      ),
-      // Playground — JS/Go against the endpoint's DynamoDB
-      PlaygroundView(
-        key: ValueKey('ep-playground-${e.id}'),
-        core: widget.core,
-        config: cfg,
-        kind: 'ddb',
+        tableOverride: widget.selectedTable,
+        allowOverrideWrites: e.kind != 'aws',
       ),
     ];
   }
@@ -119,369 +110,36 @@ class _EndpointDetailViewState extends State<EndpointDetailView> {
   }
 }
 
-// The endpoint Overview: backend metadata + a live reachability probe. An
-// endpoint is storage access, not a process (3.3): even a URL that points at
-// a Service's port shows this same client-side view — the engine's state,
-// metrics, and logs live on the Service entity.
-class EndpointOverviewPane extends StatefulWidget {
-  final NativeCore core;
-  final DdbEndpoint endpoint;
-  final RedimosConfig config;
-  // R4.3/R4.4: opens the endpoint Edit dialog (owned by HomePage, which knows
-  // how to persist the change via saveConfig and sync sibling instances).
-  final VoidCallback? onEdit;
-  const EndpointOverviewPane(
-      {super.key,
-      required this.core,
-      required this.endpoint,
-      required this.config,
-      this.onEdit});
-
-  @override
-  State<EndpointOverviewPane> createState() => _EndpointOverviewPaneState();
-}
-
-class _EndpointOverviewPaneState extends State<EndpointOverviewPane>
-    with AutomaticKeepAliveClientMixin {
-  bool _probing = true;
-  bool _reachable = false;
-  int? _tableCount;
-  int? _latencyMs;
-  String? _error;
-
-  @override
-  bool get wantKeepAlive => true;
-
-  @override
-  void initState() {
-    super.initState();
-    _probe();
-  }
-
-  Future<void> _probe() async {
-    setState(() {
-      _probing = true;
-      _error = null;
-    });
-    final start = DateTime.now();
-    final r = await widget.core.epListTables(widget.config);
-    if (!mounted) return;
-    final ms = DateTime.now().difference(start).inMilliseconds;
-    setState(() {
-      _probing = false;
-      _latencyMs = ms;
-      if (r['ok'] == true) {
-        _reachable = true;
-        _tableCount = ((r['tables'] as List?) ?? const []).length;
-        _error = null;
-      } else {
-        _reachable = false;
-        _tableCount = null;
-        _error = r['error']?.toString() ?? 'unreachable';
-      }
-    });
-  }
-
-  // Mirror of the native `awsModeForEndpoint`: empty endpoint (default AWS
-  // resolver) OR an amazonaws.com host. `kind == 'aws'` alone would miss an
-  // explicit AWS URL — the native endpointKind only returns 'aws' for the
-  // empty endpoint, classifying a URL as 'url' — and then the read-only note
-  // would silently disappear for that endpoint.
-  bool get _isAws {
-    final ep = widget.endpoint.endpoint.trim();
-    if (ep.isEmpty) return true;
-    final host = (Uri.tryParse(ep)?.host ?? '').toLowerCase();
-    return host == 'amazonaws.com' ||
-        host.endsWith('.amazonaws.com') ||
-        host.endsWith('.amazonaws.com.cn');
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    super.build(context);
-    final e = widget.endpoint;
-    final t = AppTokens.of(context);
-    return SingleChildScrollView(
-      key: const ValueKey('endpoint-overview-scroll'),
-      // Mockup .ov-wrap: 18px 22px padding, 14px column gap.
-      padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 18),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        // v2.3: warning/note banners pinned to the TOP of the screen.
-        if (_isAws)
-          _noteBanner(Icons.lock_outline, tr('ep.ovReadOnlyNote'), t.warning),
-        if (_isAws) const SizedBox(height: 10),
-        // An endpoint is client-side storage access; any engine process
-        // behind the URL is owned by a Service, never surfaced here (3.3).
-        // Mockup .note-banner is always the amber warning tint.
-        _noteBanner(
-            Icons.info_outline, tr('ep.ovNoProcessNote'), t.warning),
-        const SizedBox(height: 14),
-        // Backend identity card (mockup .ov-card: head band + ruled kv rows).
-        _card(
-          t,
-          key: const ValueKey('endpoint-overview-backend-card'),
-          head: Row(children: [
-            _cardTitle(t, tr('ep.ovBackend')),
-            const Spacer(),
-            if (widget.onEdit != null)
-              _cardAction(t, label: 'Edit', onTap: widget.onEdit),
-          ]),
-          rows: [
-            _kv(t, 'Name', e.name.isEmpty ? '—' : e.name),
-            _kv(t, 'Type', _backendLabel()),
-            _kv(t, tr('ep.ovEndpoint'),
-                e.endpoint.trim().isEmpty ? tr('ep.ovAwsDefault') : e.endpoint),
-            if (e.region.trim().isNotEmpty) _kv(t, tr('ep.ovRegion'), e.region),
-            if (e.accessKeyId.trim().isNotEmpty)
-              _kv(t, 'Credential', 'AK •••${_tail(e.accessKeyId)}'),
-            _kv(t, 'Tables', _tableCount == null ? '—' : '$_tableCount'),
-            _kv(t, 'Items',
-                '—'), // R5.x: item counts need a per-table scan — not polled.
-            // Mockup renders Status as a dot + label in the value cell.
-            _reachRow(t, 'Status', _reachStatusWidget(t)),
-          ],
-        ),
-        const SizedBox(height: 14),
-        // Reachability card: four rows (Status / Tables / Latency / Error) +
-        // a Recheck button in the head band.
-        _card(
-          t,
-          key: const ValueKey('endpoint-overview-reachability-card'),
-          head: Row(children: [
-            _cardTitle(t, tr('ep.ovReachability')),
-            const Spacer(),
-            _cardAction(t,
-                label: tr('ep.ovRecheck'), onTap: _probing ? null : _probe),
-          ]),
-          rows: [
-            _reachRow(t, tr('ep.ovReachability'), _reachStatusWidget(t)),
-            _reachRow(
-                t,
-                tr('ep.ovTablesCount'),
-                Text(_tableCount == null ? '—' : '$_tableCount',
-                    style: Ts.style(
-                        size: Ts.md,
-                        weight: FontWeight.w600,
-                        color: t.text,
-                        monoFont: true,
-                        tabularNums: true))),
-            _reachRow(
-                t,
-                'Latency',
-                Text(_latencyMs == null ? '—' : '$_latencyMs ms',
-                    style: Ts.style(
-                        size: Ts.md,
-                        weight: FontWeight.w600,
-                        color: t.text,
-                        monoFont: true,
-                        tabularNums: true))),
-            if (_error != null)
-              _reachRow(
-                  t,
-                  'Error',
-                  SelectableText(_error!,
-                      style: Ts.style(
-                          size: Ts.md,
-                          weight: FontWeight.w600,
-                          color: t.danger,
-                          monoFont: true,
-                          tabularNums: true))),
-          ],
-        ),
-      ]),
-    );
-  }
-
-  // Last 4 chars of an access key, so a credential is identifiable without
-  // exposing it (the AWS console shows the same tail).
-  String _tail(String s) {
-    final trimmed = s.trim();
-    return trimmed.length <= 4
-        ? trimmed
-        : trimmed.substring(trimmed.length - 4);
-  }
-
-  Widget _reachStatusWidget(AppTokens t) {
-    if (_probing) {
-      return Row(mainAxisSize: MainAxisSize.min, children: [
-        SizedBox.square(
-          dimension: 13,
-          child: CircularProgressIndicator(
-            strokeWidth: 2,
-            color: t.text3,
-          ),
-        ),
-        const SizedBox(width: 8),
-        Text(
-          tr('ep.ovChecking'),
-          style: Ts.style(
-            size: Ts.md,
-            weight: FontWeight.w600,
-            color: t.text3,
-          ),
-        ),
-      ]);
-    }
-    final label = _reachable ? tr('ep.ovReachable') : tr('ep.ovUnreachable');
-    return CodexStatusIndicator(
-      status: _reachable ? CodexStatus.success : CodexStatus.error,
-      label: label,
-      semanticLabel: label,
-    );
-  }
-
-  String _backendLabel() {
-    final e = widget.endpoint;
-    return switch (e.kind) {
-      'aws' => e.region.isEmpty ? 'AWS' : 'AWS · ${e.region}',
-      'local' => 'Local DynamoDB',
-      _ => 'DynamoDB-compatible',
-    };
-  }
-
-  Widget _noteBanner(IconData icon, String text, Color color) => Container(
-        padding: const EdgeInsets.all(11),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(8),
-          color: color.withValues(alpha: 0.08),
-          border: Border.all(color: color.withValues(alpha: 0.4)),
-        ),
-        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Icon(icon, size: 16, color: color),
-          const SizedBox(width: 8),
-          Expanded(
-            // Mockup .note-banner body weight 500.
-            child: Text(text,
-                style: const TextStyle(
-                    fontSize: 12, height: 1.35, fontWeight: FontWeight.w500)),
-          ),
-        ]),
-      );
-
-  // Mockup .kv-row: 150px recessed key column, 600 mono tabular value; the
-  // hairline rule between rows comes from the card body builder, not here.
-  Widget _kv(AppTokens t, String k, String v) => Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(
-            width: 150,
-            child: Text(k, style: Ts.style(size: Ts.md, color: t.text3)),
-          ),
-          Expanded(
-            child: SelectableText(v,
-                style: Ts.style(
-                    size: Ts.md,
-                    weight: FontWeight.w600,
-                    color: t.text,
-                    monoFont: true,
-                    tabularNums: true)),
-          ),
-        ],
-      );
-
-  // A reachability detail row (label left, live value widget right). Same
-  // 150px key column as _kv so both cards' rows align.
-  Widget _reachRow(AppTokens t, String k, Widget v) => Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          SizedBox(
-            width: 150,
-            child: Text(k, style: Ts.style(size: Ts.md, color: t.text3)),
-          ),
-          Expanded(child: v),
-        ],
-      );
-
-  Widget _card(
-    AppTokens t, {
-    Key? key,
-    required Widget head,
-    required List<Widget> rows,
-  }) =>
-      CodexSurface(
-        key: key,
-        variant: CodexSurfaceVariant.elevated,
-        padding: EdgeInsets.zero,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            ColoredBox(
-              color: t.panel2,
-              child: Padding(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                child: head,
-              ),
-            ),
-            const CodexDivider(),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 14),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  for (var i = 0; i < rows.length; i++) ...[
-                    Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 9),
-                      child: rows[i],
-                    ),
-                    if (i < rows.length - 1) const CodexDivider(),
-                  ],
-                ],
-              ),
-            ),
-          ],
-        ),
-      );
-
-  Widget _cardTitle(AppTokens t, String label) => Text(
-        label.toUpperCase(),
-        style: Ts.style(
-          size: Ts.xs,
-          letterSpacing: 0.9,
-          weight: FontWeight.w700,
-          color: t.text3,
-        ),
-      );
-
-  Widget _cardAction(
-    AppTokens t, {
-    required String label,
-    VoidCallback? onTap,
-  }) =>
-      CodexButton(
-        variant: CodexButtonVariant.secondary,
-        semanticLabel: label,
-        onPressed: onTap,
-        label: Text(
-          label,
-          style: Ts.style(
-            size: Ts.md,
-            weight: FontWeight.w500,
-            color: onTap == null ? t.text3 : t.text2,
-          ),
-        ),
-      );
-}
-
-// The endpoint Configure screen (v1 convention: Configure leads the tab row).
-// R4.3/R4.4 lifted into a pane: edit the identity tuple (name / endpoint /
-// region), then persist through HomePage's onSaveEndpoint, which syncs every
-// bound instance config via saveConfig - the endpoint itself is a dedup view
-// of those tuples, so the write goes through them.
 class EndpointConfigPane extends StatefulWidget {
   final DdbEndpoint endpoint;
   final Future<void> Function(DdbEndpoint saved)? onSave;
-  const EndpointConfigPane({super.key, required this.endpoint, this.onSave});
+  final Future<void> Function()? onDelete;
+  const EndpointConfigPane(
+      {super.key, required this.endpoint, this.onSave, this.onDelete});
 
   @override
   State<EndpointConfigPane> createState() => _EndpointConfigPaneState();
 }
+
+// The Configure pane edits the endpoint's identity tuple. Two modes behind a
+// segment control (v1.2 redesign): Endpoint mode points at a local URL; AWS
+// mode carries Region/AccessKeyId/SecretKey/SessionToken. Saving one mode
+// blanks the other half of the tuple so the bound instance configs flip
+// cleanly between a local backend and real AWS.
+enum _EpMode { endpoint, aws }
+
+_EpMode _modeFor(DdbEndpoint e) =>
+    e.kind == 'aws' || e.accessKeyId.isNotEmpty ? _EpMode.aws : _EpMode.endpoint;
 
 class _EndpointConfigPaneState extends State<EndpointConfigPane>
     with AutomaticKeepAliveClientMixin {
   late final TextEditingController _name;
   late final TextEditingController _endpoint;
   late final TextEditingController _region;
+  late final TextEditingController _ak;
+  late final TextEditingController _sk;
+  late final TextEditingController _token;
+  late _EpMode _mode;
   bool _busy = false;
 
   @override
@@ -490,9 +148,14 @@ class _EndpointConfigPaneState extends State<EndpointConfigPane>
   @override
   void initState() {
     super.initState();
-    _name = TextEditingController(text: widget.endpoint.name);
-    _endpoint = TextEditingController(text: widget.endpoint.endpoint);
-    _region = TextEditingController(text: widget.endpoint.region);
+    final e = widget.endpoint;
+    _name = TextEditingController(text: e.name);
+    _endpoint = TextEditingController(text: e.endpoint);
+    _region = TextEditingController(text: e.region);
+    _ak = TextEditingController(text: e.accessKeyId);
+    _sk = TextEditingController(text: e.secretKey);
+    _token = TextEditingController(text: e.sessionToken);
+    _mode = _modeFor(e);
   }
 
   @override
@@ -508,6 +171,10 @@ class _EndpointConfigPaneState extends State<EndpointConfigPane>
     _name.text = e.name;
     _endpoint.text = e.endpoint;
     _region.text = e.region;
+    _ak.text = e.accessKeyId;
+    _sk.text = e.secretKey;
+    _token.text = e.sessionToken;
+    _mode = _modeFor(e);
   }
 
   @override
@@ -515,26 +182,78 @@ class _EndpointConfigPaneState extends State<EndpointConfigPane>
     _name.dispose();
     _endpoint.dispose();
     _region.dispose();
+    _ak.dispose();
+    _sk.dispose();
+    _token.dispose();
     super.dispose();
   }
 
   Future<void> _save() async {
     final e = widget.endpoint;
+    final isAws = _mode == _EpMode.aws;
     final saved = DdbEndpoint(
       id: e.id,
       name: _name.text.trim(),
-      kind: e.kind,
-      endpoint: _endpoint.text.trim(),
+      // Endpoint mode must shed a stale 'aws' kind or the Table view stays
+      // read-only against the now-local backend.
+      kind: isAws ? 'aws' : (e.kind == 'aws' ? 'url' : e.kind),
+      endpoint: isAws ? '' : _endpoint.text.trim(),
       partitionID: e.partitionID,
-      region: _region.text.trim(),
-      accessKeyId: e.accessKeyId,
-      secretKey: e.secretKey,
-      sessionToken: e.sessionToken,
+      region: isAws ? _region.text.trim() : '',
+      accessKeyId: isAws ? _ak.text.trim() : '',
+      secretKey: isAws ? _sk.text.trim() : '',
+      sessionToken: isAws ? _token.text.trim() : '',
       source: e.source,
     );
     setState(() => _busy = true);
     try {
       await widget.onSave?.call(saved);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  // Single destructive confirmation, then HomePage deletes every bound
+  // instance config (the endpoint itself is a dedup view and vanishes with
+  // them). No data-cleanup tier — instance configs own no managed data.
+  Future<void> _confirmDelete() async {
+    final e = widget.endpoint;
+    final proceed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        key: const ValueKey('ep-delete-dialog'),
+        title: Text(tr('ep.deleteTitle')),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('${tr('ep.cfgName')}: ${e.name}'),
+            Text('${tr('ep.ovEndpoint')}: ${e.endpoint}'),
+            const SizedBox(height: 12),
+            Text(tr('ep.deleteBody')),
+          ],
+        ),
+        actions: [
+          CodexButton(
+            variant: CodexButtonVariant.secondary,
+            semanticLabel: tr('home.cancel'),
+            onPressed: () => Navigator.pop(ctx, false),
+            label: Text(tr('home.cancel')),
+          ),
+          CodexButton(
+            key: const ValueKey('ep-delete-confirm'),
+            variant: CodexButtonVariant.danger,
+            semanticLabel: tr('home.delete'),
+            onPressed: () => Navigator.pop(ctx, true),
+            label: Text(tr('home.delete')),
+          ),
+        ],
+      ),
+    );
+    if (proceed != true || !mounted) return;
+    setState(() => _busy = true);
+    try {
+      await widget.onDelete?.call();
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -552,14 +271,25 @@ class _EndpointConfigPaneState extends State<EndpointConfigPane>
           child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                _section(t, tr('ep.cfgSection'), [
+                _section(t, '1', tr('ep.cfgSection'), [
                   _field(t, _name, tr('ep.cfgName'),
                       key: const ValueKey('ep-config-name')),
-                  _field(t, _endpoint, tr('ep.ovEndpoint'),
-                      key: const ValueKey('ep-config-endpoint')),
-                  _field(t, _region, tr('ep.ovRegion'),
-                      key: const ValueKey('ep-config-region')),
                 ]),
+                _section(t, '2', tr('ep.connSection'), [
+                  if (_mode == _EpMode.endpoint)
+                    _field(t, _endpoint, tr('ep.ovEndpoint'),
+                        key: const ValueKey('ep-config-endpoint')),
+                  if (_mode == _EpMode.aws) ...[
+                    _field(t, _region, tr('ep.ovRegion'),
+                        key: const ValueKey('ep-config-region')),
+                    _field(t, _ak, tr('home.accessKeyId'),
+                        key: const ValueKey('ep-config-ak')),
+                    _field(t, _sk, tr('home.secretAccessKey'),
+                        key: const ValueKey('ep-config-sk')),
+                    _field(t, _token, tr('home.sessionToken'),
+                        key: const ValueKey('ep-config-token')),
+                  ],
+                ], lead: _modeSeg()),
                 Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   Icon(Icons.info_outline, size: 14, color: t.text3),
                   const SizedBox(width: 8),
@@ -579,13 +309,38 @@ class _EndpointConfigPaneState extends State<EndpointConfigPane>
     ]);
   }
 
-  // Same house grammar as ServiceConfigEditor: numbered-less section card
-  // (head band + ruled body), fields stacked single-column.
-  Widget _section(AppTokens t, String title, List<Widget> fields) {
+  // Local-URL vs online-AWS switch; the save button commits whichever mode
+  // is showing and blanks the other half of the tuple.
+  Widget _modeSeg() {
+    return Align(
+      key: const ValueKey('ep-config-mode'),
+      alignment: Alignment.centerLeft,
+      child: SegmentedButton<_EpMode>(
+        style: const ButtonStyle(visualDensity: VisualDensity.compact),
+        segments: [
+          ButtonSegment(
+              value: _EpMode.endpoint,
+              label: Text(tr('ep.modeEndpoint')),
+              icon: const Icon(Icons.link, size: 14)),
+          ButtonSegment(
+              value: _EpMode.aws,
+              label: Text(tr('ep.modeAws')),
+              icon: const Icon(Icons.cloud_outlined, size: 14)),
+        ],
+        selected: {_mode},
+        onSelectionChanged: (s) => setState(() => _mode = s.first),
+      ),
+    );
+  }
+
+  // Same house grammar as ServiceConfigEditor: numbered section card (badge
+  // head band + ruled body) over a two-column field grid.
+  Widget _section(AppTokens t, String n, String title, List<Widget> fields,
+      {Widget? lead}) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 16),
       child: CodexSurface(
-        key: ValueKey('ep-config-section-${title.hashCode}'),
+        key: ValueKey('ep-config-section-$n'),
         variant: CodexSurfaceVariant.elevated,
         padding: EdgeInsets.zero,
         child: Column(
@@ -596,15 +351,37 @@ class _EndpointConfigPaneState extends State<EndpointConfigPane>
               child: Padding(
                 padding:
                     const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                child: Text(
-                  title.toUpperCase(),
-                  style: Ts.style(
-                    size: Ts.md,
-                    letterSpacing: 0.9,
-                    weight: FontWeight.w700,
-                    color: t.text,
+                child: Row(children: [
+                  Container(
+                    width: 20,
+                    height: 20,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: t.accent,
+                      borderRadius: BorderRadius.circular(Dim.radiusS),
+                    ),
+                    child: Text(
+                      n,
+                      style: Ts.style(
+                        size: Ts.xs,
+                        color: t.onAccent,
+                        weight: FontWeight.w700,
+                        monoFont: true,
+                        tabularNums: true,
+                      ),
+                    ),
                   ),
-                ),
+                  const SizedBox(width: 10),
+                  Text(
+                    title.toUpperCase(),
+                    style: Ts.style(
+                      size: Ts.md,
+                      letterSpacing: 0.9,
+                      weight: FontWeight.w700,
+                      color: t.text,
+                    ),
+                  ),
+                ]),
               ),
             ),
             const CodexDivider(),
@@ -613,10 +390,8 @@ class _EndpointConfigPaneState extends State<EndpointConfigPane>
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  for (var i = 0; i < fields.length; i++) ...[
-                    fields[i],
-                    if (i < fields.length - 1) const SizedBox(height: 12),
-                  ],
+                  if (lead != null) ...[lead, const SizedBox(height: 12)],
+                  _grid(fields),
                 ],
               ),
             ),
@@ -624,6 +399,22 @@ class _EndpointConfigPaneState extends State<EndpointConfigPane>
         ),
       ),
     );
+  }
+
+  Widget _grid(List<Widget> fields) {
+    final rows = <Widget>[];
+    for (var i = 0; i < fields.length; i += 2) {
+      final left = fields[i];
+      final right = i + 1 < fields.length ? fields[i + 1] : null;
+      rows.add(Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Expanded(child: left),
+        const SizedBox(width: 16),
+        Expanded(child: right ?? const SizedBox.shrink()),
+      ]));
+      if (i + 2 < fields.length) rows.add(const SizedBox(height: 12));
+    }
+    return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch, children: rows);
   }
 
   Widget _field(AppTokens t, TextEditingController c, String label, {Key? key}) {
@@ -666,9 +457,23 @@ class _EndpointConfigPaneState extends State<EndpointConfigPane>
           key: const ValueKey('ep-config-revert'),
           variant: CodexButtonVariant.secondary,
           semanticLabel: tr('home.revert'),
-          onPressed: _busy ? null : _reseed,
+          onPressed: _busy
+              ? null
+              : () {
+                  _reseed();
+                  setState(() {});
+                },
           icon: const Icon(Icons.restore, size: 15),
           label: Text(tr('home.revert')),
+        ),
+        const SizedBox(width: 8),
+        CodexButton(
+          key: const ValueKey('ep-config-delete'),
+          variant: CodexButtonVariant.danger,
+          semanticLabel: tr('home.delete'),
+          onPressed: _busy ? null : _confirmDelete,
+          icon: const Icon(Icons.delete_outline, size: 15),
+          label: Text(tr('home.delete')),
         ),
         const SizedBox(width: 8),
         CodexButton(

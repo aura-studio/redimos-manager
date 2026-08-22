@@ -714,6 +714,7 @@ class ServiceRuntime {
   final bool ready;
   final bool healthy;
   final int restarts; // supervised restarts so far (wire: restarts)
+  final int errorCount; // ERROR lines held in the log buffer; -1 = no runtime
   final double? latencyMs; // probe RTT; null until a probe succeeds
   final String errorCode; // taxonomy code when error is set, '' otherwise
   final String error;
@@ -727,6 +728,7 @@ class ServiceRuntime {
     this.ready = false,
     this.healthy = false,
     this.restarts = 0,
+    this.errorCount = -1,
     this.latencyMs,
     this.errorCode = '',
     this.error = '',
@@ -741,6 +743,7 @@ class ServiceRuntime {
         ready: (j['ready'] ?? false) as bool,
         healthy: (j['healthy'] ?? false) as bool,
         restarts: (j['restarts'] ?? 0) as int,
+        errorCount: (j['errorCount'] ?? -1) as int,
         latencyMs: (j['latencyMs'] as num?)?.toDouble(),
         errorCode: (j['errorCode'] ?? '') as String,
         error: (j['error'] ?? '') as String,

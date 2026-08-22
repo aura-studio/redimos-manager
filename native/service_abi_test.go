@@ -27,6 +27,30 @@ func envHas(t *testing.T, env map[string]any, key string) bool {
 	return ok
 }
 
+// countErrorLines must bucket exactly like logs_page.dart's parseLogLevel:
+// the FIRST word-bounded severity token decides; error/err/fatal count, and
+// lines whose first token is another level (or none) never count — even when
+// they mention "error" later on.
+func TestCountErrorLines(t *testing.T) {
+	logs := []string{
+		"08:00:01 ERROR boom",            // error token first → counts
+		"err: connection reset",          // err → counts
+		"FATAL out of memory",            // fatal → counts
+		"08:00:02 INFO all good",         // info first → no
+		"08:00:03 WARN slow",             // warn first → no
+		"INFO recovered after error",     // first token info → no
+		"plain line without severity",    // no token → no
+		"ERRORS are not a bounded token", // no word boundary → no
+		"",                               // empty → no
+	}
+	if got := countErrorLines(logs); got != 3 {
+		t.Fatalf("countErrorLines = %d, want 3", got)
+	}
+	if got := countErrorLines(nil); got != 0 {
+		t.Fatalf("countErrorLines(nil) = %d, want 0", got)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Error-code taxonomy
 // ---------------------------------------------------------------------------

@@ -1,6 +1,6 @@
 // Stage 13.4: Service Configure CRUD widget / interaction / boundary tests.
 //
-// Covers: engine-conditional fields (path vs volume, heap vs SERVICES),
+// Covers: engine-conditional fields (path vs volume, heap option),
 // client-side validation mirroring the Core rules, Core error-code mapping
 // onto fields vs the form banner, the runtime identity lock (2.7), user-input
 // preservation across polling refreshes (13.2), revert, and the full delete
@@ -137,25 +137,23 @@ void main() {
 
     // Java: heap option + custom storage shows the PATH field.
     expect(find.byKey(const ValueKey('service-config-heap')), findsOneWidget);
-    expect(find.byKey(const ValueKey('service-config-services')), findsNothing);
     expect(find.byKey(const ValueKey('service-config-path')), findsOneWidget);
     expect(find.byKey(const ValueKey('service-config-volume')), findsNothing);
 
-    // LocalStack: SERVICES option replaces heap; LocalStack owns its storage,
-    // so the storage select disappears behind an explanation row (2.4).
+    // LocalStack: no engine option fields (SERVICES is pinned to dynamodb by
+    // the core); LocalStack owns its storage, so the storage select
+    // disappears behind an explanation row (2.4).
     await _selectIn<ServiceEngine>(tester, tr('svc.engine.localstack'));
     expect(find.byKey(const ValueKey('service-config-heap')), findsNothing);
-    expect(find.byKey(const ValueKey('service-config-services')), findsOneWidget);
     expect(find.byKey(const ValueKey('service-config-path')), findsNothing);
     expect(find.byKey(const ValueKey('service-config-volume')), findsNothing);
     expect(find.byKey(const ValueKey('service-config-storage')), findsNothing);
     expect(find.byKey(const ValueKey('service-config-localstack-storage')),
         findsOneWidget);
 
-    // Docker: neither engine option renders; volume returns for custom storage.
+    // Docker: no engine option fields; volume returns for custom storage.
     await _selectIn<ServiceEngine>(tester, tr('svc.engine.docker'));
     expect(find.byKey(const ValueKey('service-config-heap')), findsNothing);
-    expect(find.byKey(const ValueKey('service-config-services')), findsNothing);
     expect(find.byKey(const ValueKey('service-config-volume')), findsOneWidget);
     expect(find.byKey(const ValueKey('service-config-localstack-storage')),
         findsNothing);

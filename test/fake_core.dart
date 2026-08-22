@@ -48,7 +48,7 @@ class FakeNativeCore implements NativeCore {
   Future<Map<String, dynamic>> epListTables(RedimosConfig c) async => {
         'ok': true,
         'awsMode': false,
-        // v2.3 mockup (ep-browser/ep-overview): users 12.4k / sessions 3.1k /
+        // v2.3 mockup (ep tables): users 12.4k / sessions 3.1k /
         // events 892; users is keyed user# + profile.
         'tables': [
           {

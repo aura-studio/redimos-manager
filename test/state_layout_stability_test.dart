@@ -246,7 +246,7 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('Endpoint Browser sidebar anchors survive all list states',
+  testWidgets('Endpoint tables anchors survive all list states',
       (tester) async {
     tester.view.physicalSize = const Size(1280, 800);
     tester.view.devicePixelRatio = 1;
@@ -256,7 +256,7 @@ void main() {
 
     await _pump(
       tester,
-      EndpointBrowserView(
+      EndpointTablesView(
         core: core,
         config: endpoint.toStorageConfig(),
         endpoint: endpoint,
@@ -264,9 +264,9 @@ void main() {
     );
 
     List<Rect> geometry() => [
-          _rect(tester, 'endpoint-browser-sidebar-header'),
-          _stateBodyRect(tester, 'endpoint-browser-table-state'),
-          _rect(tester, 'endpoint-browser-sidebar-footer'),
+          _rect(tester, 'endpoint-tables-header'),
+          _stateBodyRect(tester, 'endpoint-tables-state'),
+          _rect(tester, 'endpoint-tables-footer'),
         ];
 
     final loading = geometry();

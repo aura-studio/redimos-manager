@@ -62,6 +62,12 @@ String serviceLatencyValue(double? latencyMs) => latencyMs == null
 String servicePortValue(ServiceConfig c) =>
     '${c.port == 0 ? serviceDefaultPort(c.engine) : c.port}';
 
+/// Errors tile value: the count of ERROR-severity lines held in the log
+/// buffer — the same rule as the Logs screen's ERROR chip; 「—」 until a
+/// runtime exists (-1).
+String serviceErrorValue(ServiceRuntime rt) =>
+    rt.errorCount < 0 ? '—' : '${rt.errorCount}';
+
 // ---------------------------------------------------------------------------
 // Monitor (requirement 7: three spark cards over seven info tiles)
 // ---------------------------------------------------------------------------
@@ -184,8 +190,9 @@ class _ServiceMonitorTabState extends State<ServiceMonitorTab> {
           ),
         ]),
         const SizedBox(height: 12),
-        // Bottom rows: seven info tiles in fixed order (7.2); the 4-column
-        // grid wraps into two rows at 1280px without overflow (7.4).
+        // Bottom rows: eight info tiles in fixed order (7.2 + the v1.2
+        // errors tile); the 4-column grid wraps into two rows at 1280px
+        // without overflow (7.4).
         tileGrid([
           InfoTile(
             key: const ValueKey('service-monitor-uptime'),
@@ -229,6 +236,12 @@ class _ServiceMonitorTabState extends State<ServiceMonitorTab> {
             label: tr('svc.engine').toUpperCase(),
             value: ddbEngineLabel(cfg.engine.wire),
             fitReference: ddbEngineLabel('docker'),
+          ),
+          InfoTile(
+            key: const ValueKey('service-monitor-errors'),
+            label: tr('svc.errorCount').toUpperCase(),
+            value: serviceErrorValue(rt),
+            valueColor: rt.errorCount > 0 ? t.danger : null,
           ),
         ]),
       ]),

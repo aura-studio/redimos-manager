@@ -84,6 +84,10 @@ class _HomePageState extends State<HomePage>
   // v2.3: active screen index on the endpoint detail's MidBar tabs (the tab
   // controller lives there no longer — the chrome is HomePage-level now).
   int _epScreenIndex = 0;
+  // The table picked on the Endpoint screen; the Table screen renders it.
+  // Lifted here (v1 _browseTable) so the row-tap bridge can flip both the
+  // selection and the screen index in one setState.
+  String? _epTableOverride;
   // Sidebar card currently under the pointer (reveals its start/stop control).
   String? _hoveredCardId;
   // Configs that were running at the last AppBar "Stop all". While non-empty and
@@ -508,17 +512,6 @@ class _HomePageState extends State<HomePage>
             () => (st as dynamic).runScript());
       }
     }
-    if (isEp && idx == 1) {
-      // Endpoint Browser → ＋ Item (T12; opens the selected table's create
-      // flow via the key bridge). No i18n key for this label. The leading
-      // plus comes from the icon — the literal must NOT repeat it (the
-      // mockup .pbtn shows a single plus; pixel-fidelity-v23 CP 9.x).
-      return chromeCta(context, Icons.add, 'Item', () {
-        final st = _epBrowserKey.currentState;
-        if (st != null && (st as dynamic).createItem() == true) return;
-        _toast('Select a table first');
-      });
-    }
     return const SizedBox(width: 8);
   }
 
@@ -527,8 +520,6 @@ class _HomePageState extends State<HomePage>
   final GlobalKey _browserKey = GlobalKey();
   // Same bridge for the instance Playground screen's Run action (T9).
   final GlobalKey _playgroundKey = GlobalKey();
-  // Same bridge for the endpoint Browser screen's ＋ Item action (T12).
-  final GlobalKey _epBrowserKey = GlobalKey();
 
   void _focusBrowserNewKey(RedimosConfig c) {
     final st = _browserKey.currentState;
@@ -551,16 +542,10 @@ class _HomePageState extends State<HomePage>
   List<String> _instanceTabLabels() =>
       [for (final k in _instanceTabKeys) tr(k)];
 
-  // Stage 15 (3.1–3.4): the endpoint screens — Configure leads (v1
-  // convention), then the four client-side tabs; no engine-derived
-  // Monitor/Logs extras.
-  static const _epTabKeys = [
-    'tab.configure',
-    'tab.overview',
-    'tab.browser',
-    'tab.partiql',
-    'tab.playground'
-  ];
+  // v1.2 redesign: the endpoint's three screens — Configure leads (two-mode
+  // identity editor), then the storage views split the way v1 had them:
+  // Endpoint (every table on the backend) and Table (item browser/editor).
+  static const _epTabKeys = ['tab.configure', 'tab.endpoint', 'tab.table'];
   List<String> _epTabLabels() => [for (final k in _epTabKeys) tr(k)];
 
   // v1.2: the Service detail's three fixed screens — Configure leads (v1
@@ -661,6 +646,7 @@ class _HomePageState extends State<HomePage>
     setState(() {
       if (id != _selEndpointId) {
         _epScreenIndex = 0; // fresh pick resets the endpoint's MidBar screen
+        _epTableOverride = null;
       }
       _selEndpointId = id;
       _entityKind = EntityKind.endpoint;
@@ -745,12 +731,45 @@ class _HomePageState extends State<HomePage>
         core: _core!,
         endpoint: e,
         screenIndex: _epScreenIndex,
-        // v1 configure-first: the Overview header's Edit button jumps to the
-        // Configure tab (index 0) instead of opening the old dialog.
-        onEdit: () => setState(() => _epScreenIndex = 0),
         onSaveEndpoint: (saved) => _persistEndpointEdit(e, saved),
-        browserKey: _epBrowserKey,
+        onDeleteEndpoint: () => _deleteEndpoint(e),
+        selectedTable: _epTableOverride,
+        // The Endpoint tab's row tap bridges into the Table tab (v1
+        // _browseTable): HomePage owns both the screen index and the table.
+        onOpenTable: (name) => setState(() {
+          _epTableOverride = name;
+          _epScreenIndex = 2;
+        }),
       );
+
+  // Endpoint deletion: the endpoint is a dedup view over instance configs, so
+  // deleting it means deleting every config bound to its tuple — the core
+  // stops each running instance first (rm_delete_config). Same binding
+  // predicate as _persistEndpointEdit.
+  Future<void> _deleteEndpoint(DdbEndpoint e) async {
+    var failed = false;
+    for (final c in List.of(_configs)) {
+      if (c.endpoint == e.endpoint &&
+          c.region == e.region &&
+          c.accessKeyId == e.accessKeyId) {
+        try {
+          if (c.id.startsWith('unsaved-')) {
+            _configs.remove(c);
+          } else {
+            _core!.deleteConfig(c.id);
+          }
+        } catch (err) {
+          // One bad config must not strand the rest; the partial result is
+          // visible after the reload and the failed one can be retried.
+          failed = true;
+          _toast('${tr('home.deleteFailed')}: $err', error: true);
+        }
+      }
+    }
+    _selEndpointId = null;
+    _reload();
+    if (!failed) _toast('${tr('home.deleted')} "${e.name}"');
+  }
 
   // T11 R4.3/R4.4, lifted into the Configure tab: persist an edited
   // endpoint tuple to every instance config bound to this endpoint (the same

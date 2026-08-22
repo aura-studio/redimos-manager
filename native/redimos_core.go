@@ -409,7 +409,8 @@ func (m *manager) sampleServices() {
 		if err != nil {
 			continue
 		}
-		_ = ad.sample(m, sc, rt.instance())
+		in := rt.instance()
+		_ = ad.sample(m, sc, in)
 	}
 }
 

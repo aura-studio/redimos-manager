@@ -112,7 +112,7 @@ void main() {
     await fx.pumpScreen(
       tester,
       dark: true,
-      child: EndpointBrowserView(
+      child: EndpointTablesView(
         core: core,
         config: firstEndpoint.toStorageConfig(),
         endpoint: firstEndpoint,
@@ -123,7 +123,7 @@ void main() {
     await fx.pumpScreen(
       tester,
       dark: true,
-      child: EndpointBrowserView(
+      child: EndpointTablesView(
         core: core,
         config: secondEndpoint.toStorageConfig(),
         endpoint: secondEndpoint,

@@ -19,7 +19,10 @@ import 'i18n.dart';
 import 'item_editor.dart';
 import 'models.dart';
 import 'native.dart';
+import 'ui_fields.dart';
+import 'ui_primitives.dart';
 import 'ui_states.dart';
+import 'ui_surfaces.dart';
 import 'ui_table.dart';
 import 'ui_tokens.dart';
 
@@ -444,12 +447,7 @@ class TablePageViewState extends State<TablePageView>
         toolbar: showHeader
             ? Padding(
                 key: const ValueKey('table-page-header'),
-                padding: EdgeInsets.fromLTRB(
-                  _flat ? 0 : 12,
-                  _flat ? 0 : 12,
-                  _flat ? 0 : 12,
-                  0,
-                ),
+                padding: const EdgeInsets.fromLTRB(22, 14, 22, 0),
                 child: _headerRow(),
               )
             : null,
@@ -468,30 +466,22 @@ class TablePageViewState extends State<TablePageView>
             ? const SizedBox.shrink()
             : SingleChildScrollView(
                 key: ValueKey('table-scroll-${widget.config.id}-$_effTable'),
-                padding: EdgeInsets.all(_flat ? 0 : 12),
+                // The same 22/18 page gutter every other v1.2 screen uses;
+                // the data surfaces sit inside elevated section cards.
+                padding: const EdgeInsets.fromLTRB(22, 18, 22, 18),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     // Flat mode: the advanced Scan/Query form is one tap away
                     // (the valuepane head's tune toggle) but never in the way —
                     // the single SCAN FILTER box covers the common case.
-                    if (!_flat || _panelOpen)
-                      Padding(
-                        padding:
-                            _flat ? const EdgeInsets.all(12) : EdgeInsets.zero,
-                        child: _queryCard(),
-                      ),
-                    if (!_flat && _pageError != null) ...[
+                    if (!_flat || _panelOpen) _queryCard(),
+                    if (_pageError != null) ...[
                       const SizedBox(height: 12),
                       _banner(),
                     ],
-                    if (_flat && _pageError != null)
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-                        child: _banner(),
-                      ),
                     if (_page != null) ...[
-                      if (!_flat) const SizedBox(height: 12),
+                      const SizedBox(height: 12),
                       _resultsCard(),
                     ],
                   ],
@@ -528,32 +518,34 @@ class TablePageViewState extends State<TablePageView>
       : widget.config;
 
   Widget _headerRow() {
-    final scheme = Theme.of(context).colorScheme;
+    final t = AppTokens.of(context);
     return Row(children: [
-      Icon(Icons.table_chart, size: 18, color: scheme.primary),
+      Icon(Icons.table_chart, size: 16, color: t.accent),
       const SizedBox(width: 8),
       Flexible(
         child: Text(_effTable,
             overflow: TextOverflow.ellipsis,
-            style:
-                const TextStyle(fontSize: 15.5, fontWeight: FontWeight.w600)),
+            style: Ts.style(
+                size: Ts.md,
+                weight: FontWeight.w700,
+                color: t.text,
+                monoFont: true)),
       ),
       // The endpoint Browser owns its selection, so no transient browse chrome
-      // shows there; on AWS the amber chip below carries the read-only message.
+      // shows there; on AWS the inline warning carries the read-only message.
       if (_awsMode) ...[
         const SizedBox(width: 10),
-        Chip(
-          visualDensity: VisualDensity.compact,
-          avatar:
-              Icon(Icons.lock_outline, size: 15, color: Colors.amber.shade700),
-          label: Text(tr('ep.awsReadOnly'),
-              style: TextStyle(color: Colors.amber.shade700)),
-        ),
+        Icon(Icons.lock_outline, size: 13, color: t.warning),
+        const SizedBox(width: 5),
+        Text(tr('ep.awsReadOnly'),
+            style: Ts.style(size: Ts.xs, color: t.warning)),
       ],
       const Spacer(),
-      OutlinedButton.icon(
+      CodexButton(
+        variant: CodexButtonVariant.secondary,
+        semanticLabel: tr('tbl.refresh'),
         onPressed: _running ? null : () => _meta == null ? _loadMeta() : _run(),
-        icon: const Icon(Icons.refresh, size: 18),
+        icon: const Icon(Icons.refresh, size: 14),
         label: Text(tr('tbl.refresh')),
       ),
     ]);
@@ -561,92 +553,117 @@ class TablePageViewState extends State<TablePageView>
 
   void _toast(String msg, {bool error = false}) {
     if (!mounted) return;
+    final t = AppTokens.of(context);
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
       content: Text(msg),
-      backgroundColor: error ? Colors.red.shade800 : null,
+      backgroundColor: error ? t.danger : null,
       duration: const Duration(seconds: 3),
     ));
   }
 
-  Card _card({required Widget child}) => Card(
-        elevation: 0,
-        color: Theme.of(context).colorScheme.surfaceContainerHigh,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        child: Padding(padding: const EdgeInsets.all(11), child: child),
-      );
-
-  Widget _queryCard() => _card(
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          InkWell(
-            onTap: () => setState(() => _panelOpen = !_panelOpen),
+  // Section-card grammar (service_configure._section / endpoint Configure):
+  // panel2 head band with an uppercase title, ruled body. The collapse toggle
+  // lives on the whole head band.
+  Widget _queryCard() {
+    final t = AppTokens.of(context);
+    return CodexSurface(
+      variant: CodexSurfaceVariant.elevated,
+      padding: EdgeInsets.zero,
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        InkWell(
+          onTap: () => setState(() => _panelOpen = !_panelOpen),
+          child: Container(
+            color: t.panel2,
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
             child: Row(children: [
               Icon(_panelOpen ? Icons.expand_more : Icons.chevron_right,
-                  size: 20),
-              const SizedBox(width: 4),
-              Text(tr('tbl.scanOrQueryItems'),
-                  style: const TextStyle(
-                      fontSize: 13.5, fontWeight: FontWeight.w600)),
+                  size: 16, color: t.text3),
+              const SizedBox(width: 8),
+              Text(tr('tbl.scanOrQueryItems').toUpperCase(),
+                  style: Ts.style(
+                      size: Ts.md,
+                      letterSpacing: 0.9,
+                      weight: FontWeight.w700,
+                      color: t.text)),
             ]),
           ),
-          if (!_panelOpen)
-            Padding(
-              padding: const EdgeInsets.only(left: 24, top: 2),
-              child: Text(tr('tbl.expandToQueryOrScan'),
-                  style: TextStyle(
-                      fontSize: 12, color: Theme.of(context).hintColor)),
-            ),
-          if (_panelOpen) ...[
-            const SizedBox(height: 10),
-            SegmentedButton<bool>(
-              segments: [
-                ButtonSegment(
-                    value: false,
-                    label: Text(tr('tbl.scan')),
-                    icon: const Icon(Icons.list, size: 16)),
-                ButtonSegment(
-                    value: true,
-                    label: Text(tr('tbl.query')),
-                    icon: const Icon(Icons.search, size: 16)),
-              ],
-              selected: {_isQuery},
-              onSelectionChanged: (s) => setState(() => _isQuery = s.first),
-            ),
-            const SizedBox(height: 9),
-            _targetDropdown(),
-            const SizedBox(height: 12),
-            _projectionRow(),
-            if (_isQuery) ...[
-              const SizedBox(height: 10),
-              _queryKeys(),
-            ],
-            const SizedBox(height: 8),
-            _filtersSection(),
-            const SizedBox(height: 10),
-            Row(children: [
-              FilledButton(
-                onPressed: _running ? null : () => _run(),
-                child: _running
-                    ? const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2))
-                    : Text(tr('tbl.run')),
-              ),
-              const SizedBox(width: 12),
-              TextButton(onPressed: _reset, child: Text(tr('tbl.reset'))),
-            ]),
-          ],
-        ]),
-      );
+        ),
+        const CodexDivider(),
+        if (!_panelOpen)
+          Padding(
+            padding: const EdgeInsets.all(14),
+            child: Text(tr('tbl.expandToQueryOrScan'),
+                style: Ts.style(size: Ts.sm, color: t.text3)),
+          )
+        else
+          Padding(
+            padding: const EdgeInsets.all(14),
+            child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: SegmentedButton<bool>(
+                      segments: [
+                        ButtonSegment(
+                            value: false,
+                            label: Text(tr('tbl.scan')),
+                            icon: const Icon(Icons.list, size: 16)),
+                        ButtonSegment(
+                            value: true,
+                            label: Text(tr('tbl.query')),
+                            icon: const Icon(Icons.search, size: 16)),
+                      ],
+                      selected: {_isQuery},
+                      onSelectionChanged: (s) =>
+                          setState(() => _isQuery = s.first),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  _targetDropdown(),
+                  const SizedBox(height: 12),
+                  _projectionRow(),
+                  if (_isQuery) ...[
+                    const SizedBox(height: 12),
+                    _queryKeys(),
+                  ],
+                  const SizedBox(height: 12),
+                  _filtersSection(),
+                  const SizedBox(height: 12),
+                  Row(children: [
+                    CodexButton(
+                      variant: CodexButtonVariant.primary,
+                      semanticLabel: tr('tbl.run'),
+                      onPressed: _running ? null : () => _run(),
+                      label: _running
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2))
+                          : Text(tr('tbl.run')),
+                    ),
+                    const SizedBox(width: 8),
+                    CodexButton(
+                      variant: CodexButtonVariant.ghost,
+                      semanticLabel: tr('tbl.reset'),
+                      onPressed: _reset,
+                      label: Text(tr('tbl.reset')),
+                    ),
+                  ]),
+                ]),
+          ),
+      ]),
+    );
+  }
 
   Widget _targetDropdown() {
     final targets = _meta!.targets;
+    final style = Ts.style(size: Ts.sm, color: AppTokens.of(context).text);
     return _labeled(
       tr('tbl.selectTableOrIndex'),
-      DropdownButtonFormField<int>(
-        initialValue: _targetIdx,
-        isDense: true,
-        decoration: _dec(),
+      CodexSelectField<int>(
+        value: _targetIdx,
+        style: style,
         items: [
           for (var i = 0; i < targets.length; i++)
             DropdownMenuItem(
@@ -665,16 +682,16 @@ class TablePageViewState extends State<TablePageView>
   }
 
   Widget _projectionRow() {
+    final t = AppTokens.of(context);
+    final style = Ts.style(size: Ts.sm, color: t.text);
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       _labeled(
         tr('tbl.selectAttributeProjection'),
-        DropdownButtonFormField<String>(
-          initialValue: _projection,
-          isDense: true,
-          decoration: _dec(),
+        CodexSelectField<String>(
+          value: _projection,
+          style: style,
           items: [
-            DropdownMenuItem(
-                value: 'all', child: Text(tr('tbl.allAttributes'))),
+            DropdownMenuItem(value: 'all', child: Text(tr('tbl.allAttributes'))),
             DropdownMenuItem(
                 value: 'specific', child: Text(tr('tbl.specificAttributes'))),
           ],
@@ -685,34 +702,51 @@ class TablePageViewState extends State<TablePageView>
         const SizedBox(height: 10),
         Row(children: [
           Expanded(
-            child: TextField(
+            child: CodexTextField(
               controller: _projectInput,
-              decoration: _dec(hint: tr('tbl.enterAttributeName')),
+              style: Ts.style(size: Ts.sm, color: t.text, monoFont: true),
+              decoration: InputDecoration(hintText: tr('tbl.enterAttributeName')),
               onSubmitted: (_) => _addProjectAttr(),
             ),
           ),
           const SizedBox(width: 8),
-          OutlinedButton(
-              onPressed: _addProjectAttr, child: Text(tr('tbl.addAttribute'))),
+          CodexButton(
+            variant: CodexButtonVariant.secondary,
+            semanticLabel: tr('tbl.addAttribute'),
+            onPressed: _addProjectAttr,
+            label: Text(tr('tbl.addAttribute')),
+          ),
         ]),
         if (_projectAttrs.isNotEmpty) ...[
           const SizedBox(height: 8),
           Wrap(
             spacing: 6,
             runSpacing: 6,
-            children: [
-              for (final a in _projectAttrs)
-                Chip(
-                  label: Text(a),
-                  onDeleted: () => setState(() => _projectAttrs.remove(a)),
-                  visualDensity: VisualDensity.compact,
-                ),
-            ],
+            children: [for (final a in _projectAttrs) _attrChip(t, a)],
           ),
         ],
       ],
     ]);
   }
+
+  // Token chip (the house grammar has no Material Chip on data surfaces):
+  // panel2 pill with a hairline border and a quiet close glyph.
+  Widget _attrChip(AppTokens t, String a) => Container(
+        decoration: BoxDecoration(
+          color: t.panel2,
+          border: Border.all(color: t.border),
+          borderRadius: BorderRadius.circular(Dim.radiusS),
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Text(a, style: Ts.style(size: Ts.sm, color: t.text2, monoFont: true)),
+          const SizedBox(width: 4),
+          InkWell(
+            onTap: () => setState(() => _projectAttrs.remove(a)),
+            child: Icon(Icons.close, size: 12, color: t.text3),
+          ),
+        ]),
+      );
 
   void _addProjectAttr() {
     final a = _projectInput.text.trim();
@@ -725,35 +759,36 @@ class TablePageViewState extends State<TablePageView>
 
   Widget _queryKeys() {
     final t = _target;
+    final tok = AppTokens.of(context);
     if (t == null) return const SizedBox.shrink();
+    final mono = Ts.style(size: Ts.sm, color: tok.text, monoFont: true);
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Text(tr('tbl.partitionKey'),
-          style: const TextStyle(fontWeight: FontWeight.w600)),
+      _labelText(tr('tbl.partitionKey')),
       const SizedBox(height: 6),
       Row(children: [
         Expanded(flex: 2, child: _readonlyAttr(t.pk.name)),
         const SizedBox(width: 12),
         Expanded(
           flex: 5,
-          child: TextField(
+          child: CodexTextField(
               controller: _pk,
-              decoration: _dec(hint: tr('tbl.enterAttributeValue'))),
+              style: mono,
+              decoration:
+                  InputDecoration(hintText: tr('tbl.enterAttributeValue'))),
         ),
       ]),
       if (t.sk != null) ...[
         const SizedBox(height: 16),
-        Text(tr('tbl.sortKey'),
-            style: const TextStyle(fontWeight: FontWeight.w600)),
+        _labelText(tr('tbl.sortKey')),
         const SizedBox(height: 6),
         Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Expanded(flex: 2, child: _readonlyAttr(t.sk!.name)),
           const SizedBox(width: 12),
           Expanded(
             flex: 2,
-            child: DropdownButtonFormField<String>(
-              initialValue: _skOp,
-              isDense: true,
-              decoration: _dec(),
+            child: CodexSelectField<String>(
+              value: _skOp,
+              style: mono,
               items: [
                 for (final c in _skConds)
                   DropdownMenuItem(value: c.$1, child: Text(tr(c.$2))),
@@ -765,13 +800,17 @@ class TablePageViewState extends State<TablePageView>
           Expanded(
             flex: 3,
             child: Column(children: [
-              TextField(
+              CodexTextField(
                   controller: _skV1,
-                  decoration: _dec(hint: tr('tbl.enterAttributeValue'))),
+                  style: mono,
+                  decoration: InputDecoration(
+                      hintText: tr('tbl.enterAttributeValue'))),
               if (_skOp == 'between') ...[
                 const SizedBox(height: 6),
-                TextField(
-                    controller: _skV2, decoration: _dec(hint: tr('tbl.and'))),
+                CodexTextField(
+                    controller: _skV2,
+                    style: mono,
+                    decoration: InputDecoration(hintText: tr('tbl.and'))),
               ],
             ]),
           ),
@@ -783,7 +822,8 @@ class TablePageViewState extends State<TablePageView>
             onChanged: (v) => setState(() => _sortDesc = v ?? false),
             visualDensity: VisualDensity.compact,
           ),
-          Text(tr('tbl.sortDescending')),
+          Text(tr('tbl.sortDescending'),
+              style: Ts.style(size: Ts.sm, color: tok.text2)),
         ]),
       ],
     ]);
@@ -797,34 +837,29 @@ class TablePageViewState extends State<TablePageView>
   static const double _fRemoveW = 104;
 
   Widget _filtersSection() {
-    final scheme = Theme.of(context).colorScheme;
-    final label = TextStyle(fontSize: 11, color: scheme.onSurfaceVariant);
+    final t = AppTokens.of(context);
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      const Divider(height: 24),
-      Text.rich(TextSpan(children: [
-        TextSpan(
-            text: tr('tbl.filters'),
-            style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
-        TextSpan(
-            text: tr('tbl.optional'),
-            style: TextStyle(
-                fontStyle: FontStyle.italic,
-                fontSize: 13,
-                color: scheme.onSurfaceVariant)),
-      ])),
+      const CodexDivider(),
+      const SizedBox(height: 12),
+      Row(children: [
+        Text(tr('tbl.filters'),
+            style: Ts.style(size: Ts.md, weight: FontWeight.w700, color: t.text)),
+        const SizedBox(width: 8),
+        Text(tr('tbl.optional'),
+            style: Ts.style(size: Ts.sm, color: t.text3)
+                .copyWith(fontStyle: FontStyle.italic)),
+      ]),
       const SizedBox(height: 10),
       if (_filters.isNotEmpty) ...[
         Row(children: [
           Expanded(
-              flex: _fFlex[0],
-              child: Text(tr('tbl.attributeName'), style: label)),
+              flex: _fFlex[0], child: _labelText(tr('tbl.attributeName'))),
           const SizedBox(width: 10),
-          Expanded(
-              flex: _fFlex[1], child: Text(tr('tbl.condition'), style: label)),
+          Expanded(flex: _fFlex[1], child: _labelText(tr('tbl.condition'))),
           const SizedBox(width: 10),
-          Expanded(flex: _fFlex[2], child: Text(tr('tbl.type'), style: label)),
+          Expanded(flex: _fFlex[2], child: _labelText(tr('tbl.type'))),
           const SizedBox(width: 10),
-          Expanded(flex: _fFlex[3], child: Text(tr('tbl.value'), style: label)),
+          Expanded(flex: _fFlex[3], child: _labelText(tr('tbl.value'))),
           const SizedBox(width: 10),
           const SizedBox(width: _fRemoveW),
         ]),
@@ -832,42 +867,42 @@ class TablePageViewState extends State<TablePageView>
         for (var i = 0; i < _filters.length; i++) _filterRow(i),
         const SizedBox(height: 4),
       ],
-      OutlinedButton.icon(
+      CodexButton(
+        variant: CodexButtonVariant.secondary,
+        semanticLabel: tr('tbl.addFilter'),
         onPressed: () => setState(() => _filters.add(_FilterRow())),
-        icon: const Icon(Icons.add, size: 16),
+        icon: const Icon(Icons.add, size: 14),
         label: Text(tr('tbl.addFilter')),
       ),
     ]);
   }
 
   Widget _filterRow(int i) {
+    final t = AppTokens.of(context);
     final f = _filters[i];
+    final mono = Ts.style(size: Ts.sm, color: t.text, monoFont: true);
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Expanded(
           flex: _fFlex[0],
-          child: TextField(
+          child: CodexTextField(
             controller: f.attr,
+            style: mono,
             decoration: InputDecoration(
-              isDense: true,
               prefixIcon: const Icon(Icons.search, size: 16),
               prefixIconConstraints:
                   const BoxConstraints(minWidth: 32, minHeight: 32),
               hintText: tr('tbl.enterAttributeName'),
-              border: const OutlineInputBorder(),
-              contentPadding:
-                  const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
             ),
           ),
         ),
         const SizedBox(width: 10),
         Expanded(
           flex: _fFlex[1],
-          child: DropdownButtonFormField<String>(
-            initialValue: f.op,
-            isDense: true,
-            decoration: _dec(),
+          child: CodexSelectField<String>(
+            value: f.op,
+            style: mono,
             items: [
               for (final c in _filterConds)
                 DropdownMenuItem(value: c.$1, child: Text(tr(c.$2)))
@@ -878,13 +913,13 @@ class TablePageViewState extends State<TablePageView>
         const SizedBox(width: 10),
         Expanded(
           flex: _fFlex[2],
-          child: DropdownButtonFormField<String>(
-            initialValue: f.type,
-            isDense: true,
-            decoration: _dec(),
+          child: CodexSelectField<String>(
+            value: f.type,
+            enabled: f.needsValue,
+            style: mono,
             items: [
-              for (final t in _filterTypes)
-                DropdownMenuItem(value: t.$1, child: Text(t.$2))
+              for (final ty in _filterTypes)
+                DropdownMenuItem(value: ty.$1, child: Text(ty.$2))
             ],
             onChanged:
                 f.needsValue ? (v) => setState(() => f.type = v ?? 'S') : null,
@@ -894,42 +929,43 @@ class TablePageViewState extends State<TablePageView>
         Expanded(
           flex: _fFlex[3],
           child: !f.needsValue
-              ? TextField(
-                  enabled: false, decoration: _dec(hint: tr('tbl.notRequired')))
+              ? CodexTextField(
+                  enabled: false,
+                  decoration: InputDecoration(hintText: tr('tbl.notRequired')))
               : f.needsTwo
                   ? Row(children: [
                       Expanded(
-                          child: TextField(
+                          child: CodexTextField(
                               controller: f.v1,
-                              decoration:
-                                  _dec(hint: tr('tbl.enterAttributeValue')))),
+                              style: mono,
+                              decoration: InputDecoration(
+                                  hintText: tr('tbl.enterAttributeValue')))),
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 8),
-                        child: Text(tr('tbl.and')),
+                        child: Text(tr('tbl.and'),
+                            style: Ts.style(size: Ts.sm, color: t.text3)),
                       ),
                       Expanded(
-                          child: TextField(
+                          child: CodexTextField(
                               controller: f.v2,
-                              decoration:
-                                  _dec(hint: tr('tbl.enterAttributeValue')))),
+                              style: mono,
+                              decoration: InputDecoration(
+                                  hintText: tr('tbl.enterAttributeValue')))),
                     ])
-                  : TextField(
+                  : CodexTextField(
                       controller: f.v1,
-                      decoration: _dec(hint: tr('tbl.enterAttributeValue'))),
+                      style: mono,
+                      decoration: InputDecoration(
+                          hintText: tr('tbl.enterAttributeValue'))),
         ),
         const SizedBox(width: 10),
         SizedBox(
           width: _fRemoveW,
-          child: Padding(
-            padding: const EdgeInsets.only(top: 2),
-            child: OutlinedButton(
-              onPressed: () => setState(() => _filters.removeAt(i).dispose()),
-              style: OutlinedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(horizontal: 10),
-                minimumSize: const Size(0, 44),
-              ),
-              child: Text(tr('tbl.remove'), maxLines: 1),
-            ),
+          child: CodexButton(
+            variant: CodexButtonVariant.secondary,
+            semanticLabel: tr('tbl.remove'),
+            onPressed: () => setState(() => _filters.removeAt(i).dispose()),
+            label: Text(tr('tbl.remove'), maxLines: 1),
           ),
         ),
       ]),
@@ -939,21 +975,18 @@ class TablePageViewState extends State<TablePageView>
   // ---- result banner + grid ----
 
   Widget _banner() {
-    final scheme = Theme.of(context).colorScheme;
+    final t = AppTokens.of(context);
     if (_pageError != null) {
-      return Container(
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: scheme.errorContainer,
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: scheme.error),
-        ),
+      // Same shape as the Service Monitor's error banner.
+      return CodexSurface(
+        variant: CodexSurfaceVariant.elevated,
+        padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
         child: Row(children: [
-          Icon(Icons.error_outline, color: scheme.error, size: 20),
+          Icon(Icons.error_outline, color: t.danger, size: 16),
           const SizedBox(width: 8),
           Expanded(
               child: Text(_pageError!,
-                  style: TextStyle(color: scheme.onErrorContainer))),
+                  style: Ts.style(size: Ts.sm, color: t.text, monoFont: true))),
         ]),
       );
     }
@@ -981,27 +1014,48 @@ class TablePageViewState extends State<TablePageView>
     // + key summary + SCAN FILTER + advanced toggle + pagination + ＋ Item);
     // the instance Browse keeps the AWS-console "Items returned" toolbar.
     final head = _flat ? _valuepaneHead(t) : _toolbar(t, p, rows, selCount);
-    final body =
-        Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      head,
-      if (!_flat) const SizedBox(height: 8),
-      if (rows.isEmpty)
-        Padding(
-          padding: const EdgeInsets.symmetric(vertical: 40),
-          child: Center(
-            child: Column(children: [
-              Icon(Icons.inbox_outlined,
-                  size: 36, color: Theme.of(context).hintColor),
-              const SizedBox(height: 8),
-              Text(tr('tbl.noItems')),
-              const SizedBox(height: 4),
-              Text(tr('tbl.noItemsToDisplay'),
-                  style: TextStyle(
-                      fontSize: 12, color: Theme.of(context).hintColor)),
-            ]),
-          ),
-        )
-      else
+    final table = rows.isEmpty ? _emptyRows() : _dataTable(t, rows, cols);
+    if (_flat) {
+      // v2.3 valuepane as a section card: the valuepane head IS the panel2
+      // head band; the data rows fill the ruled body.
+      return CodexSurface(
+        variant: CodexSurfaceVariant.elevated,
+        padding: EdgeInsets.zero,
+        child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [head, table]),
+      );
+    }
+    return CodexSurface(
+      variant: CodexSurfaceVariant.elevated,
+      padding: const EdgeInsets.all(11),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        head,
+        const SizedBox(height: 8),
+        table,
+      ]),
+    );
+  }
+
+  Widget _emptyRows() {
+    final t = AppTokens.of(context);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 40),
+      child: Center(
+        child: Column(children: [
+          Icon(Icons.inbox_outlined, size: 36, color: t.text3),
+          const SizedBox(height: 8),
+          Text(tr('tbl.noItems'),
+              style: Ts.style(size: Ts.md, color: t.text2)),
+          const SizedBox(height: 4),
+          Text(tr('tbl.noItemsToDisplay'),
+              style: Ts.style(size: Ts.sm, color: t.text3)),
+        ]),
+      ),
+    );
+  }
+
+  Widget _dataTable(TableTarget? t, List<TableItem> rows, List<String> cols) =>
         CodexHorizontalScrollView(
           child: DataTable(
             columnSpacing: 16,
@@ -1037,15 +1091,7 @@ class TablePageViewState extends State<TablePageView>
                 _dataRow(t, rows[i], i, cols),
             ],
           ),
-        ),
-    ]);
-    if (_flat) {
-      // v2.3 valuepane: borderless flat surface (the endpoint Browser's own
-      // pane border is the frame) instead of the rounded card.
-      return body;
-    }
-    return _card(child: body);
-  }
+        );
 
   DataRow _dataRow(TableTarget? t, TableItem r, int i, List<String> cols) {
     final tok = AppTokens.of(context);
@@ -1266,7 +1312,9 @@ class TablePageViewState extends State<TablePageView>
     final rows = _visibleRows(p);
     final selCount = _checked.length;
     return MenuAnchor(
-      builder: (ctx, ctrl, _) => OutlinedButton.icon(
+      builder: (ctx, ctrl, _) => CodexButton(
+        variant: CodexButtonVariant.secondary,
+        semanticLabel: tr('tbl.actions'),
         onPressed: () => ctrl.isOpen ? ctrl.close() : ctrl.open(),
         icon: const Icon(Icons.arrow_drop_down, size: 18),
         label: Text(tr('tbl.actions')),
@@ -1300,51 +1348,52 @@ class TablePageViewState extends State<TablePageView>
   // The classic (instance Browse) toolbar — the AWS Explore-items layout.
   Widget _toolbar(
       TableTarget? t, TablePage p, List<TableItem> rows, int selCount) {
-    final scheme = Theme.of(context).colorScheme;
+    final tok = AppTokens.of(context);
     return Row(children: [
       Expanded(
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text('${tr('tbl.itemsReturned')} (${p.returned})',
-              style:
-                  const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600)),
+              style: Ts.style(
+                  size: Ts.md, weight: FontWeight.w600, color: tok.text)),
           Text(
             '${t != null && !t.isTable ? 'Index ${t.name} · ' : ''}'
             'Items scanned: ${p.scanned} · ${(p.efficiency * 100).round()}% · ${p.timeMs} ms'
             '${selCount > 0 ? ' · $selCount selected' : ''}',
-            style: TextStyle(fontSize: 11.5, color: scheme.onSurfaceVariant),
+            style: Ts.style(size: Ts.xs, color: tok.text3),
           ),
         ]),
       ),
       _semanticIconButton(
         label: tr('tbl.refresh'),
         onPressed: _running ? null : () => _run(),
-        icon: const Icon(Icons.refresh, size: 18),
+        icon: const Icon(Icons.refresh, size: 17),
       ),
       _semanticIconButton(
         label: MaterialLocalizations.of(context).previousPageTooltip,
-        visualDensity: VisualDensity.compact,
         onPressed: _pageIdx == 0 || _running ? null : _prevPage,
         icon: const Icon(Icons.chevron_left, size: 20),
       ),
-      Text('${_pageIdx + 1}'),
+      Text('${_pageIdx + 1}',
+          style: Ts.style(size: Ts.md, tabularNums: true)),
       _semanticIconButton(
         label: MaterialLocalizations.of(context).nextPageTooltip,
-        visualDensity: VisualDensity.compact,
         onPressed: p.hasNext && !_running ? _nextPage : null,
         icon: const Icon(Icons.chevron_right, size: 20),
       ),
       _semanticIconButton(
         label: tr('tbl.preferences'),
         onPressed: _openPreferences,
-        icon: const Icon(Icons.settings, size: 18),
+        icon: const Icon(Icons.settings, size: 17),
       ),
       if (_canWriteItems) ...[
         const SizedBox(width: 6),
         _selectionMenu(),
         const SizedBox(width: 8),
-        FilledButton(
+        CodexButton(
+          variant: CodexButtonVariant.primary,
+          semanticLabel: tr('tbl.createItem'),
           onPressed: () => _openEditor(from: null, isNew: true),
-          child: Text(tr('tbl.createItem')),
+          label: Text(tr('tbl.createItem')),
         ),
       ],
     ]);
@@ -1450,8 +1499,10 @@ class TablePageViewState extends State<TablePageView>
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         Text(tr('tbl.pageSize'),
-                            style:
-                                const TextStyle(fontWeight: FontWeight.w600)),
+                            style: Ts.style(
+                                size: Ts.md,
+                                weight: FontWeight.w600,
+                                color: AppTokens.of(context).text)),
                         RadioGroup<int>(
                           groupValue: size,
                           onChanged: (v) => setD(() => size = v ?? size),
@@ -1475,12 +1526,16 @@ class TablePageViewState extends State<TablePageView>
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         Row(children: [
-                          TextButton(
+                          CodexButton(
+                              variant: CodexButtonVariant.ghost,
+                              semanticLabel: tr('tbl.selectAll'),
                               onPressed: () => setD(() => hidden.clear()),
-                              child: Text(tr('tbl.selectAll'))),
-                          TextButton(
+                              label: Text(tr('tbl.selectAll'))),
+                          CodexButton(
+                              variant: CodexButtonVariant.ghost,
+                              semanticLabel: tr('tbl.deselectAll'),
                               onPressed: () => setD(() => hidden.addAll(cols)),
-                              child: Text(tr('tbl.deselectAll'))),
+                              label: Text(tr('tbl.deselectAll'))),
                         ]),
                         for (final c in cols)
                           SwitchListTile(
@@ -1496,10 +1551,14 @@ class TablePageViewState extends State<TablePageView>
               ]),
             ),
             actions: [
-              TextButton(
+              CodexButton(
+                  variant: CodexButtonVariant.ghost,
+                  semanticLabel: tr('tbl.cancel'),
                   onPressed: () => Navigator.pop(ctx),
-                  child: Text(tr('tbl.cancel'))),
-              FilledButton(
+                  label: Text(tr('tbl.cancel'))),
+              CodexButton(
+                variant: CodexButtonVariant.primary,
+                semanticLabel: tr('tbl.saveChanges'),
                 onPressed: () {
                   Navigator.pop(ctx);
                   final resize = size != _pageSize;
@@ -1511,7 +1570,7 @@ class TablePageViewState extends State<TablePageView>
                   });
                   if (resize) _run();
                 },
-                child: Text(tr('tbl.saveChanges')),
+                label: Text(tr('tbl.saveChanges')),
               ),
             ],
           );
@@ -1596,13 +1655,16 @@ class TablePageViewState extends State<TablePageView>
           width: 560,
           child: SingleChildScrollView(
             child: SelectableText(pretty,
-                style:
-                    const TextStyle(fontFamily: 'monospace', fontSize: 12.5)),
+                style: Ts.style(
+                    size: Ts.sm, color: AppTokens.of(context).text, monoFont: true)),
           ),
         ),
         actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx), child: Text(tr('tbl.close')))
+          CodexButton(
+              variant: CodexButtonVariant.ghost,
+              semanticLabel: tr('tbl.close'),
+              onPressed: () => Navigator.pop(ctx),
+              label: Text(tr('tbl.close')))
         ],
       ),
     );
@@ -1641,7 +1703,6 @@ class TablePageViewState extends State<TablePageView>
       }
       keys.add(k);
     }
-    final scheme = Theme.of(context).colorScheme;
     final go = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -1656,13 +1717,16 @@ class TablePageViewState extends State<TablePageView>
           ),
         ),
         actions: [
-          TextButton(
+          CodexButton(
+              variant: CodexButtonVariant.ghost,
+              semanticLabel: tr('tbl.cancel'),
               onPressed: () => Navigator.pop(ctx, false),
-              child: Text(tr('tbl.cancel'))),
-          FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: scheme.error),
+              label: Text(tr('tbl.cancel'))),
+          CodexButton(
+            variant: CodexButtonVariant.danger,
+            semanticLabel: tr('tbl.delete'),
             onPressed: () => Navigator.pop(ctx, true),
-            child: Text(tr('tbl.delete')),
+            label: Text(tr('tbl.delete')),
           ),
         ],
       ),
@@ -1707,7 +1771,6 @@ class TablePageViewState extends State<TablePageView>
 
   // Strong confirmation before a raw item write on a redimos table.
   Future<bool> _confirmRawWrite(String verb) async {
-    final scheme = Theme.of(context).colorScheme;
     final go = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -1717,13 +1780,16 @@ class TablePageViewState extends State<TablePageView>
           child: Text(tr('tbl.rawWriteBody')),
         ),
         actions: [
-          TextButton(
+          CodexButton(
+              variant: CodexButtonVariant.ghost,
+              semanticLabel: tr('tbl.cancel'),
               onPressed: () => Navigator.pop(ctx, false),
-              child: Text(tr('tbl.cancel'))),
-          FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: scheme.error),
+              label: Text(tr('tbl.cancel'))),
+          CodexButton(
+            variant: CodexButtonVariant.danger,
+            semanticLabel: '$verb anyway',
             onPressed: () => Navigator.pop(ctx, true),
-            child: Text('$verb anyway'),
+            label: Text('$verb anyway'),
           ),
         ],
       ),
@@ -1733,23 +1799,37 @@ class TablePageViewState extends State<TablePageView>
 
   // ---- small helpers ----
 
-  InputDecoration _dec({String? hint}) => InputDecoration(
-        isDense: true,
-        hintText: hint,
-        border: const OutlineInputBorder(),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-      );
+  // House label grammar (endpoint Configure _field): recessed uppercase
+  // eyebrow over the control.
+  Text _labelText(String label) => Text(label.toUpperCase(),
+      style: Ts.style(
+          size: Ts.xs,
+          weight: FontWeight.w600,
+          letterSpacing: 0.5,
+          color: AppTokens.of(context).text3,
+          height: 14 / 11));
 
   Widget _labeled(String label, Widget field) =>
       Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(label,
-            style: TextStyle(fontSize: 11, color: Theme.of(context).hintColor)),
-        const SizedBox(height: 3),
+        _labelText(label),
+        const SizedBox(height: 5),
         field,
       ]);
 
-  Widget _readonlyAttr(String name) => InputDecorator(
-        decoration: _dec(),
-        child: Text(name.isEmpty ? '—' : name),
-      );
+  Widget _readonlyAttr(String name) {
+    final t = AppTokens.of(context);
+    return Container(
+      height: Dim.ctlH,
+      alignment: Alignment.centerLeft,
+      padding: const EdgeInsets.symmetric(horizontal: 10),
+      decoration: BoxDecoration(
+        color: t.panel2,
+        border: Border.all(color: t.border),
+        borderRadius: BorderRadius.circular(Dim.radiusS),
+      ),
+      child: Text(name.isEmpty ? '—' : name,
+          style:
+              Ts.style(size: Ts.sm, color: t.text2, monoFont: true)),
+    );
+  }
 }

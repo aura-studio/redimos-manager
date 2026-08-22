@@ -18,6 +18,8 @@
 // result distinguishes preserved data, proven-and-cleaned data, manual
 // cleanup instructions, and partial deletion (retryable).
 
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 
 import 'i18n.dart';
@@ -62,7 +64,6 @@ class ServiceConfigEditorState extends State<ServiceConfigEditor> {
   late final TextEditingController _path;
   late final TextEditingController _volume;
   late final TextEditingController _heap;
-  late final TextEditingController _servicesOpt;
 
   late ServiceEngine _engine;
   late ServiceStorageMode _storageMode;
@@ -90,8 +91,6 @@ class ServiceConfigEditorState extends State<ServiceConfigEditor> {
     _volume = TextEditingController(text: c.storage.volume);
     _heap = TextEditingController(
         text: (c.engineOptions['heap'] ?? '').toString());
-    _servicesOpt = TextEditingController(
-        text: (c.engineOptions['SERVICES'] ?? '').toString());
     _engine = c.engine;
     _storageMode = _displayStorageMode(c);
     _prefillVolume();
@@ -123,9 +122,29 @@ class ServiceConfigEditorState extends State<ServiceConfigEditor> {
     _volume.text = 'redimos-service-$id-data';
   }
 
+  /// The real default data dir for a java Service with no custom path —
+  /// mirrors native/service.go's serviceDataDir() under the managed root
+  /// (REDIMOS_STORE_PATH's dir when set, else ~/.redimos). Shown verbatim in
+  /// the path field's placeholder so users see the actual location, not a
+  /// symbolic stand-in.
+  String _defaultDataDir() {
+    final sep = Platform.pathSeparator;
+    final sp = Platform.environment['REDIMOS_STORE_PATH'] ?? '';
+    final String root;
+    if (sp.isNotEmpty) {
+      root = File(sp).parent.path;
+    } else {
+      final home = Platform.environment['HOME'] ??
+          Platform.environment['USERPROFILE'] ??
+          '~';
+      root = '$home$sep.redimos';
+    }
+    return '$root${sep}services$sep${widget.service.id}${sep}ddb-data';
+  }
+
   @override
   void dispose() {
-    for (final ctl in [_name, _port, _path, _volume, _heap, _servicesOpt]) {
+    for (final ctl in [_name, _port, _path, _volume, _heap]) {
       ctl.dispose();
     }
     super.dispose();
@@ -147,7 +166,6 @@ class ServiceConfigEditorState extends State<ServiceConfigEditor> {
     _path.text = c.storage.path;
     _volume.text = c.storage.volume;
     _heap.text = (c.engineOptions['heap'] ?? '').toString();
-    _servicesOpt.text = (c.engineOptions['SERVICES'] ?? '').toString();
     setState(() {
       _engine = c.engine;
       _storageMode = _displayStorageMode(c);
@@ -202,10 +220,6 @@ class ServiceConfigEditorState extends State<ServiceConfigEditor> {
     final options = <String, dynamic>{};
     if (_engine == ServiceEngine.java && _heap.text.trim().isNotEmpty) {
       options['heap'] = _heap.text.trim();
-    }
-    if (_engine == ServiceEngine.localStack &&
-        _servicesOpt.text.trim().isNotEmpty) {
-      options['SERVICES'] = _servicesOpt.text.trim();
     }
     return ServiceConfig(
       id: c.id, // immutable identity — the form never invents IDs (2.1)
@@ -490,16 +504,13 @@ class ServiceConfigEditorState extends State<ServiceConfigEditor> {
                   _prefillVolume();
                 }),
               ),
-              // Engine-conditional options: JVM heap for the Java engine, the
-              // SERVICES list for LocalStack. Docker DynamoDB Local has none.
+              // Engine-conditional options: JVM heap for the Java engine.
+              // Docker DynamoDB Local has none; LocalStack's SERVICES list is
+              // pinned to dynamodb by the core (service_engine.go), no UI.
               if (_engine == ServiceEngine.java)
                 _field(t, _heap, tr('svc.heap'),
                     key: const ValueKey('service-config-heap'),
                     placeholder: tr('svc.heapHint')),
-              if (_engine == ServiceEngine.localStack)
-                _field(t, _servicesOpt, tr('svc.servicesOpt'),
-                    key: const ValueKey('service-config-services'),
-                    placeholder: tr('svc.servicesOptHint')),
             ]),
             _section(t, '3', tr('svc.storageSection'), [
               if (_engine == ServiceEngine.localStack)
@@ -542,7 +553,8 @@ class ServiceConfigEditorState extends State<ServiceConfigEditor> {
                       ? _field(t, _path, tr('svc.storage.path'),
                           key: const ValueKey('service-config-path'),
                           enabled: !_locked,
-                          placeholder: tr('svc.storage.pathHint'),
+                          placeholder: trp('svc.storage.pathHint',
+                              {'path': _defaultDataDir()}),
                           error: _storageError)
                       : _field(t, _volume, tr('svc.storage.volume'),
                           key: const ValueKey('service-config-volume'),

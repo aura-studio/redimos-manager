@@ -64,10 +64,17 @@ Future<void> _pump(WidgetTester tester, Widget child) async {
   await tester.pump();
   await tester.pump(const Duration(milliseconds: 1));
   await tester.pump();
+  // Flush the endpoint Table screen's deferred metadata/scan loads (16ms
+  // delays) so no timer outlives the widget tree.
+  await tester.pump(const Duration(milliseconds: 50));
+  await tester.pump(const Duration(milliseconds: 16));
+  await tester.pump(const Duration(milliseconds: 16));
+  await tester.pump();
 }
 
 // ---------------------------------------------------------------------------
-// 3.1–3.4: Endpoint detail is client-side only — a fixed four screens.
+// 3.1–3.4 (v1.2 redesign): Endpoint detail is client-side only — a fixed
+// three screens (Configure / Endpoint / Table).
 // ---------------------------------------------------------------------------
 
 void _endpointDetailTests() {
@@ -79,7 +86,7 @@ void _endpointDetailTests() {
       EndpointDetailView(
         core: FakeNativeCore(),
         endpoint: _collidingEndpoint,
-        // Configure (the identity pane) leads at 0; Overview follows.
+        // Configure (the identity pane) leads at 0; the table list follows.
         screenIndex: 1,
       ),
     );
@@ -88,12 +95,9 @@ void _endpointDetailTests() {
     // off-stages every non-current screen, so look through it.)
     expect(find.byKey(const ValueKey('ep-config-ep-1'), skipOffstage: false),
         findsOneWidget);
-    expect(find.byKey(const ValueKey('ep-overview-ep-1')), findsOneWidget);
-    expect(find.byKey(const ValueKey('ep-browser-ep-1'), skipOffstage: false),
+    expect(find.byKey(const ValueKey('ep-tables-ep-1'), skipOffstage: false),
         findsOneWidget);
-    expect(find.byKey(const ValueKey('ep-partiql-ep-1'), skipOffstage: false),
-        findsOneWidget);
-    expect(find.byKey(const ValueKey('ep-playground-ep-1'), skipOffstage: false),
+    expect(find.byKey(const ValueKey('ep-table-ep-1'), skipOffstage: false),
         findsOneWidget);
 
     // No engine screens — ever. The old Monitor/Logs tab keys must never
@@ -104,9 +108,6 @@ void _endpointDetailTests() {
     expect(
         find.byKey(const ValueKey('ep-ddblog-ep-1'), skipOffstage: false),
         findsNothing);
-
-    // The overview says plainly that no process lives on this page.
-    expect(find.text(tr('ep.ovNoProcessNote')), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
@@ -114,7 +115,7 @@ void _endpointDetailTests() {
       (tester) async {
     // The old inference was port-bounded; the new contract is stronger —
     // there is no inference at all. A URL that even CONTAINS the Service
-    // port renders the identical four-screen set.
+    // port renders the identical three-screen set.
     await _pump(
       tester,
       EndpointDetailView(
@@ -128,10 +129,10 @@ void _endpointDetailTests() {
         screenIndex: 1,
       ),
     );
-    expect(find.byKey(const ValueKey('ep-overview-ep-2')), findsOneWidget);
+    expect(find.byKey(const ValueKey('ep-tables-ep-2'), skipOffstage: false),
+        findsOneWidget);
     expect(find.byKey(const ValueKey('ep-ddbmon-ep-2')), findsNothing);
     expect(find.byKey(const ValueKey('ep-ddblog-ep-2')), findsNothing);
-    expect(find.text(tr('ep.ovNoProcessNote')), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 }

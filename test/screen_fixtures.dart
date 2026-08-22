@@ -548,21 +548,17 @@ Future<void> pumpInstConfig(WidgetTester t,
   await t.pump(const Duration(milliseconds: 50));
 }
 
-Future<void> pumpEpOverview(WidgetTester t,
+Future<void> pumpEpConfig(WidgetTester t,
     {required bool dark, Key? shotKey, Widget Function(Widget)? chrome}) async {
   await pumpScreen(t,
       dark: dark,
       shotKey: shotKey,
       chrome: chrome,
-      child: EndpointOverviewPane(
-        core: fakeCore,
+      child: EndpointConfigPane(
         endpoint: fixtureEndpoint,
-        config: fixtureConfig(),
-        onEdit: () {},
+        onSave: (_) async {},
+        onDelete: () async {},
       ));
-  // Zero-duration pumps only: the probe measures DateTime.now() around
-  // epListTables — advancing the fake clock would paint a machine-dependent
-  // "N ms". Microtasks still run, so the probe settles at a stable "0 ms".
   await t.pump();
   await t.pump();
 }
@@ -573,17 +569,12 @@ Future<void> pumpEpBrowser(WidgetTester t,
       dark: dark,
       shotKey: shotKey,
       chrome: chrome,
-      child: EndpointBrowserView(
+      child: EndpointTablesView(
         core: fakeCore,
         config: fixtureEndpoint.toStorageConfig(),
         endpoint: fixtureEndpoint,
       ));
   await t.pump(const Duration(milliseconds: 50)); // epListTables resolves
-  // Select a table in the sidebar so the Explorer pane renders the flat
-  // item table (pump order mirrors the golden body exactly).
-  await t.tap(find.text('users').first);
-  await t.pump();
-  await t.pump(const Duration(milliseconds: 50));
   await t.pump();
 }
 

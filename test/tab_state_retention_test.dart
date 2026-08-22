@@ -82,6 +82,7 @@ class _EndpointHarness extends StatefulWidget {
 
 class _EndpointHarnessState extends State<_EndpointHarness> {
   int index = 0;
+  String? table;
 
   void select(int value) => setState(() => index = value);
 
@@ -90,6 +91,11 @@ class _EndpointHarnessState extends State<_EndpointHarness> {
         core: widget.core,
         endpoint: widget.endpoint,
         screenIndex: index,
+        selectedTable: table,
+        onOpenTable: (name) => setState(() {
+          table = name;
+          index = 2;
+        }),
       );
 }
 
@@ -342,7 +348,7 @@ void main() {
     await tester.runAsync(server.close);
   });
 
-  testWidgets('Endpoint Overview and Browser retain probe and table selection',
+  testWidgets('Endpoint Tables and Table screens retain list and selection',
       (tester) async {
     final core = _RetentionCore();
     final key = GlobalKey<_EndpointHarnessState>();
@@ -357,40 +363,34 @@ void main() {
       size: const Size(1280, 700),
     );
     await tester.pump();
-    // Configure leads at 0 (v1 convention) - hop to Overview for the probe.
-    key.currentState!.select(1);
-    await tester.pump();
+    // Configure leads at 0 (v1 convention); every screen inflates once in the
+    // IndexedStack, so the table list loads exactly once at mount.
+    expect(core.endpointListCalls, 1);
 
-    expect(find.text('Reachable'), findsWidgets);
-    expect(core.endpointListCalls, 2,
-        reason: 'Overview and Browser each load exactly once at mount');
-
-    key.currentState!.select(2); // Browser
+    key.currentState!.select(1); // Endpoint (the table list)
     await tester.pump();
     await tester.tap(find.text('users').first);
     await tester.pump();
-    expect(
-      find.byKey(const ValueKey('epb-explore-e1-users')),
-      findsOneWidget,
-    );
     await tester.pump(const Duration(milliseconds: 16));
     await tester.pump(const Duration(milliseconds: 16));
+    // The row tap bridged into the Table screen and its scan rendered.
+    expect(key.currentState!.index, 2);
+    expect(find.text('user#1001'), findsOneWidget);
 
-    key.currentState!.select(1); // Overview
+    key.currentState!.select(1); // back to the table list
     await tester.pump();
-    expect(find.text('Reachable'), findsWidgets);
-    expect(core.endpointListCalls, 2,
-        reason: 'returning to Overview must not re-run its probe');
+    expect(find.text('sessions'), findsOneWidget);
+    expect(core.endpointListCalls, 1,
+        reason: 'returning to the list must not reload it');
 
-    key.currentState!.select(2); // Browser
+    key.currentState!.select(2); // Table
     await tester.pump();
     expect(
-      find.byKey(const ValueKey('epb-explore-e1-users')),
+      find.text('user#1001'),
       findsOneWidget,
-      reason: 'the selected table explorer remains mounted',
+      reason: 'the selected table scan remains mounted',
     );
-    expect(core.endpointListCalls, 2,
-        reason: 'returning to Browser must not reload the table list');
+    expect(core.endpointListCalls, 1);
     expect(tester.takeException(), isNull);
 
     await tester.pumpWidget(const SizedBox.shrink());
@@ -550,50 +550,52 @@ void main() {
       size: const Size(1280, 700),
     );
     await tester.pump();
-    expect(core.endpointListCalls, 2);
+    expect(core.endpointListCalls, 1);
 
-    key.currentState!.select(2); // Browser (Configure leads at 0)
+    key.currentState!.select(1); // Endpoint (Configure leads at 0)
     await tester.pump();
     await tester.tap(find.text('users').first);
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 16));
     await tester.pump(const Duration(milliseconds: 16));
-    expect(
-      find.byKey(const ValueKey('epb-explore-e1-users')),
-      findsOneWidget,
-    );
+    expect(find.text('user#1001'), findsOneWidget);
 
-    key.currentState!.select(4); // Playground
+    // Type into the Configure pane's name field before the cycling.
+    key.currentState!.select(0);
     await tester.pump();
-    final editor = find.descendant(
-      of: find.byType(CodeField),
-      matching: find.byType(TextField),
-    );
-    await tester.enterText(editor, 'return "endpoint-cycle";');
+    await tester.enterText(
+        find.byKey(const ValueKey('ep-config-name-input')), 'retained-name');
     await tester.pump();
 
     for (var round = 0; round < 4; round++) {
-      // 5 screens since the Configure pane joined (v1 configure-first).
-      for (var index = 0; index < 5; index++) {
+      // 3 screens: Configure / Endpoint / Table.
+      for (var index = 0; index < 3; index++) {
         key.currentState!.select(index);
         await tester.pump();
       }
     }
 
-    key.currentState!.select(2); // Browser
+    key.currentState!.select(2); // Table
     await tester.pump();
     expect(
-      find.byKey(const ValueKey('epb-explore-e1-users')),
+      find.text('user#1001'),
       findsOneWidget,
-      reason: 'the selected table remains mounted after rapid cycling',
+      reason: 'the selected table scan remains mounted after rapid cycling',
     );
 
-    key.currentState!.select(4); // Playground
+    key.currentState!.select(0); // Configure
     await tester.pump();
-    expect(tester.widget<TextField>(editor).controller!.text,
-        'return "endpoint-cycle";');
-    expect(core.endpointListCalls, 2,
-        reason: 'Overview and Browser must each load only once');
+    expect(
+        tester
+            .widget<TextField>(find.descendant(
+              of: find.byKey(const ValueKey('ep-config-name-input')),
+              matching: find.byType(TextField),
+            ))
+            .controller!
+            .text,
+        'retained-name');
+    expect(core.endpointListCalls, 1,
+        reason: 'the table list must load only once');
     expect(tester.takeException(), isNull);
 
     await tester.pumpWidget(const SizedBox.shrink());

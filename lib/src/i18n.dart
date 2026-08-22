@@ -79,15 +79,26 @@ const Map<String, Map<AppLang, String>> _strings = {
   'tab.browser': {AppLang.en: 'Browser', AppLang.zh: '浏览器'},
   'tab.playground': {AppLang.en: 'Playground', AppLang.zh: '脚本台'},
   'tab.overview': {AppLang.en: 'Overview', AppLang.zh: '概览'},
+  'tab.endpoint': {AppLang.en: 'Endpoint', AppLang.zh: 'Endpoint'},
+  'tab.table': {AppLang.en: 'Table', AppLang.zh: '表'},
 
   // --- v1.2 endpoint Overview tab ---
   'ep.ovBackend': {AppLang.en: 'Backend', AppLang.zh: '后端'},
   'ep.cfgSection': {AppLang.en: 'Endpoint identity', AppLang.zh: '端点身份'},
+  'ep.connSection': {AppLang.en: 'Connection', AppLang.zh: '连接'},
   'ep.cfgName': {AppLang.en: 'Endpoint name', AppLang.zh: '端点名称'},
   'ep.cfgSyncNote': {
     AppLang.en:
         'Saving updates every instance config bound to this endpoint (endpoints are a dedup view of those configs).',
     AppLang.zh: '保存会同步更新绑定此端点的所有实例配置（端点是这些配置的去重视图）。'
+  },
+  'ep.modeEndpoint': {AppLang.en: 'Endpoint', AppLang.zh: 'Endpoint'},
+  'ep.modeAws': {AppLang.en: 'AWS', AppLang.zh: 'AWS'},
+  'ep.deleteTitle': {AppLang.en: 'Delete endpoint?', AppLang.zh: '删除端点?'},
+  'ep.deleteBody': {
+    AppLang.en:
+        'This deletes every instance config bound to this endpoint (running instances are stopped first). This cannot be undone.',
+    AppLang.zh: '将删除绑定此端点的所有实例配置（运行中的实例会先停止）。此操作不可撤销。'
   },
   'ep.ovEndpoint': {AppLang.en: 'Endpoint', AppLang.zh: '端点地址'},
   'ep.ovRegion': {AppLang.en: 'Region', AppLang.zh: '区域'},
@@ -242,8 +253,8 @@ const Map<String, Map<AppLang, String>> _strings = {
   'svc.storage.persisted': {AppLang.en: 'Persisted', AppLang.zh: '持久化'},
   'svc.storage.path': {AppLang.en: 'Data path', AppLang.zh: '数据路径'},
   'svc.storage.pathHint': {
-    AppLang.en: 'Default: <app data>/services/<id>/ddb-data',
-    AppLang.zh: '默认：<应用数据>/services/<id>/ddb-data'
+    AppLang.en: 'Default: {path}',
+    AppLang.zh: '默认：{path}'
   },
   'svc.storage.volume': {AppLang.en: 'Volume name', AppLang.zh: '卷名'},
   'svc.storage.volumeHint': {
@@ -255,9 +266,11 @@ const Map<String, Map<AppLang, String>> _strings = {
     AppLang.zh: '存储由 LocalStack 管理'
   },
   'svc.heap': {AppLang.en: 'JVM heap', AppLang.zh: 'JVM 堆内存'},
-  'svc.heapHint': {AppLang.en: 'e.g. 512m', AppLang.zh: '如 512m'},
-  'svc.servicesOpt': {AppLang.en: 'LocalStack services', AppLang.zh: 'LocalStack 服务清单'},
-  'svc.servicesOptHint': {AppLang.en: 'e.g. dynamodb,s3', AppLang.zh: '如 dynamodb,s3'},
+  'svc.heapHint': {
+    AppLang.en:
+        'e.g. 512m, 1g (k/m/g case-insensitive; plain number = bytes)',
+    AppLang.zh: '如 512m、1g（支持 k/m/g，不区分大小写；纯数字按字节计）'
+  },
   'svc.identityLocked': {
     AppLang.en: 'Stop this Service to change engine, port, or storage',
     AppLang.zh: '停止服务后才能修改引擎、端口或存储'
@@ -356,6 +369,7 @@ const Map<String, Map<AppLang, String>> _strings = {
   'svc.cpu': {AppLang.en: 'CPU', AppLang.zh: 'CPU'},
   'svc.memory': {AppLang.en: 'Memory', AppLang.zh: '内存'},
   'svc.disk': {AppLang.en: 'Disk I/O', AppLang.zh: '磁盘 I/O'},
+  'svc.errorCount': {AppLang.en: 'Errors', AppLang.zh: '错误条数'},
   'svc.logsEmpty': {AppLang.en: 'No log lines yet', AppLang.zh: '暂无日志'},
   'svc.logsLoadFailed': {AppLang.en: 'Failed to load logs', AppLang.zh: '日志加载失败'},
   'svc.refresh': {AppLang.en: 'Refresh', AppLang.zh: '刷新'},
