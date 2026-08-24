@@ -205,6 +205,12 @@ class _ServiceMonitorTabState extends State<ServiceMonitorTab> {
             value: '${rt.restarts}',
           ),
           InfoTile(
+            key: const ValueKey('service-monitor-errors'),
+            label: tr('svc.errorCount').toUpperCase(),
+            value: serviceErrorValue(rt),
+            valueColor: rt.errorCount > 0 ? t.danger : null,
+          ),
+          InfoTile(
             key: const ValueKey('service-monitor-latency'),
             label: tr('svc.latency').toUpperCase(),
             value: serviceLatencyValue(rt.latencyMs),
@@ -236,12 +242,6 @@ class _ServiceMonitorTabState extends State<ServiceMonitorTab> {
             label: tr('svc.engine').toUpperCase(),
             value: ddbEngineLabel(cfg.engine.wire),
             fitReference: ddbEngineLabel('docker'),
-          ),
-          InfoTile(
-            key: const ValueKey('service-monitor-errors'),
-            label: tr('svc.errorCount').toUpperCase(),
-            value: serviceErrorValue(rt),
-            valueColor: rt.errorCount > 0 ? t.danger : null,
           ),
         ]),
       ]),

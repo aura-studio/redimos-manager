@@ -167,6 +167,18 @@ class TablePageViewState extends State<TablePageView>
   // (client-side contains-filter over the loaded page's cell reprs; the full
   // Scan/Query form still lives in the collapsed advanced card).
   final _scanFilter = TextEditingController();
+  // Flat mode: the scan filter lives in a right-hand sidebar instead of the
+  // crowded valuepane head. A view preference (like _pageSize) — survives
+  // table changes; closing the sidebar clears the filter so hidden filtering
+  // can never silently narrow the grid.
+  bool _filterSidebarOpen = true;
+
+  void _toggleFilterSidebar() => setState(() {
+        _filterSidebarOpen = !_filterSidebarOpen;
+        if (!_filterSidebarOpen && _scanFilter.text.isNotEmpty) {
+          _scanFilter.clear();
+        }
+      });
 
   // results
   bool _running = false;
@@ -490,7 +502,7 @@ class TablePageViewState extends State<TablePageView>
                     ],
                     if (_page != null) ...[
                       const SizedBox(height: 12),
-                      _resultsCard(),
+                      _resultsRow(),
                     ],
                   ],
                 ),
@@ -1199,6 +1211,79 @@ class TablePageViewState extends State<TablePageView>
     );
   }
 
+  // Flat mode lays the results card and the filter sidebar out as sibling
+  // section cards (the house grammar) instead of crowding the valuepane head.
+  Widget _resultsRow() {
+    final card = _resultsCard();
+    if (!_flat || !_filterSidebarOpen) return card;
+    return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Expanded(child: card),
+      const SizedBox(width: 12),
+      SizedBox(width: 248, child: _filterSidebarCard()),
+    ]);
+  }
+
+  // Right-hand filter sidebar (flat mode): a section card with the SCAN
+  // FILTER box and the advanced Scan/Query form toggle.
+  Widget _filterSidebarCard() {
+    final tok = AppTokens.of(context);
+    return CodexSurface(
+      variant: CodexSurfaceVariant.elevated,
+      padding: EdgeInsets.zero,
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Container(
+          color: tok.panel2,
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          child: Text(tr('tbl.filters').toUpperCase(),
+              style: Ts.style(
+                  size: Ts.md,
+                  letterSpacing: 0.9,
+                  weight: FontWeight.w700,
+                  color: tok.text)),
+        ),
+        const CodexDivider(),
+        Padding(
+          padding: const EdgeInsets.all(12),
+          child:
+              Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            _labelText('SCAN FILTER'),
+            const SizedBox(height: 8),
+            SizedBox(
+              height: Dim.ctlH,
+              child: TextField(
+                controller: _scanFilter,
+                onChanged: (_) => setState(() {}),
+                style: Ts.style(size: Ts.sm, color: tok.text, monoFont: true),
+                decoration: InputDecoration(
+                  isDense: true,
+                  hintText: tr('tbl.filters'),
+                  hintStyle: Ts.style(size: Ts.sm, color: tok.text3),
+                  prefixIcon: Icon(Icons.search, size: 14, color: tok.text3),
+                  prefixIconConstraints:
+                      const BoxConstraints(minWidth: 28, minHeight: 26),
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: CodexButton(
+                variant: CodexButtonVariant.secondary,
+                semanticLabel: tr('tbl.scanOrQueryItems'),
+                onPressed: () => setState(() => _panelOpen = !_panelOpen),
+                icon:
+                    Icon(_panelOpen ? Icons.expand_less : Icons.tune, size: 15),
+                label: Text(tr('tbl.scanOrQueryItems')),
+              ),
+            ),
+          ]),
+        ),
+      ]),
+    );
+  }
+
   // The v2.3 valuepane head: table name (15.5/700) + PK/SK summary + the
   // single SCAN FILTER box + advanced-form toggle; refresh / pagination /
   // preferences / Actions / ＋ Item on the right.
@@ -1247,46 +1332,6 @@ class TablePageViewState extends State<TablePageView>
               ],
             ]),
           ],
-          const SizedBox(width: 16),
-          SizedBox(
-            width: compact ? 132 : 200,
-            height: 26,
-            child: TextField(
-              controller: _scanFilter,
-              onChanged: (_) => setState(() {}),
-              style: Ts.style(size: Ts.sm, monoFont: true, letterSpacing: .6),
-              decoration: InputDecoration(
-                isDense: true,
-                // No i18n key for this one — the design's own placeholder.
-                hintText: 'SCAN FILTER…',
-                hintStyle: Ts.style(
-                    size: Ts.sm,
-                    color: tok.text3,
-                    monoFont: true,
-                    letterSpacing: .6),
-                prefixIcon: Icon(Icons.search, size: 14, color: tok.text3),
-                prefixIconConstraints:
-                    const BoxConstraints(minWidth: 28, minHeight: 26),
-                contentPadding:
-                    const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
-                border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(Dim.radiusS),
-                    borderSide: BorderSide(color: tok.border)),
-                enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(Dim.radiusS),
-                    borderSide: BorderSide(color: tok.border)),
-              ),
-            ),
-          ),
-          _semanticIconButton(
-            // The advanced Scan/Query card (projection / key conditions / typed
-            // filters) — folded away in flat mode, one tap back.
-            label: tr('tbl.scanOrQueryItems'),
-            visualDensity: VisualDensity.compact,
-            selected: _panelOpen,
-            icon: const Icon(Icons.tune, size: 17),
-            onPressed: () => setState(() => _panelOpen = !_panelOpen),
-          ),
           const Spacer(),
           Text('${p.returned}',
               style: Ts.style(
@@ -1319,6 +1364,13 @@ class TablePageViewState extends State<TablePageView>
             visualDensity: VisualDensity.compact,
             onPressed: _openPreferences,
             icon: const Icon(Icons.settings, size: 17),
+          ),
+          _semanticIconButton(
+            label: tr('tbl.filters'),
+            visualDensity: VisualDensity.compact,
+            selected: _filterSidebarOpen,
+            onPressed: _toggleFilterSidebar,
+            icon: const Icon(Icons.filter_list, size: 18),
           ),
           if (_canWriteItems) ...[
             const SizedBox(width: 4),
