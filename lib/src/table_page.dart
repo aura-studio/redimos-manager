@@ -3,9 +3,9 @@
 // base64 on hover). Hosted as the right pane of the endpoint Browser
 // (endpoint_browser.dart), pointed at the Tables-sidebar selection via
 // tableOverride. Scan / Query with projection, sort-key conditions, filters,
-// DynamoDB-style pagination, column preferences, checkbox multi-select with an
-// Actions menu (Edit / Duplicate / Delete items / Export to CSV), pk links into
-// a full-page Form|JSON item editor, and a Create item button. Item writes are
+// DynamoDB-style pagination, column preferences, checkbox multi-select with
+// inline row actions and flat batch actions, pk links into a full-page
+// Form|JSON item editor, and a Create item button. Item writes are
 // offered on non-AWS endpoints (allowOverrideWrites) and carry the redimos
 // raw-write confirmation. All data comes from the Go core over FFI.
 
@@ -492,10 +492,9 @@ class TablePageViewState extends State<TablePageView>
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    // Flat mode: the advanced Scan/Query form is one tap away
-                    // (the valuepane head's tune toggle) but never in the way —
-                    // the single SCAN FILTER box covers the common case.
-                    if (!_flat || _panelOpen) _queryCard(),
+                    // Instance Browse keeps the query card on top; flat mode
+                    // moves every filtering surface into the left sidebar.
+                    if (!_flat) _queryCard(),
                     if (_pageError != null) ...[
                       const SizedBox(height: 12),
                       _banner(),
@@ -660,62 +659,69 @@ class TablePageViewState extends State<TablePageView>
         else
           Padding(
             padding: const EdgeInsets.all(14),
-            child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: SegmentedButton<bool>(
-                      segments: [
-                        ButtonSegment(
-                            value: false,
-                            label: Text(tr('tbl.scan')),
-                            icon: const Icon(Icons.list, size: 16)),
-                        ButtonSegment(
-                            value: true,
-                            label: Text(tr('tbl.query')),
-                            icon: const Icon(Icons.search, size: 16)),
-                      ],
-                      selected: {_isQuery},
-                      onSelectionChanged: (s) =>
-                          setState(() => _isQuery = s.first),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  _targetDropdown(),
-                  const SizedBox(height: 12),
-                  _projectionRow(),
-                  if (_isQuery) ...[
-                    const SizedBox(height: 12),
-                    _queryKeys(),
-                  ],
-                  const SizedBox(height: 12),
-                  _filtersSection(),
-                  const SizedBox(height: 12),
-                  Row(children: [
-                    CodexButton(
-                      variant: CodexButtonVariant.primary,
-                      semanticLabel: tr('tbl.run'),
-                      onPressed: _running ? null : () => _run(),
-                      label: _running
-                          ? const SizedBox(
-                              width: 16,
-                              height: 16,
-                              child: CircularProgressIndicator(strokeWidth: 2))
-                          : Text(tr('tbl.run')),
-                    ),
-                    const SizedBox(width: 8),
-                    CodexButton(
-                      variant: CodexButtonVariant.ghost,
-                      semanticLabel: tr('tbl.reset'),
-                      onPressed: _reset,
-                      label: Text(tr('tbl.reset')),
-                    ),
-                  ]),
-                ]),
+            child: _queryFormBody(),
           ),
       ]),
     );
+  }
+
+  // The expanded Scan/Query form (segment control / target / projection /
+  // key conditions / typed filters / run+reset). Shared by the classic
+  // instance-Browse query card and the flat mode's left filter sidebar.
+  Widget _queryFormBody() {
+    return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Align(
+            alignment: Alignment.centerLeft,
+            child: SegmentedButton<bool>(
+              segments: [
+                ButtonSegment(
+                    value: false,
+                    label: Text(tr('tbl.scan')),
+                    icon: const Icon(Icons.list, size: 16)),
+                ButtonSegment(
+                    value: true,
+                    label: Text(tr('tbl.query')),
+                    icon: const Icon(Icons.search, size: 16)),
+              ],
+              selected: {_isQuery},
+              onSelectionChanged: (s) =>
+                  setState(() => _isQuery = s.first),
+            ),
+          ),
+          const SizedBox(height: 12),
+          _targetDropdown(),
+          const SizedBox(height: 12),
+          _projectionRow(),
+          if (_isQuery) ...[
+            const SizedBox(height: 12),
+            _queryKeys(),
+          ],
+          const SizedBox(height: 12),
+          _filtersSection(),
+          const SizedBox(height: 12),
+          Row(children: [
+            CodexButton(
+              variant: CodexButtonVariant.primary,
+              semanticLabel: tr('tbl.run'),
+              onPressed: _running ? null : () => _run(),
+              label: _running
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2))
+                  : Text(tr('tbl.run')),
+            ),
+            const SizedBox(width: 8),
+            CodexButton(
+              variant: CodexButtonVariant.ghost,
+              semanticLabel: tr('tbl.reset'),
+              onPressed: _reset,
+              label: Text(tr('tbl.reset')),
+            ),
+          ]),
+        ]);
   }
 
   Widget _targetDropdown() {
@@ -1125,8 +1131,9 @@ class TablePageViewState extends State<TablePageView>
             // Mockup .vtable td height = var(--row-h) = 30, fixed.
             dataRowMinHeight: 30,
             dataRowMaxHeight: 30,
-            // Mockup shows no checkbox column — selection is by row click.
-            showCheckboxColumn: false,
+            // Keep the selection affordance visible at the far left, including
+            // the header checkbox that selects the currently loaded page.
+            showCheckboxColumn: true,
             onSelectAll: (v) => setState(() {
               _checked.clear();
               if (v == true) _checked.addAll(rows.map((r) => r.ddbJson));
@@ -1147,6 +1154,7 @@ class TablePageViewState extends State<TablePageView>
                     }
                   }),
                 ),
+              DataColumn(label: Text(tr('tbl.rowActions'))),
             ],
             rows: [
               for (var i = 0; i < rows.length; i++)
@@ -1207,46 +1215,89 @@ class TablePageViewState extends State<TablePageView>
                       : _showItemViewer(r),
                 )
               : DataCell(_cellWidget(r.cells[c])),
+        DataCell(_rowActions(r)),
       ],
     );
   }
 
-  // Flat mode lays the results card and the filter sidebar out as sibling
-  // section cards (the house grammar) instead of crowding the valuepane head.
+  Widget _rowActions(TableItem row) {
+    final canWrite = _canWriteItems;
+    return Row(mainAxisSize: MainAxisSize.min, children: [
+      _semanticIconButton(
+        label: canWrite ? tr('tbl.editItem') : tr('tbl.viewItem'),
+        visualDensity: VisualDensity.compact,
+        onPressed: canWrite
+            ? () => _openEditor(from: row, isNew: false)
+            : () => _showItemViewer(row),
+        icon: Icon(canWrite ? Icons.edit_outlined : Icons.visibility_outlined,
+            size: 16),
+      ),
+      if (canWrite) ...[
+        _semanticIconButton(
+          label: tr('tbl.duplicateItem'),
+          visualDensity: VisualDensity.compact,
+          onPressed: () => _openEditor(from: row, isNew: true),
+          icon: const Icon(Icons.content_copy_outlined, size: 16),
+        ),
+        _semanticIconButton(
+          label: tr('tbl.deleteItem'),
+          visualDensity: VisualDensity.compact,
+          onPressed: () => _deleteRows([row]),
+          icon: const Icon(Icons.delete_outline, size: 16),
+        ),
+      ],
+    ]);
+  }
+
+  // Flat mode lays the filter sidebar and the results card out as sibling
+  // section cards (the house grammar): EVERY filtering surface (the SCAN
+  // FILTER box and the advanced Scan/Query form) lives in the left sidebar.
   Widget _resultsRow() {
     final card = _resultsCard();
     if (!_flat || !_filterSidebarOpen) return card;
     return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Expanded(child: card),
+      SizedBox(width: _panelOpen ? 420 : 248, child: _filterSidebarCard()),
       const SizedBox(width: 12),
-      SizedBox(width: 248, child: _filterSidebarCard()),
+      Expanded(child: card),
     ]);
   }
 
-  // Right-hand filter sidebar (flat mode): a section card with the SCAN
-  // FILTER box and the advanced Scan/Query form toggle.
+  // Left-hand filter sidebar (flat mode): a section card holding the SCAN
+  // FILTER box; the head band toggles the advanced Scan/Query form, which
+  // expands inside the same card.
   Widget _filterSidebarCard() {
     final tok = AppTokens.of(context);
     return CodexSurface(
       variant: CodexSurfaceVariant.elevated,
       padding: EdgeInsets.zero,
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        Container(
-          color: tok.panel2,
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-          child: Text(tr('tbl.filters').toUpperCase(),
-              style: Ts.style(
-                  size: Ts.md,
-                  letterSpacing: 0.9,
-                  weight: FontWeight.w700,
-                  color: tok.text)),
+        InkWell(
+          onTap: () => setState(() => _panelOpen = !_panelOpen),
+          child: Container(
+            color: tok.panel2,
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            child: Row(children: [
+              Icon(_panelOpen ? Icons.expand_more : Icons.chevron_right,
+                  size: 16, color: tok.text3),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(tr('tbl.filters').toUpperCase(),
+                    overflow: TextOverflow.ellipsis,
+                    style: Ts.style(
+                        size: Ts.md,
+                        letterSpacing: 0.9,
+                        weight: FontWeight.w700,
+                        color: tok.text)),
+              ),
+            ]),
+          ),
         ),
         const CodexDivider(),
         Padding(
           padding: const EdgeInsets.all(12),
           child:
               Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-            _labelText('SCAN FILTER'),
+            _labelText(tr('tbl.scanFilter')),
             const SizedBox(height: 8),
             SizedBox(
               height: Dim.ctlH,
@@ -1266,18 +1317,12 @@ class TablePageViewState extends State<TablePageView>
                 ),
               ),
             ),
-            const SizedBox(height: 12),
-            Align(
-              alignment: Alignment.centerLeft,
-              child: CodexButton(
-                variant: CodexButtonVariant.secondary,
-                semanticLabel: tr('tbl.scanOrQueryItems'),
-                onPressed: () => setState(() => _panelOpen = !_panelOpen),
-                icon:
-                    Icon(_panelOpen ? Icons.expand_less : Icons.tune, size: 15),
-                label: Text(tr('tbl.scanOrQueryItems')),
-              ),
-            ),
+            if (_panelOpen) ...[
+              const SizedBox(height: 12),
+              const CodexDivider(),
+              const SizedBox(height: 12),
+              _queryFormBody(),
+            ],
           ]),
         ),
       ]),
@@ -1301,83 +1346,78 @@ class TablePageViewState extends State<TablePageView>
           color: tok.panel2,
           border: Border(bottom: BorderSide(color: tok.hairline)),
         ),
-        child: Row(children: [
-          // Mockup .vp-title: the table name is a small uppercase eyebrow
-          // (11/600/text-3), NOT a large prominent heading.
-          Flexible(
-            child: Text(_effTable.toUpperCase(),
-                overflow: TextOverflow.ellipsis,
-                style: Ts.style(
-                    size: Ts.xs,
-                    weight: FontWeight.w600,
-                    letterSpacing: .8,
-                    color: tok.text3)),
-          ),
-          if (!compact && t != null) ...[
-            const SizedBox(width: 14),
-            // Mockup .empty-note: "PK <b>user#</b> · SK <b>profile</b>" — sans
-            // (the PK/SK values stay non-mono, the strong is just 600 text).
-            // Plain Texts instead of TextSpan children: the capture channel
-            // rasterizes rich runs as .notdef blocks (CP 9.x).
-            Row(mainAxisSize: MainAxisSize.min, children: [
-              Text('PK ', style: Ts.style(size: Ts.md, color: tok.text3)),
-              Text(t.pk.name,
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Row(children: [
+            // Mockup .vp-title: the table name is a small uppercase eyebrow
+            // (11/600/text-3), NOT a large prominent heading.
+            Flexible(
+              child: Text(_effTable.toUpperCase(),
+                  overflow: TextOverflow.ellipsis,
                   style: Ts.style(
-                      size: Ts.md, weight: FontWeight.w600, color: tok.text)),
-              if (t.sk != null) ...[
-                Text(' · SK ', style: Ts.style(size: Ts.md, color: tok.text3)),
-                Text(t.sk!.name,
+                      size: Ts.xs,
+                      weight: FontWeight.w600,
+                      letterSpacing: .8,
+                      color: tok.text3)),
+            ),
+            if (!compact && t != null) ...[
+              const SizedBox(width: 14),
+              Row(mainAxisSize: MainAxisSize.min, children: [
+                Text('PK ', style: Ts.style(size: Ts.md, color: tok.text3)),
+                Text(t.pk.name,
                     style: Ts.style(
                         size: Ts.md, weight: FontWeight.w600, color: tok.text)),
-              ],
-            ]),
-          ],
-          const Spacer(),
-          Text('${p.returned}',
-              style: Ts.style(
-                  size: Ts.md,
-                  weight: FontWeight.w600,
-                  color: tok.text2,
-                  tabularNums: true)),
-          _semanticIconButton(
-            label: tr('tbl.refresh'),
-            visualDensity: VisualDensity.compact,
-            onPressed: _running ? null : () => _run(),
-            icon: const Icon(Icons.refresh, size: 17),
-          ),
-          _semanticIconButton(
-            label: MaterialLocalizations.of(context).previousPageTooltip,
-            visualDensity: VisualDensity.compact,
-            onPressed: _pageIdx == 0 || _running ? null : _prevPage,
-            icon: const Icon(Icons.chevron_left, size: 20),
-          ),
-          Text('${_pageIdx + 1}',
-              style: Ts.style(size: Ts.md, tabularNums: true)),
-          _semanticIconButton(
-            label: MaterialLocalizations.of(context).nextPageTooltip,
-            visualDensity: VisualDensity.compact,
-            onPressed: p.hasNext && !_running ? _nextPage : null,
-            icon: const Icon(Icons.chevron_right, size: 20),
-          ),
-          _semanticIconButton(
-            label: tr('tbl.preferences'),
-            visualDensity: VisualDensity.compact,
-            onPressed: _openPreferences,
-            icon: const Icon(Icons.settings, size: 17),
-          ),
-          _semanticIconButton(
-            label: tr('tbl.filters'),
-            visualDensity: VisualDensity.compact,
-            selected: _filterSidebarOpen,
-            onPressed: _toggleFilterSidebar,
-            icon: const Icon(Icons.filter_list, size: 18),
-          ),
+                if (t.sk != null) ...[
+                  Text(' · SK ', style: Ts.style(size: Ts.md, color: tok.text3)),
+                  Text(t.sk!.name,
+                      style: Ts.style(
+                          size: Ts.md, weight: FontWeight.w600, color: tok.text)),
+                ],
+              ]),
+            ],
+            const Spacer(),
+            Text('${p.returned}',
+                style: Ts.style(
+                    size: Ts.md,
+                    weight: FontWeight.w600,
+                    color: tok.text2,
+                    tabularNums: true)),
+            _semanticIconButton(
+              label: tr('tbl.refresh'),
+              visualDensity: VisualDensity.compact,
+              onPressed: _running ? null : () => _run(),
+              icon: const Icon(Icons.refresh, size: 17),
+            ),
+            _semanticIconButton(
+              label: MaterialLocalizations.of(context).previousPageTooltip,
+              visualDensity: VisualDensity.compact,
+              onPressed: _pageIdx == 0 || _running ? null : _prevPage,
+              icon: const Icon(Icons.chevron_left, size: 20),
+            ),
+            Text('${_pageIdx + 1}',
+                style: Ts.style(size: Ts.md, tabularNums: true)),
+            _semanticIconButton(
+              label: MaterialLocalizations.of(context).nextPageTooltip,
+              visualDensity: VisualDensity.compact,
+              onPressed: p.hasNext && !_running ? _nextPage : null,
+              icon: const Icon(Icons.chevron_right, size: 20),
+            ),
+            _semanticIconButton(
+              label: tr('tbl.preferences'),
+              visualDensity: VisualDensity.compact,
+              onPressed: _openPreferences,
+              icon: const Icon(Icons.settings, size: 17),
+            ),
+            _semanticIconButton(
+              label: tr('tbl.filters'),
+              visualDensity: VisualDensity.compact,
+              selected: _filterSidebarOpen,
+              onPressed: _toggleFilterSidebar,
+              icon: const Icon(Icons.filter_list, size: 18),
+            ),
+          ]),
           if (_canWriteItems) ...[
-            const SizedBox(width: 4),
-            _selectionMenu(),
-            const SizedBox(width: 6),
-            _ghostButton(Icons.add, tr('tbl.createItem'),
-                () => _openEditor(from: null, isNew: true)),
+            const SizedBox(height: 6),
+            _batchActionBar(p, _visibleRows(p), includeCreate: true),
           ],
         ]),
       );
@@ -1386,17 +1426,23 @@ class TablePageViewState extends State<TablePageView>
 
   // Ghost button (v2.3 .abtn.ghost — the ＋ Item grammar): a quiet 26px
   // outlined action, no fill.
-  Widget _ghostButton(IconData icon, String label, VoidCallback onPressed) {
+  Widget _ghostButton(
+    IconData icon,
+    String label,
+    VoidCallback onPressed, {
+    bool enabled = true,
+  }) {
     final tok = AppTokens.of(context);
     return SizedBox(
       height: 26,
       child: OutlinedButton.icon(
-        onPressed: onPressed,
+        onPressed: enabled ? onPressed : null,
         icon: Icon(icon, size: 14),
         label:
             Text(label, style: Ts.style(size: Ts.md, weight: FontWeight.w500)),
         style: OutlinedButton.styleFrom(
           foregroundColor: tok.text2,
+          disabledForegroundColor: tok.text3,
           side: BorderSide(color: tok.border),
           shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(Dim.radiusS)),
@@ -1406,97 +1452,106 @@ class TablePageViewState extends State<TablePageView>
     );
   }
 
-  // The Actions menu (Edit / Duplicate / Delete / Export) — shared by the
-  // valuepane head and the classic toolbar.
-  Widget _selectionMenu() {
-    final p = _page!;
+  Widget _batchActionBar(
+      TablePage p, List<TableItem> rows, {
+      required bool includeCreate,
+    }) {
+    return Wrap(
+      alignment: WrapAlignment.end,
+      spacing: 4,
+      runSpacing: 4,
+      children: [
+        _batchActions(p, rows),
+        if (includeCreate)
+          _ghostButton(Icons.add, tr('tbl.createItem'),
+              () => _openEditor(from: null, isNew: true)),
+      ],
+    );
+  }
+
+  Widget _batchActions(TablePage p, List<TableItem> rows) {
     final cols = p.cols.where((c) => !_hiddenCols.contains(c)).toList();
-    final rows = _visibleRows(p);
-    final selCount = _checked.length;
-    return MenuAnchor(
-      builder: (ctx, ctrl, _) => CodexButton(
-        variant: CodexButtonVariant.secondary,
-        semanticLabel: tr('tbl.actions'),
-        onPressed: () => ctrl.isOpen ? ctrl.close() : ctrl.open(),
-        icon: const Icon(Icons.arrow_drop_down, size: 18),
-        label: Text(tr('tbl.actions')),
-      ),
-      menuChildren: [
-        MenuItemButton(
-          onPressed: selCount == 1
-              ? () => _openEditor(from: _selectedItem(rows), isNew: false)
-              : null,
-          child: Text(tr('tbl.editItem')),
+    final selected = rows.where((r) => _checked.contains(r.ddbJson)).toList();
+    final one = selected.length == 1;
+    final any = selected.isNotEmpty;
+    return Wrap(
+      spacing: 4,
+      runSpacing: 4,
+      children: [
+        _ghostButton(
+          Icons.edit_outlined,
+          tr('tbl.editSelected'),
+          one ? () => _openEditor(from: selected.first, isNew: false) : () {},
+          enabled: one,
         ),
-        MenuItemButton(
-          onPressed: selCount == 1
-              ? () => _openEditor(from: _selectedItem(rows), isNew: true)
-              : null,
-          child: Text(tr('tbl.duplicateItem')),
+        _ghostButton(
+          Icons.content_copy_outlined,
+          tr('tbl.duplicateSelected'),
+          one ? () => _openEditor(from: selected.first, isNew: true) : () {},
+          enabled: one,
         ),
-        MenuItemButton(
-          onPressed: selCount >= 1 ? () => _deleteSelected(rows) : null,
-          child: Text(tr('tbl.deleteItems')),
+        _ghostButton(
+          Icons.delete_outline,
+          tr('tbl.deleteSelected'),
+          any ? () => _deleteRows(selected) : () {},
+          enabled: any,
         ),
-        const Divider(height: 4),
-        MenuItemButton(
-          onPressed: rows.isEmpty ? null : () => _exportCsv(cols, rows),
-          child: Text(tr('tbl.exportToCsv')),
+        _ghostButton(
+          Icons.download_outlined,
+          tr('tbl.exportToCsv'),
+          rows.isEmpty ? () {} : () => _exportCsv(cols, rows),
+          enabled: rows.isNotEmpty,
         ),
       ],
     );
   }
 
+
   // The classic (instance Browse) toolbar — the AWS Explore-items layout.
   Widget _toolbar(
       TableTarget? t, TablePage p, List<TableItem> rows, int selCount) {
     final tok = AppTokens.of(context);
-    return Row(children: [
-      Expanded(
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text('${tr('tbl.itemsReturned')} (${p.returned})',
-              style: Ts.style(
-                  size: Ts.md, weight: FontWeight.w600, color: tok.text)),
-          Text(
-            '${t != null && !t.isTable ? 'Index ${t.name} · ' : ''}'
-            'Items scanned: ${p.scanned} · ${(p.efficiency * 100).round()}% · ${p.timeMs} ms'
-            '${selCount > 0 ? ' · $selCount selected' : ''}',
-            style: Ts.style(size: Ts.xs, color: tok.text3),
-          ),
-        ]),
-      ),
-      _semanticIconButton(
-        label: tr('tbl.refresh'),
-        onPressed: _running ? null : () => _run(),
-        icon: const Icon(Icons.refresh, size: 17),
-      ),
-      _semanticIconButton(
-        label: MaterialLocalizations.of(context).previousPageTooltip,
-        onPressed: _pageIdx == 0 || _running ? null : _prevPage,
-        icon: const Icon(Icons.chevron_left, size: 20),
-      ),
-      Text('${_pageIdx + 1}',
-          style: Ts.style(size: Ts.md, tabularNums: true)),
-      _semanticIconButton(
-        label: MaterialLocalizations.of(context).nextPageTooltip,
-        onPressed: p.hasNext && !_running ? _nextPage : null,
-        icon: const Icon(Icons.chevron_right, size: 20),
-      ),
-      _semanticIconButton(
-        label: tr('tbl.preferences'),
-        onPressed: _openPreferences,
-        icon: const Icon(Icons.settings, size: 17),
-      ),
-      if (_canWriteItems) ...[
-        const SizedBox(width: 6),
-        _selectionMenu(),
-        const SizedBox(width: 8),
-        CodexButton(
-          variant: CodexButtonVariant.primary,
-          semanticLabel: tr('tbl.createItem'),
-          onPressed: () => _openEditor(from: null, isNew: true),
-          label: Text(tr('tbl.createItem')),
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      Row(children: [
+        Expanded(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('${tr('tbl.itemsReturned')} (${p.returned})',
+                style: Ts.style(
+                    size: Ts.md, weight: FontWeight.w600, color: tok.text)),
+            Text(
+              '${t != null && !t.isTable ? '${tr('tbl.indexPrefix')} ${t.name} · ' : ''}'
+              '${tr('tbl.itemsScanned')}: ${p.scanned} · ${(p.efficiency * 100).round()}% · ${p.timeMs} ${tr('tbl.milliseconds')}'
+              '${selCount > 0 ? ' · ${trp('tbl.selectedCount', {'n': '$selCount'})}' : ''}',
+              style: Ts.style(size: Ts.xs, color: tok.text3),
+            ),
+          ]),
         ),
+        _semanticIconButton(
+          label: tr('tbl.refresh'),
+          onPressed: _running ? null : () => _run(),
+          icon: const Icon(Icons.refresh, size: 17),
+        ),
+        _semanticIconButton(
+          label: MaterialLocalizations.of(context).previousPageTooltip,
+          onPressed: _pageIdx == 0 || _running ? null : _prevPage,
+          icon: const Icon(Icons.chevron_left, size: 20),
+        ),
+        Text('${_pageIdx + 1}',
+            style: Ts.style(size: Ts.md, tabularNums: true)),
+        _semanticIconButton(
+          label: MaterialLocalizations.of(context).nextPageTooltip,
+          onPressed: p.hasNext && !_running ? _nextPage : null,
+          icon: const Icon(Icons.chevron_right, size: 20),
+        ),
+        _semanticIconButton(
+          label: tr('tbl.preferences'),
+          onPressed: _openPreferences,
+          icon: const Icon(Icons.settings, size: 17),
+        ),
+      ]),
+      if (_canWriteItems) ...[
+        const SizedBox(height: 6),
+        _batchActionBar(p, rows, includeCreate: true),
       ],
     ]);
   }
@@ -1520,13 +1575,6 @@ class TablePageViewState extends State<TablePageView>
             color: tok.text),
       ),
     );
-  }
-
-  TableItem? _selectedItem(List<TableItem> rows) {
-    for (final r in rows) {
-      if (_checked.contains(r.ddbJson)) return r;
-    }
-    return null;
   }
 
   // Mockup .vtable thead th: small uppercase letterspaced text-3 header — no
@@ -1779,10 +1827,8 @@ class TablePageViewState extends State<TablePageView>
     }
   }
 
-  /// Actions → Delete items: bulk-delete every checked row (single merged
-  /// confirmation carrying the redimos raw-write warning).
-  Future<void> _deleteSelected(List<TableItem> rows) async {
-    final items = rows.where((r) => _checked.contains(r.ddbJson)).toList();
+  /// Delete one or more selected rows after one merged confirmation.
+  Future<void> _deleteRows(List<TableItem> items) async {
     if (items.isEmpty) return;
     final keys = <Map<String, dynamic>>[];
     for (final r in items) {
@@ -1796,15 +1842,13 @@ class TablePageViewState extends State<TablePageView>
     final go = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title:
-            Text('${tr('tbl.delete')} ${keys.length} ${tr('tbl.itemsParen')}?'),
+        title: Text('${tr('tbl.delete')} ${keys.length} ${tr('tbl.itemsParen')}?'),
         content: SizedBox(
           width: 440,
-          child: Text(
-            'This permanently deletes ${keys.length} item(s) from "$_effTable", '
-            'writing directly to DynamoDB and bypassing redimos’s encoding — for redimos data, '
-            'prefer the Browser or Console tab.',
-          ),
+          child: Text(trp('tbl.deleteRawBody', {
+            'count': '${keys.length}',
+            'table': _effTable,
+          })),
         ),
         actions: [
           CodexButton(
@@ -1836,7 +1880,7 @@ class TablePageViewState extends State<TablePageView>
     _run(resetPaging: false);
   }
 
-  /// Actions → Export to CSV: the current page's visible columns/rows, written
+  /// Export to CSV: the current page's visible columns/rows, written
   /// to ~/Downloads (falls back to the clipboard if the write fails).
   Future<void> _exportCsv(List<String> cols, List<TableItem> rows) async {
     String q(String s) => '"${s.replaceAll('"', '""')}"';
