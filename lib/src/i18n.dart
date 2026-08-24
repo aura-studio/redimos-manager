@@ -267,9 +267,8 @@ const Map<String, Map<AppLang, String>> _strings = {
   },
   'svc.heap': {AppLang.en: 'JVM heap', AppLang.zh: 'JVM 堆内存'},
   'svc.heapHint': {
-    AppLang.en:
-        'e.g. 512m, 1g (k/m/g case-insensitive; plain number = bytes)',
-    AppLang.zh: '如 512m、1g（支持 k/m/g，不区分大小写；纯数字按字节计）'
+    AppLang.en: 'e.g. 512m, 1g',
+    AppLang.zh: '如 512m、1g'
   },
   'svc.identityLocked': {
     AppLang.en: 'Stop this Service to change engine, port, or storage',
@@ -464,7 +463,7 @@ const Map<String, Map<AppLang, String>> _strings = {
   },
 
   // --- extracted from page files (workflow, phase 1 cont.) ---
-  'home.accessKeyId': {AppLang.en: 'AccessKeyID', AppLang.zh: '访问密钥 ID'},
+  'home.accessKeyId': {AppLang.en: 'Access Key ID', AppLang.zh: '访问密钥 ID'},
   'home.addFlag': {AppLang.en: 'Add flag', AppLang.zh: '添加参数'},
   'home.adopted': {AppLang.en: 'adopted', AppLang.zh: '已接管'},
   'home.alreadyRunning': {AppLang.en: 'Another Redimos Manager instance is already running.', AppLang.zh: '另一个 Redimos Manager 实例正在运行。'},
@@ -521,8 +520,8 @@ const Map<String, Map<AppLang, String>> _strings = {
   'home.saveBeforeStart': {AppLang.en: 'Save the config before starting it', AppLang.zh: '启动前请先保存配置'},
   'home.saveFailed': {AppLang.en: 'Save failed', AppLang.zh: '保存失败'},
   'home.saved': {AppLang.en: 'Saved', AppLang.zh: '已保存'},
-  'home.secretAccessKey': {AppLang.en: 'SecretAccessKey', AppLang.zh: '秘密访问密钥'},
-  'home.sessionToken': {AppLang.en: 'SessionToken', AppLang.zh: '会话令牌'},
+  'home.secretAccessKey': {AppLang.en: 'Secret Access Key', AppLang.zh: '秘密访问密钥'},
+  'home.sessionToken': {AppLang.en: 'Session Token', AppLang.zh: '会话令牌'},
   'home.startFailed': {AppLang.en: 'Start failed', AppLang.zh: '启动失败'},
   'home.startingAnyway': {AppLang.en: 'Starting anyway would fail or corrupt the data. Choose how to fix it:', AppLang.zh: '强行启动会失败或损坏数据。请选择修复方式:'},
   'home.status': {AppLang.en: 'Status', AppLang.zh: '状态'},

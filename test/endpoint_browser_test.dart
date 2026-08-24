@@ -205,7 +205,7 @@ void main() {
     expect(find.text('AWS · read-only'), findsOneWidget);
     final createTable = tester.widget<CodexButton>(
       find.ancestor(
-        of: find.text('＋ Table'),
+        of: find.bySemanticsLabel('＋ Table'),
         matching: find.byType(CodexButton),
       ),
     );

@@ -184,7 +184,11 @@ class TablePageViewState extends State<TablePageView>
   int _entityGeneration = 0;
   int _metaGeneration = 0;
   int _runGeneration = 0;
-
+  bool _editorOpen = false;
+  String? _editorTable;
+  TableTarget? _editorTarget;
+  bool _editorIsNew = false;
+  Map<String, dynamic> _editorInitial = const {};
   @override
   bool get wantKeepAlive => true;
 
@@ -256,6 +260,9 @@ class TablePageViewState extends State<TablePageView>
     _sortCol = null;
     _sortAsc = true;
     _checked.clear();
+    _editorOpen = false;
+    _editorTarget = null;
+    _editorInitial = const {};
     // _pageSize is a user preference and intentionally survives table changes.
   }
 
@@ -441,7 +448,8 @@ class TablePageViewState extends State<TablePageView>
 
     return Theme(
       data: _denseTabTheme(context),
-      child: CodexStateShell(
+      child: Stack(children: [
+        CodexStateShell(
         key: const ValueKey('table-page-state'),
         state: state,
         toolbar: showHeader
@@ -487,7 +495,49 @@ class TablePageViewState extends State<TablePageView>
                   ],
                 ),
               ),
-      ),
+        ),
+        if (_editorOpen) ...[
+          Positioned.fill(
+            child: ModalBarrier(
+              dismissible: false,
+              color: Colors.black.withValues(alpha: 0.28),
+            ),
+          ),
+          Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 900, maxHeight: 720),
+              child: CodexSurface(
+                variant: CodexSurfaceVariant.elevated,
+                padding: EdgeInsets.zero,
+                child: ItemEditorPage(
+                  key: ValueKey('item-editor-${_editorTable ?? ''}'),
+                  table: _editorTable ?? _effTable,
+                  target: _editorTarget!,
+                  isNew: _editorIsNew,
+                  initial: _editorInitial,
+                  onSave: (av) async {
+                    if (!await _confirmRawWrite('Write')) return '';
+                    final res = widget.core.tablePutItem(_effCfg, av);
+                    return res['ok'] == true
+                        ? null
+                        : '${res['error'] ?? tr('tbl.saveFailed')}';
+                  },
+                  onCancel: () => setState(() => _editorOpen = false),
+                  onCompleted: (saved) {
+                    final wasNew = _editorIsNew;
+                    setState(() => _editorOpen = false);
+                    if (!saved) return;
+                    _toast(wasNew
+                        ? tr('tbl.itemCreated')
+                        : tr('tbl.itemSaved'));
+                    _run(resetPaging: false);
+                  },
+                ),
+              ),
+            ),
+          ),
+        ],
+      ]),
     );
   }
 
@@ -1606,25 +1656,13 @@ class TablePageViewState extends State<TablePageView>
       }
     }
     if (!mounted) return;
-    final saved = await Navigator.of(context).push<bool>(MaterialPageRoute(
-      fullscreenDialog: true,
-      builder: (_) => ItemEditorPage(
-        table: _effTable,
-        target: t,
-        isNew: isNew,
-        initial: initial,
-        onSave: (av) async {
-          if (!await _confirmRawWrite('Write')) return ''; // '' = cancelled
-          final res = widget.core.tablePutItem(_effCfg, av);
-          return res['ok'] == true
-              ? null
-              : '${res['error'] ?? tr('tbl.saveFailed')}';
-        },
-      ),
-    ));
-    if (!mounted || saved != true) return;
-    _toast(isNew ? tr('tbl.itemCreated') : tr('tbl.itemSaved'));
-    _run(resetPaging: false);
+    setState(() {
+      _editorOpen = true;
+      _editorTable = _effTable;
+      _editorTarget = t;
+      _editorIsNew = isNew;
+      _editorInitial = initial;
+    });
   }
 
   /// Read-only DynamoDB-JSON viewer (AWS mode / index targets).

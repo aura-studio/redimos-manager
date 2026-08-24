@@ -55,6 +55,11 @@ class ItemEditorPage extends StatefulWidget {
   /// Persists the item; returns null on success or an error message.
   final Future<String?> Function(Map<String, dynamic> item) onSave;
 
+  /// Optional local-overlay lifecycle hooks. Standalone callers keep the
+  /// Navigator-based behavior when these are omitted.
+  final VoidCallback? onCancel;
+  final ValueChanged<bool>? onCompleted;
+
   const ItemEditorPage({
     super.key,
     required this.table,
@@ -62,6 +67,8 @@ class ItemEditorPage extends StatefulWidget {
     required this.isNew,
     required this.initial,
     required this.onSave,
+    this.onCancel,
+    this.onCompleted,
   });
 
   @override
@@ -259,6 +266,15 @@ class _ItemEditorPageState extends State<ItemEditorPage> {
     });
   }
 
+  void _close(bool result) {
+    final completed = widget.onCompleted;
+    if (completed != null) {
+      completed(result);
+    } else {
+      Navigator.of(context).pop(result);
+    }
+  }
+
   Future<void> _save() async {
     final av = _currentAv(fromForm: _formView);
     if (av == null) return;
@@ -277,7 +293,7 @@ class _ItemEditorPageState extends State<ItemEditorPage> {
     if (!mounted) return;
     setState(() => _saving = false);
     if (err == null) {
-      Navigator.of(context).pop(true);
+      _close(true);
     } else if (err.isNotEmpty) {
       _toast(err, error: true);
     } // '' = user cancelled the confirm — stay on the page silently
@@ -291,6 +307,7 @@ class _ItemEditorPageState extends State<ItemEditorPage> {
     final actionLabel =
         widget.isNew ? tr('item.createItem') : tr('item.saveChanges');
     return Scaffold(
+      backgroundColor: Colors.transparent,
       body: SafeArea(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -306,7 +323,7 @@ class _ItemEditorPageState extends State<ItemEditorPage> {
                       semanticLabel: tr('item.cancel'),
                       tooltip: tr('item.cancel'),
                       icon: const Icon(Icons.arrow_back, size: 17),
-                      onPressed: () => Navigator.of(context).pop(false),
+                      onPressed: widget.onCancel ?? () => _close(false),
                     ),
                     const SizedBox(width: 8),
                     Expanded(
@@ -385,7 +402,7 @@ class _ItemEditorPageState extends State<ItemEditorPage> {
                       variant: CodexButtonVariant.ghost,
                       onPressed: _saving
                           ? null
-                          : () => Navigator.of(context).pop(false),
+                          : () => _close(false),
                       label: Text(tr('item.cancel')),
                     ),
                     const SizedBox(width: 10),

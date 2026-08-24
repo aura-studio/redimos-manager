@@ -1195,6 +1195,28 @@ class MatSuppress {
         labelStyle: Ts.themedStyle(td, size: Ts.md, weight: FontWeight.w600),
         unselectedLabelStyle: Ts.themedStyle(td, size: Ts.md),
       ),
+      segmentedButtonTheme: SegmentedButtonThemeData(
+        style: ButtonStyle(
+          backgroundColor: WidgetStateProperty.resolveWith(
+            (states) => states.contains(WidgetState.selected)
+                ? t.selection
+                : transparent,
+          ),
+          foregroundColor: WidgetStateProperty.resolveWith(
+            (states) => states.contains(WidgetState.selected)
+                ? t.accent
+                : t.text2,
+          ),
+          side: WidgetStatePropertyAll(BorderSide(color: t.border)),
+          shape: WidgetStatePropertyAll(shape),
+          textStyle: WidgetStatePropertyAll(controlText),
+          overlayColor: const WidgetStatePropertyAll(transparent),
+          elevation: const WidgetStatePropertyAll(0),
+          surfaceTintColor: const WidgetStatePropertyAll(transparent),
+          visualDensity: VisualDensity.compact,
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        ),
+      ),
       scrollbarTheme: ScrollbarThemeData(
         thickness: WidgetStateProperty.resolveWith(
           (states) => states.contains(WidgetState.dragged) ? 8 : 6,

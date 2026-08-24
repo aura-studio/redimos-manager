@@ -230,7 +230,6 @@ class _EndpointTablesViewState extends State<EndpointTablesView>
                 ? null
                 : () => _toast(
                     'Creating tables needs engine support (rm_table_create) — not available yet.'),
-            icon: const Icon(Icons.add, size: 14),
             label: Text('＋ Table',
                 style: Ts.style(size: Ts.md, weight: FontWeight.w500)),
           ),
@@ -292,7 +291,7 @@ class _EndpointTablesViewState extends State<EndpointTablesView>
                     controller.isOpen ? controller.close() : controller.open(),
             children: [
               const SizedBox(width: 12),
-              Text('⛁', style: Ts.style(size: 13, color: tok.accent)),
+              Icon(Icons.table_chart_outlined, size: 15, color: tok.accent),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
