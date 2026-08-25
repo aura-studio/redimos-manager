@@ -5,9 +5,8 @@ import 'dart:ui' show AppExitResponse;
 import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
 
-import 'src/browser_page.dart';
-import 'src/cmd_console.dart';
 import 'src/configure_page.dart';
+import 'src/connect_detail.dart';
 import 'src/endpoint_detail.dart';
 import 'src/home_chrome.dart';
 import 'src/i18n.dart';
@@ -15,7 +14,7 @@ import 'src/logs_page.dart';
 import 'src/models.dart';
 import 'src/monitor_widgets.dart';
 import 'src/native.dart';
-import 'src/playground_page.dart';
+import 'src/redis_connection.dart';
 import 'src/service_configure.dart';
 import 'src/service_detail.dart';
 import 'src/services_state.dart';
@@ -96,11 +95,16 @@ class _HomePageState extends State<HomePage>
   Timer? _poll;
   // Lets the parent inspect / save the editor form before leaving it.
   final _editorKey = GlobalKey<ConfigEditorState>();
-  // Right-pane tabs (Configure / Monitor / Logs / Console / Browser /
-  // Playground) — owned here so flows can jump between tabs. The endpoint-bound
-  // storage views (Endpoint / Table / PartiQL) live on the endpoint detail,
-  // which owns them outright (2026-08-05 trim).
-  late final TabController _tabs = TabController(length: 6, vsync: this);
+  // Right-pane tabs (Configure / Monitor / Logs) — owned here so flows can
+  // jump between tabs. Browse / Console / Playground moved to the Connect
+  // module (a Redis client connection owns the client screens).
+  late final TabController _tabs = TabController(length: 3, vsync: this);
+
+  // Connect module: persisted Redis client connections (Flutter-side JSON),
+  // the current selection and its MidBar screen index.
+  List<RedisConnection> _connections = [];
+  String? _selConnectId;
+  int _connScreenIndex = 0;
 
   // Rolling CPU / memory history per config id, fed by the status poll and
   // drawn as sparklines in the monitor panel.
@@ -109,6 +113,11 @@ class _HomePageState extends State<HomePage>
   final Map<String, List<double>> _memHist = {};
   final Map<String, List<double>> _opsHist =
       {}; // redimos ops/s (from /metrics)
+  // ERROR-severity line counts per instance (log buffer), for the monitor's
+  // Errors tile; same word-boundary rule as the Logs screen's level parser.
+  static final RegExp _errLineRe =
+      RegExp(r'\b(error|err|fatal)\b', caseSensitive: false);
+  Map<String, int> _errCount = {};
 
   // Stage 11: central multi-Service state (list / selection / tab / per-ID
   // history), refreshed by the SAME 1.5 s timer as the instance status — one
@@ -130,8 +139,10 @@ class _HomePageState extends State<HomePage>
     // never land on (see the v2.3 self-test). Release builds ignore the env.
     if (kDebugMode) {
       final i = int.tryParse(Platform.environment['REDIMOS_INITIAL_TAB'] ?? '');
-      if (i != null) _tabs.index = i.clamp(0, 5);
+      if (i != null) _tabs.index = i.clamp(0, 2);
     }
+    _connections = loadConnections();
+    if (_connections.isNotEmpty) _selConnectId = _connections.first.id;
     try {
       _core = NativeCore();
       _svcState = ServicesState(_core!);
@@ -211,8 +222,19 @@ class _HomePageState extends State<HomePage>
       if (_memHist[s.id]!.length > _histCap) _memHist[s.id]!.removeAt(0);
       if (_opsHist[s.id]!.length > _histCap) _opsHist[s.id]!.removeAt(0);
     }
+    final errs = <String, int>{};
+    for (final c in _configs) {
+      if (c.id.startsWith('unsaved-')) continue;
+      try {
+        errs[c.id] =
+            _core!.logs(c.id).where((l) => _errLineRe.hasMatch(l)).length;
+      } catch (_) {
+        // No log buffer for this id (never started) — the tile shows —.
+      }
+    }
     setState(() {
       _status = st;
+      _errCount = errs;
     });
   }
 
@@ -424,6 +446,7 @@ class _HomePageState extends State<HomePage>
     // each kind keeps its own selection, so switching never loses one (12.6).
     final isSvc = _entityKind == EntityKind.service;
     final isEp = !isSvc && _entityKind == EntityKind.endpoint;
+    final isConn = !isSvc && !isEp && _entityKind == EntityKind.connect;
     // CP 9.x: the chrome (rail / entity sidebar / top bar / mid bar / status
     // bar) lives in src/home_chrome.dart so the pixel-capture channel can wrap
     // the very same widgets around its content screens.
@@ -438,28 +461,41 @@ class _HomePageState extends State<HomePage>
           selectedEndpointId: _selEndpointId,
           hoveredCardId: _hoveredCardId,
           entityQuery: _entityQuery,
-          tabLabels:
-              isSvc ? _serviceTabLabels() : isEp ? _epTabLabels() : _instanceTabLabels(),
+          tabLabels: isSvc
+              ? _serviceTabLabels()
+              : isEp
+                  ? _epTabLabels()
+                  : isConn
+                      ? _connectTabLabels()
+                      : _instanceTabLabels(),
           tabIndex: isSvc
               ? (_svcState?.selectedTab ?? 0)
               : isEp
                   ? _epScreenIndex
-                  : _tabs.index,
+                  : isConn
+                      ? _connScreenIndex
+                      : _tabs.index,
           stopAllSnapshot: _stopAllSnapshot,
           lang: appLang.value,
           services: _svcState?.services ?? const [],
           selectedServiceId: _svcState?.selectedId,
+          connections: _connections,
+          selectedConnectionId: _selConnectId,
         ),
         cb: ChromeCallbacks(
           onEntityKind: (k) => setState(() => _entityKind = k),
           onSelectConfig: _selectInstance,
           onSelectEndpoint: _selectEndpoint,
           onSelectService: _selectService,
+          onSelectConnect: _selectConnect,
+          onNewConnect: _newConnect,
+          onDeleteConnect: _deleteConnect,
+          onNewEndpoint: _newEndpoint,
           onHoverCard: (h) => setState(() => _hoveredCardId = h),
           onQueryChanged: (v) => setState(() => _entityQuery = v),
           onNewConfig: _newConfig,
           onNewService: _newService,
-          onMidTab: (i) => _onMidTab(i, isEp),
+          onMidTab: (i) => _onMidTab(i),
           onStartStop: _startStop,
           onServiceStartStop: _serviceStartStop,
           onStopAll: _stopAll,
@@ -475,77 +511,80 @@ class _HomePageState extends State<HomePage>
     );
   }
 
-  void _onMidTab(int i, bool isEp) {
+  void _onMidTab(int i) {
     if (_entityKind == EntityKind.service) {
       _svcState?.selectedTab = i; // notifies → listener rebuilds
       return;
     }
-    if (isEp) {
+    if (_entityKind == EntityKind.endpoint) {
       setState(() => _epScreenIndex = i);
-    } else {
-      _tabs.animateTo(i);
-      setState(() {}); // refresh the MidBar's active underline + top-bar name
+      return;
     }
+    if (_entityKind == EntityKind.connect) {
+      setState(() => _connScreenIndex = i);
+      return;
+    }
+    _tabs.animateTo(i);
+    setState(() {}); // refresh the MidBar's active underline + top-bar name
   }
 
   Widget _midBarCta() {
-    // Context CTA in the end group. Wired screens get a live action; the rest
-    // reserve the slot (per-screen wiring lands in T4–T13). Stage 12: route by
-    // the ACTIVE entity kind — the Service area has no CTA yet (stage 13 adds
-    // the Configure action bar inside its own screen instead).
+    // Context CTA in the end group. Stage 12: route by the ACTIVE entity kind.
+    // Service has no CTA (its action bar lives in the screen). Instance keeps
+    // only Configure/Monitor/Logs — no CTA. Connect wires Browse's New Key and
+    // Playground's Run through the same GlobalKey grammar as before.
     if (_entityKind == EntityKind.service) return const SizedBox(width: 8);
-    final isEp = _entityKind == EntityKind.endpoint;
-    final idx = isEp ? _epScreenIndex : _tabs.index;
-    if (!isEp && idx == 0) {
-      // Browse → New Key
-      final c = _selected;
-      if (c != null) {
-        return chromeCta(
-            context, Icons.add, tr('br.newKey'), () => _focusBrowserNewKey(c));
+    if (_entityKind == EntityKind.connect) {
+      if (_connScreenIndex == 1) {
+        final st = _browserKey.currentState;
+        if (st != null) {
+          return chromeCta(context, Icons.add, tr('br.newKey'),
+              () => (st as dynamic).startCreateKey());
+        }
       }
-    }
-    if (!isEp && idx == 4) {
-      // Playground → Run (same v2.3 CTA grammar, same action as the toolbar's)
-      final st = _playgroundKey.currentState;
-      if (st != null) {
-        return chromeCta(context, Icons.play_arrow, tr('pg.run'),
-            () => (st as dynamic).runScript());
+      if (_connScreenIndex == 3) {
+        final st = _playgroundKey.currentState;
+        if (st != null) {
+          return chromeCta(context, Icons.play_arrow, tr('pg.run'),
+              () => (st as dynamic).runScript());
+        }
       }
+      return const SizedBox(width: 8);
     }
     return const SizedBox(width: 8);
   }
 
-  // A GlobalKey into the instance Browser page so the MidBar CTA can reach its
+  // A GlobalKey into the Connect Browse page so the MidBar CTA can reach its
   // New-Key flow (the in-page button and the CTA open the same dialog).
   final GlobalKey _browserKey = GlobalKey();
-  // Same bridge for the instance Playground screen's Run action (T9).
+  // Same bridge for the Connect Playground screen's Run action.
   final GlobalKey _playgroundKey = GlobalKey();
-
-  void _focusBrowserNewKey(RedimosConfig c) {
-    final st = _browserKey.currentState;
-    if (st != null) (st as dynamic).startCreateKey();
-  }
 
   // ---- screen-name + tab-label helpers (single source for top bar & mid bar) ----
 
   // v2.3 mockups label the instance tab 'Browse' but the endpoint tab
   // 'Browser'; the two screens must not share one i18n value. Reuse the
   // existing 'ep.browse' ('Browse') key for the instance side — no new keys.
-  static const _instanceTabKeys = [
+  // The instance detail kept Configure / Monitor / Logs when the client
+  // screens (Browse / Console / Playground) moved to the Connect module.
+  static const _instanceTabKeys = ['tab.configure', 'tab.monitor', 'tab.logs'];
+  List<String> _instanceTabLabels() =>
+      [for (final k in _instanceTabKeys) tr(k)];
+
+  // Connect module: Configure leads, then the three Redis client screens.
+  static const _connectTabKeys = [
     'tab.configure',
     'ep.browse',
     'tab.console',
-    'tab.monitor',
-    'tab.logs',
     'tab.playground'
   ];
-  List<String> _instanceTabLabels() =>
-      [for (final k in _instanceTabKeys) tr(k)];
+  List<String> _connectTabLabels() =>
+      [for (final k in _connectTabKeys) tr(k)];
 
   // v1.2 redesign: the endpoint's three screens — Configure leads (two-mode
   // identity editor), then the storage views split the way v1 had them:
   // Endpoint (every table on the backend) and Table (item browser/editor).
-  static const _epTabKeys = ['tab.configure', 'tab.endpoint', 'tab.table'];
+  static const _epTabKeys = ['tab.configure', 'tab.table'];
   List<String> _epTabLabels() => [for (final k in _epTabKeys) tr(k)];
 
   // v1.2: the Service detail's three fixed screens — Configure leads (v1
@@ -653,6 +692,41 @@ class _HomePageState extends State<HomePage>
     });
   }
 
+  // The endpoint group's New button creates the endpoint itself: persist a
+  // storage-style config (no table) and the core derives the endpoint from
+  // its tuple — same create-persist-and-select grammar as _newService. An
+  // existing tuple just gets selected (endpoints are a dedup view).
+  void _newEndpoint() {
+    final core = _core;
+    if (core == null) return;
+    try {
+      final c = RedimosConfig(
+        name: 'new-endpoint',
+        port: _nextFreePort(),
+        table: '',
+        endpoint: 'http://localhost:8000',
+      );
+      core.saveConfig(c);
+      _reload();
+      setState(() {
+        _entityKind = EntityKind.endpoint;
+        _epScreenIndex = 0;
+        _epTableOverride = null;
+        _selEndpointId = null;
+        for (final e in _endpoints) {
+          if (e.endpoint == c.endpoint &&
+              e.region == c.region &&
+              e.accessKeyId == c.accessKeyId) {
+            _selEndpointId = e.id;
+            break;
+          }
+        }
+      });
+    } catch (e) {
+      _toast('${tr('home.saveFailed')}: $e');
+    }
+  }
+
   String _entityQuery = '';
 
   Future<void> _selectInstance(RedimosConfig c) async {
@@ -670,6 +744,59 @@ class _HomePageState extends State<HomePage>
   void _selectService(String id) {
     _svcState?.select(id);
     setState(() => _entityKind = EntityKind.service);
+  }
+
+  // Connect module selection: each connection keeps its own screen index
+  // reset on a fresh pick, same grammar as endpoints (12.6).
+  void _selectConnect(String id) {
+    setState(() {
+      if (id != _selConnectId) _connScreenIndex = 0;
+      _selConnectId = id;
+      _entityKind = EntityKind.connect;
+    });
+  }
+
+  RedisConnection? get _selConnect {
+    for (final c in _connections) {
+      if (c.id == _selConnectId) return c;
+    }
+    return null;
+  }
+
+  // Create persists a blank connection, selects it and lands on Configure so
+  // the user finishes host/port in place (same grammar as _newService).
+  void _newConnect() {
+    final conn = RedisConnection(
+        id: 'conn-${DateTime.now().microsecondsSinceEpoch}',
+        name: 'new-connection');
+    setState(() {
+      _connections = [..._connections, conn];
+      saveConnections(_connections);
+      _selConnectId = conn.id;
+      _connScreenIndex = 0;
+      _entityKind = EntityKind.connect;
+    });
+  }
+
+  Future<void> _saveConnect(RedisConnection saved) async {
+    setState(() {
+      _connections = [
+        for (final c in _connections)
+          if (c.id == saved.id) saved else c
+      ];
+      saveConnections(_connections);
+    });
+  }
+
+  void _deleteConnect(String id) {
+    setState(() {
+      _connections = [for (final c in _connections) if (c.id != id) c];
+      saveConnections(_connections);
+      if (_selConnectId == id) {
+        _selConnectId = _connections.isNotEmpty ? _connections.first.id : null;
+        _connScreenIndex = 0;
+      }
+    });
   }
 
   // Stage 13: create persists a default Service through the core, selects it,
@@ -734,12 +861,24 @@ class _HomePageState extends State<HomePage>
         onSaveEndpoint: (saved) => _persistEndpointEdit(e, saved),
         onDeleteEndpoint: () => _deleteEndpoint(e),
         selectedTable: _epTableOverride,
-        // The Endpoint tab's row tap bridges into the Table tab (v1
-        // _browseTable): HomePage owns both the screen index and the table.
+        // The Table screen's sidebar row tap selects the browsed table and
+        // jumps to the Table tab (v1 _browseTable): HomePage owns both the
+        // screen index and the table.
         onOpenTable: (name) => setState(() {
           _epTableOverride = name;
-          _epScreenIndex = 2;
+          _epScreenIndex = 1;
         }),
+      );
+
+  // Right pane for a selected Connect entry: Configure / Browse / Console /
+  // Playground over the connection's own host:port (see connect_detail.dart).
+  Widget _connectDetail(RedisConnection c) => ConnectDetailView(
+        key: ValueKey('connect-detail-${c.id}'),
+        core: _core!,
+        connection: c,
+        screenIndex: _connScreenIndex,
+        onSave: _saveConnect,
+        onDelete: () async => _deleteConnect(c.id),
       );
 
   // Endpoint deletion: the endpoint is a dedup view over instance configs, so
@@ -806,14 +945,20 @@ class _HomePageState extends State<HomePage>
       return Center(child: Text(tr('config.pick')));
     }
     if (_entityKind == EntityKind.service) return _serviceDetail();
+    if (_entityKind == EntityKind.connect) {
+      final c = _selConnect;
+      if (c != null) return _connectDetail(c);
+      return Center(child: Text(tr('connect.noneYet')));
+    }
     final c = _selected;
     if (c == null) {
       return Center(child: Text(tr('config.pick')));
     }
     final logsConfigId = c.id.startsWith('unsaved-') ? null : c.id;
     final st = _status[c.id];
-    // v1 convention restored: Configure / Browse / Console / Monitor / Logs /
-    // Playground. The TabController stays (it preserves per-tab state and lets
+    // v1 convention restored, trimmed: Configure / Monitor / Logs. The Redis
+    // client screens (Browse / Console / Playground) live on the Connect
+    // module now. The TabController stays (it preserves per-tab state and lets
     // flows jump between tabs); only its on-screen chrome moved to the MidBar.
     final screens = <Widget>[
       // configure (scrolls its own fields, pins the action bar)
@@ -822,44 +967,6 @@ class _HomePageState extends State<HomePage>
         config: c,
         onSave: _save,
         onDelete: _delete,
-      ),
-      // browser — Redis key browser over the proxy (ARDM style)
-      BrowserPageView(
-        key: _browserKey,
-        config: c,
-        running: st?.isRunning ?? false,
-        core: _core!,
-      ),
-      // console — interactive redis-cli against the running proxy
-      CmdConsole(
-        key: ValueKey('cmd-${c.id}'),
-        host: '127.0.0.1',
-        port: c.port,
-        auth: c.requirepass.isEmpty ? null : c.requirepass,
-        running: st?.isRunning ?? false,
-        // v2.3 mockup .inst-crumb shows the instance name, not host:port.
-        instanceName: c.name,
-        // The console's RESP socket stays up when the DynamoDB backend
-        // dies, so no "Reconnecting" state ever appears — commands just
-        // start failing. /readyz is what reports backend usability.
-        backendDegraded: st != null && st.isRunning && st.healthy && !st.ready,
-        // The cause behind that dot, when redimos reports one. Passed
-        // whenever present rather than gated on backendDegraded: the
-        // console also raises the dot optimistically from an error
-        // reply, ahead of the health signal, and that path deserves the
-        // cause too once a sample carries it.
-        backendError: st?.backendError,
-        // Surface the crash-loop cause (e.g. a failing startup backend
-        // check) so a proxy that can't reach its table isn't a silent
-        // spinner. Only while it's actually down for a known reason.
-        statusReason: (st != null &&
-                !st.isRunning &&
-                st.exitMsg.isNotEmpty &&
-                (st.status == 'restarting' ||
-                    st.status == 'failed' ||
-                    st.status == 'error'))
-            ? st.exitMsg
-            : null,
       ),
       // monitor — the redimos proxy's own telemetry only; the Local
       // DynamoDB engine's dashboard lives on the local endpoint page
@@ -870,19 +977,12 @@ class _HomePageState extends State<HomePage>
         opsHist: _opsHist[c.id] ?? const [],
         embedded: true,
         instanceName: c.name,
+        errorCount: _errCount[c.id],
       ),
       // logs — the proxy's own log tail (v2.3 screen, src/logs_page.dart)
       LogsPage(
         core: _core!,
         configId: logsConfigId,
-      ),
-      // playground — run a JS/Go script against the proxy's Redis
-      PlaygroundView(
-        key: _playgroundKey,
-        core: _core!,
-        config: c,
-        kind: 'redis',
-        running: st?.isRunning ?? false,
       ),
     ];
     final activeIndex = _tabs.index;
@@ -952,6 +1052,9 @@ class MonitorView extends StatefulWidget {
   final VoidCallback? onToggle;
   final bool embedded; // headerless, always-shown tiles (for the tab layout)
   final String instanceName; // the config's name — for the mockup page headline
+  // Total ERROR-severity lines in the instance's log buffer (the Logs screen's
+  // rule); null until the poller has a count (never-started instance).
+  final int? errorCount;
   const MonitorView({
     super.key,
     required this.status,
@@ -962,6 +1065,7 @@ class MonitorView extends StatefulWidget {
     this.onToggle,
     this.embedded = false,
     this.instanceName = '',
+    this.errorCount,
   });
 
   @override
@@ -1146,16 +1250,19 @@ class _MonitorViewState extends State<MonitorView>
               fitReference: _fitRef,
               value: '${st?.restarts ?? 0}'),
           InfoTile(
+              label: tr('home.errors'),
+              fitReference: _fitRef,
+              valueColor: (widget.errorCount ?? 0) > 0 ? t.danger : null,
+              value: widget.errorCount == null
+                  ? '—'
+                  : '${widget.errorCount}'),
+          InfoTile(
               label: tr('home.latency'),
               fitReference: _fitRef,
               // Mockup .it-value "0.4 ms" — one decimal, no trailing zeros.
               value: running && st!.metricsOk
                   ? '${(st.avgLatencyMs * 10).round() / 10} ms'
                   : '—'),
-          InfoTile(
-              label: tr('home.port'),
-              fitReference: _fitRef,
-              value: running ? '${st!.port}' : '—'),
           InfoTile(
               label: tr('home.status'),
               fitReference: _fitRef,
@@ -1166,6 +1273,10 @@ class _MonitorViewState extends State<MonitorView>
               fitReference: _fitRef,
               valueColor: healthColor,
               value: healthValue),
+          InfoTile(
+              label: tr('home.port'),
+              fitReference: _fitRef,
+              value: running ? '${st!.port}' : '—'),
           InfoTile(
               label: tr('home.engine'), fitReference: _fitRef, value: _fitRef),
         ]),

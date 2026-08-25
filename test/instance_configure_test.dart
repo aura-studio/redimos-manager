@@ -86,9 +86,9 @@ void main() {
         );
 
         expect(find.byType(CodexSurface), findsNWidgets(5));
-        expect(find.byType(CodexTextField), findsNWidgets(14));
-        expect(find.byType(CodexSelectField<String>), findsNWidgets(2));
-        expect(find.byType(CodexButton), findsNWidgets(3));
+        expect(find.byType(CodexTextField), findsNWidgets(10));
+        expect(find.byType(CodexSelectField<String>), findsNWidgets(3));
+        expect(find.byType(CodexButton), findsNWidgets(4));
         expect(
           tester.getSize(find.byKey(const ValueKey('configure-action-bar'))),
           const Size(1280, 52),
@@ -125,29 +125,28 @@ void main() {
         );
 
         final firstField = _fieldWithText(tester, 'source-instance');
-        final switchFinder = find.byKey(const ValueKey('configure-switch-tls'));
+        final switchFinder =
+            find.byKey(const ValueKey('configure-switch-autorestart'));
         final focusTarget = find.byKey(
-          const ValueKey('configure-switch-tls-focus-target'),
+          const ValueKey('configure-switch-autorestart-focus-target'),
         );
         final before = tester.getRect(focusTarget);
         expect(before.size, const Size(34, 19));
         expect(
           tester.getSemantics(switchFinder),
           matchesSemantics(
-            label: 'TLS',
+            label: 'AutoRestart',
             isButton: true,
             hasToggledState: true,
-            isToggled: false,
+            isToggled: true,
             hasTapAction: true,
           ),
         );
 
         await tester.tap(firstField);
         await tester.pump();
-        for (var i = 0; i < 6; i++) {
-          await tester.sendKeyEvent(LogicalKeyboardKey.tab);
-          await tester.pump();
-        }
+        Focus.of(focusTarget.evaluate().single).requestFocus();
+        await tester.pump();
 
         expect(Focus.of(focusTarget.evaluate().single).hasFocus, isTrue);
         final focused = tester.widget<AnimatedContainer>(focusTarget);
@@ -163,10 +162,10 @@ void main() {
         expect(
           tester.getSemantics(switchFinder),
           matchesSemantics(
-            label: 'TLS',
+            label: 'AutoRestart',
             isButton: true,
             hasToggledState: true,
-            isToggled: true,
+            isToggled: false,
             hasTapAction: true,
           ),
         );
@@ -178,10 +177,10 @@ void main() {
         expect(
           tester.getSemantics(switchFinder),
           matchesSemantics(
-            label: 'TLS',
+            label: 'AutoRestart',
             isButton: true,
             hasToggledState: true,
-            isToggled: false,
+            isToggled: true,
             hasTapAction: true,
           ),
         );
@@ -192,7 +191,7 @@ void main() {
     );
   }
 
-  testWidgets('Configure saves the exact persisted model and parses flags',
+  testWidgets('Configure saves the exact persisted model and edits flag rows',
       (tester) async {
     final original = _config();
     final saved = <RedimosConfig>[];
@@ -223,10 +222,19 @@ void main() {
         _fieldWithText(tester, 'source-session'), 'edited-session');
     await tester.enterText(
         _fieldWithText(tester, 'source-password'), 'edited-password');
-    await tester.enterText(
-      _fieldWithText(tester, '--max-clients 128'),
-      '--max-clients 256\ntrace\n--latency-mode strict value',
-    );
+    // Flags are v1-style add/remove rows: edit the existing row's value, then
+    // add a row and pick its key from the dropdown.
+    await tester.enterText(_fieldWithText(tester, '128'), '256');
+    await tester.ensureVisible(find.text(tr('home.addFlag')));
+    await tester.pump();
+    await tester.tap(find.widgetWithText(CodexButton, tr('home.addFlag')));
+    await tester.pump();
+    tester
+        .widget<CodexSelectField<String>>(
+            find.byKey(const ValueKey('configure-flag-key-1')))
+        .onChanged!('databases');
+    await tester.pump();
+    await tester.enterText(_fieldWithText(tester, ''), '16');
 
     _selectWithValue(tester, 'native').onChanged!('docker');
     _selectWithValue(tester, 'v2').onChanged!('v1');
@@ -258,8 +266,7 @@ void main() {
       result.extraFlags.map((flag) => flag.toJson()).toList(),
       [
         {'key': 'max-clients', 'value': '256'},
-        {'key': 'trace', 'value': ''},
-        {'key': 'latency-mode', 'value': 'strict value'},
+        {'key': 'databases', 'value': '16'},
       ],
     );
     expect(original.name, 'source-instance',

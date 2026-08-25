@@ -85,11 +85,18 @@ class BrowserPageView extends StatefulWidget {
   final RedimosConfig config;
   final bool running;
   final NativeCore core;
+  // Connect module: the instance view always talks to the local proxy
+  // (127.0.0.1); a Connect connection targets any host and starts on its
+  // configured database.
+  final String host;
+  final int database;
   const BrowserPageView(
       {super.key,
       required this.config,
       required this.running,
-      required this.core});
+      required this.core,
+      this.host = '127.0.0.1',
+      this.database = 0});
 
   @override
   State<BrowserPageView> createState() => _BrowserPageViewState();
@@ -139,6 +146,7 @@ class _BrowserPageViewState extends State<BrowserPageView>
   void initState() {
     super.initState();
     _formatters = widget.core.getFormatters();
+    _db = widget.database;
     if (widget.running) _connect();
   }
 
@@ -153,10 +161,15 @@ class _BrowserPageViewState extends State<BrowserPageView>
   void didUpdateWidget(BrowserPageView old) {
     super.didUpdateWidget(old);
     if (old.config.id != widget.config.id ||
-        old.config.port != widget.config.port) {
+        old.config.port != widget.config.port ||
+        old.host != widget.host) {
       _disconnect();
       _resetAll();
+      _db = widget.database;
       if (widget.running) _connect();
+    } else if (old.database != widget.database) {
+      setState(() => _db = widget.database);
+      _reload();
     } else if (widget.running && !old.running) {
       _connect();
     } else if (!widget.running && old.running) {
@@ -184,7 +197,7 @@ class _BrowserPageViewState extends State<BrowserPageView>
       _connecting = true;
       _connError = null;
     });
-    final c = RedisClient('127.0.0.1', widget.config.port,
+    final c = RedisClient(widget.host, widget.config.port,
         auth: widget.config.requirepass.isEmpty
             ? null
             : widget.config.requirepass);
@@ -195,7 +208,9 @@ class _BrowserPageViewState extends State<BrowserPageView>
     };
     try {
       await c.connect();
-      if (widget.config.multiDb && _db > 0) await c.select(_db);
+      if ((widget.config.multiDb || widget.database > 0) && _db > 0) {
+        await c.select(_db);
+      }
       // A newer connect (config switch / disconnect) superseded this one — drop it.
       if (gen != _connGen || !mounted) {
         c.close();
@@ -583,8 +598,8 @@ class _BrowserPageViewState extends State<BrowserPageView>
           : connected
               ? null
               : _connError == null
-                  ? '127.0.0.1:${widget.config.port}'
-                  : '127.0.0.1:${widget.config.port}',
+                  ? '${widget.host}:${widget.config.port}'
+                  : '${widget.host}:${widget.config.port}',
       icon: !widget.running
           ? const Icon(Icons.play_circle_outline, size: 22)
           : null,
@@ -608,7 +623,7 @@ class _BrowserPageViewState extends State<BrowserPageView>
             ]),
           ),
           // v2.3 CLI drawer: collapsible RESP console pinned to the Browse floor.
-          CliDrawer(host: '127.0.0.1', port: widget.config.port),
+          CliDrawer(host: widget.host, port: widget.config.port),
         ]),
       ),
     );
@@ -851,8 +866,9 @@ class _BrowserPageViewState extends State<BrowserPageView>
   // preserving the native nullable DropdownButton callback contract.
   Widget _dbSelect(AppTokens tok) {
     return Tooltip(
-      message:
-          widget.config.multiDb ? tr('br.selectDatabase') : tr('br.multiDbOff'),
+      message: (widget.config.multiDb || widget.database > 0)
+          ? tr('br.selectDatabase')
+          : tr('br.multiDbOff'),
       child: SizedBox(
         width: 72,
         child: CodexSelectField<int>(

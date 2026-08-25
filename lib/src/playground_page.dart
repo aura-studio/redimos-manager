@@ -34,12 +34,17 @@ class PlaygroundView extends StatefulWidget {
   /// For kind=='redis' only: the proxy must be up. Ignored for kind=='ddb'.
   final bool running;
 
+  /// Connect module: the Redis host the script runs against (the instance
+  /// view keeps the local-proxy default).
+  final String host;
+
   const PlaygroundView({
     super.key,
     required this.core,
     required this.config,
     required this.kind,
     this.running = true,
+    this.host = '127.0.0.1',
   });
 
   @override
@@ -73,7 +78,8 @@ class _PlaygroundViewState extends State<PlaygroundView>
         oldWidget.kind != widget.kind;
     final executionContextChanged = entityChanged ||
         oldWidget.config.port != widget.config.port ||
-        oldWidget.config.requirepass != widget.config.requirepass;
+        oldWidget.config.requirepass != widget.config.requirepass ||
+        oldWidget.host != widget.host;
     if (!executionContextChanged) return;
 
     _runGeneration++;
@@ -150,6 +156,7 @@ class _PlaygroundViewState extends State<PlaygroundView>
       script: script,
       port: c.port,
       auth: c.requirepass,
+      host: widget.host,
       config: c,
       timeoutMs: 8000,
     );

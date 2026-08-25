@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:redimos_manager/src/home_chrome.dart';
 import 'package:redimos_manager/src/i18n.dart';
 import 'package:redimos_manager/src/models.dart';
+import 'package:redimos_manager/src/redis_connection.dart';
 import 'package:redimos_manager/src/ui_theme.dart';
 import 'package:redimos_manager/src/ui_tokens.dart';
 
@@ -34,6 +35,10 @@ final _svc = ServiceInfo.fromJson({
   'runtime': {'state': 'stopped', 'ready': false, 'healthy': false},
 });
 
+// Connect module fixture for the crumb branch.
+const _connection = RedisConnection(
+    id: 'conn-1', name: 'local-redis', host: '127.0.0.1', port: 6380);
+
 ChromeState _state({
   required Brightness brightness,
   EntityKind kind = EntityKind.instance,
@@ -51,6 +56,10 @@ ChromeState _state({
       selectedEndpointId: kind == EntityKind.endpoint ? _endpoint.id : null,
       services: kind == EntityKind.service ? [_svc] : const [],
       selectedServiceId: kind == EntityKind.service ? _svc.id : null,
+      connections:
+          kind == EntityKind.connect ? const [_connection] : const [],
+      selectedConnectionId:
+          kind == EntityKind.connect ? _connection.id : null,
       hoveredCardId: null,
       entityQuery: '',
       tabLabels: tabLabels,

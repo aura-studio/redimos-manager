@@ -39,6 +39,7 @@ ServiceInfo _svc(String id, String name, {int port = 8000}) =>
 const _instanceTabs = ['Browse', 'Console', 'Monitor', 'Logs', 'Play', 'Conf'];
 const _endpointTabs = ['Overview', 'Browser', 'PartiQL', 'Playground'];
 const _serviceTabs = ['Configure', 'Monitor', 'Logs'];
+const _connectTabs = ['Configure', 'Browse', 'Console', 'Playground'];
 
 /// Mirrors HomePage's per-kind selection model: three independent
 /// (selectedId, tabIndex) slots + the active kind. Nothing here ever clears
@@ -55,14 +56,17 @@ class _ThreeEntityHarnessState extends State<_ThreeEntityHarness> {
   String? instanceId;
   String? endpointId;
   String? serviceId;
+  String? connectId;
   int instanceTab = 0;
   int endpointTab = 0;
   int serviceTab = 0;
+  int connectTab = 0;
 
   List<String> get _labels => switch (kind) {
         EntityKind.instance => _instanceTabs,
         EntityKind.endpoint => _endpointTabs,
         EntityKind.service => _serviceTabs,
+        EntityKind.connect => _connectTabs,
       };
 
   @override
@@ -84,6 +88,7 @@ class _ThreeEntityHarnessState extends State<_ThreeEntityHarness> {
           EntityKind.instance => instanceTab,
           EntityKind.endpoint => endpointTab,
           EntityKind.service => serviceTab,
+          EntityKind.connect => connectTab,
         },
         stopAllSnapshot: const [],
         lang: AppLang.en,
@@ -114,6 +119,8 @@ class _ThreeEntityHarnessState extends State<_ThreeEntityHarness> {
               endpointTab = i;
             case EntityKind.service:
               serviceTab = i;
+            case EntityKind.connect:
+              connectTab = i;
           }
         }),
         onStartStop: (_) {},

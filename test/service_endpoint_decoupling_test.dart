@@ -86,7 +86,7 @@ void _endpointDetailTests() {
       EndpointDetailView(
         core: FakeNativeCore(),
         endpoint: _collidingEndpoint,
-        // Configure (the identity pane) leads at 0; the table list follows.
+        // Configure (the identity pane) leads at 0; the Table screen follows.
         screenIndex: 1,
       ),
     );
@@ -94,8 +94,6 @@ void _endpointDetailTests() {
     // The client-side screens, keyed by endpoint ID. (IndexedStack
     // off-stages every non-current screen, so look through it.)
     expect(find.byKey(const ValueKey('ep-config-ep-1'), skipOffstage: false),
-        findsOneWidget);
-    expect(find.byKey(const ValueKey('ep-tables-ep-1'), skipOffstage: false),
         findsOneWidget);
     expect(find.byKey(const ValueKey('ep-table-ep-1'), skipOffstage: false),
         findsOneWidget);
@@ -115,7 +113,7 @@ void _endpointDetailTests() {
       (tester) async {
     // The old inference was port-bounded; the new contract is stronger —
     // there is no inference at all. A URL that even CONTAINS the Service
-    // port renders the identical three-screen set.
+    // port renders the identical two-screen set.
     await _pump(
       tester,
       EndpointDetailView(
@@ -129,7 +127,7 @@ void _endpointDetailTests() {
         screenIndex: 1,
       ),
     );
-    expect(find.byKey(const ValueKey('ep-tables-ep-2'), skipOffstage: false),
+    expect(find.byKey(const ValueKey('ep-table-ep-2'), skipOffstage: false),
         findsOneWidget);
     expect(find.byKey(const ValueKey('ep-ddbmon-ep-2')), findsNothing);
     expect(find.byKey(const ValueKey('ep-ddblog-ep-2')), findsNothing);

@@ -180,9 +180,11 @@ void main() {
           child: TablePageView(core: core, config: fx.fixtureConfig()),
         );
         await _settleDeferredPage(tester);
+        await tester.ensureVisible(find.text('Previous page'));
+        await tester.pump();
 
-        expect(find.byTooltip('Previous page'), findsOneWidget);
-        expect(find.byTooltip('Next page'), findsOneWidget);
+        expect(find.text('Previous page'), findsOneWidget);
+        expect(find.text('Next page'), findsOneWidget);
         _expectEnabledButtonSemantics(tester, 'Next page');
         expect(
           tester.getSemantics(find.bySemanticsLabel('Previous page')),
@@ -194,7 +196,7 @@ void main() {
           ),
         );
 
-        await tester.tap(find.byTooltip('Next page'));
+        await tester.tap(find.bySemanticsLabel('Next page'));
         await _settleDeferredPage(tester);
         expect(core.tableRequests, hasLength(2));
         expect(core.tableRequests.last['startKey'], {

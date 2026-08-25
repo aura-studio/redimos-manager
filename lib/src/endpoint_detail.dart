@@ -14,7 +14,6 @@
 
 import 'package:flutter/material.dart';
 
-import 'endpoint_browser.dart';
 import 'i18n.dart';
 import 'models.dart';
 import 'native.dart';
@@ -58,8 +57,9 @@ class EndpointDetailView extends StatefulWidget {
 class _EndpointDetailViewState extends State<EndpointDetailView> {
   DdbEndpoint get e => widget.endpoint;
 
-  // Screen list (Configure / Endpoint / Table), one per MidBar tab.
-  // Index-matched with HomePage._epTabLabels.
+  // Screen list (Configure / Table), one per MidBar tab. The endpoint's table
+  // list moved into the Table screen's sidebar, so the old Endpoint tab is
+  // gone. Index-matched with HomePage._epTabLabels.
   List<Widget> get _screens {
     final cfg = e.toStorageConfig();
     return [
@@ -67,24 +67,20 @@ class _EndpointDetailViewState extends State<EndpointDetailView> {
       EndpointConfigPane(
         key: ValueKey('ep-config-${e.id}'),
         endpoint: e,
+        core: widget.core,
         onSave: widget.onSaveEndpoint,
         onDelete: widget.onDeleteEndpoint,
       ),
-      // Endpoint — every table on this backend (v1 EndpointPageView shape).
-      EndpointTablesView(
-        key: ValueKey('ep-tables-${e.id}'),
-        core: widget.core,
-        config: cfg,
-        endpoint: e,
-        onOpenTable: widget.onOpenTable,
-      ),
-      // Table — the item browser/editor for the selected table.
+      // Table — the item browser/editor; its sidebar lists every table on the
+      // endpoint and row taps bridge through onOpenTable.
       TablePageView(
         key: ValueKey('ep-table-${e.id}'),
         core: widget.core,
         config: cfg,
         tableOverride: widget.selectedTable,
+        endpointMode: true,
         allowOverrideWrites: e.kind != 'aws',
+        onOpenTable: widget.onOpenTable,
       ),
     ];
   }
@@ -96,26 +92,35 @@ class _EndpointDetailViewState extends State<EndpointDetailView> {
     // Keep every screen's state alive (scroll position, probe results, editor
     // contents) across tab switches — an IndexedStack does that without the
     // TabBarView the chrome used to own.
-    return IndexedStack(
-      index: i,
-      children: [
-        for (var screenIndex = 0; screenIndex < screens.length; screenIndex++)
-          ExcludeFocus(
-            key: ValueKey('endpoint-screen-$screenIndex-focus'),
-            excluding: screenIndex != i,
-            child: screens[screenIndex],
-          ),
-      ],
+    return SizedBox.expand(
+      child: IndexedStack(
+        index: i,
+        children: [
+          for (var screenIndex = 0; screenIndex < screens.length; screenIndex++)
+            ExcludeFocus(
+              key: ValueKey('endpoint-screen-$screenIndex-focus'),
+              excluding: screenIndex != i,
+              child: screens[screenIndex],
+            ),
+        ],
+      ),
     );
   }
 }
 
 class EndpointConfigPane extends StatefulWidget {
   final DdbEndpoint endpoint;
+  // Enables the Connection section's Test-connection probe; absent in the
+  // standalone config-pane tests.
+  final NativeCore? core;
   final Future<void> Function(DdbEndpoint saved)? onSave;
   final Future<void> Function()? onDelete;
   const EndpointConfigPane(
-      {super.key, required this.endpoint, this.onSave, this.onDelete});
+      {super.key,
+      required this.endpoint,
+      this.core,
+      this.onSave,
+      this.onDelete});
 
   @override
   State<EndpointConfigPane> createState() => _EndpointConfigPaneState();
@@ -128,8 +133,9 @@ class EndpointConfigPane extends StatefulWidget {
 // cleanly between a local backend and real AWS.
 enum _EpMode { endpoint, aws }
 
-_EpMode _modeFor(DdbEndpoint e) =>
-    e.kind == 'aws' || e.accessKeyId.isNotEmpty ? _EpMode.aws : _EpMode.endpoint;
+_EpMode _modeFor(DdbEndpoint e) => e.kind == 'aws' || e.accessKeyId.isNotEmpty
+    ? _EpMode.aws
+    : _EpMode.endpoint;
 
 class _EndpointConfigPaneState extends State<EndpointConfigPane>
     with AutomaticKeepAliveClientMixin {
@@ -141,6 +147,9 @@ class _EndpointConfigPaneState extends State<EndpointConfigPane>
   late final TextEditingController _token;
   late _EpMode _mode;
   bool _busy = false;
+  bool _testing = false;
+  bool? _testOk;
+  String? _testMsg;
 
   @override
   bool get wantKeepAlive => true;
@@ -268,14 +277,17 @@ class _EndpointConfigPaneState extends State<EndpointConfigPane>
         child: SingleChildScrollView(
           key: const ValueKey('ep-config-scroll'),
           padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 18),
-          child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                _section(t, '1', tr('ep.cfgSection'), [
-                  _field(t, _name, tr('ep.cfgName'),
-                      key: const ValueKey('ep-config-name')),
-                ]),
-                _section(t, '2', tr('ep.connSection'), [
+          child:
+              Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            _section(t, '1', tr('ep.cfgSection'), [
+              _field(t, _name, tr('ep.cfgName'),
+                  key: const ValueKey('ep-config-name')),
+            ]),
+            _section(
+                t,
+                '2',
+                tr('ep.connSection'),
+                [
                   if (_mode == _EpMode.endpoint)
                     _field(t, _endpoint, tr('ep.ovEndpoint'),
                         key: const ValueKey('ep-config-endpoint')),
@@ -289,20 +301,21 @@ class _EndpointConfigPaneState extends State<EndpointConfigPane>
                     _field(t, _token, tr('home.sessionToken'),
                         key: const ValueKey('ep-config-token')),
                   ],
-                ], lead: _modeSeg()),
-                Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Icon(Icons.info_outline, size: 14, color: t.text3),
-                  const SizedBox(width: 8),
-                  Flexible(
-                    child: Text(
-                      tr('ep.cfgSyncNote'),
-                      key: const ValueKey('ep-config-sync-note'),
-                      style: Ts.style(size: Ts.sm, color: t.text3),
-                    ),
-                  ),
-                ]),
-                const SizedBox(height: 16),
-              ]),
+                ],
+                lead: _connectionLead(t)),
+            Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Icon(Icons.info_outline, size: 14, color: t.text3),
+              const SizedBox(width: 8),
+              Flexible(
+                child: Text(
+                  tr('ep.cfgSyncNote'),
+                  key: const ValueKey('ep-config-sync-note'),
+                  style: Ts.style(size: Ts.sm, color: t.text3),
+                ),
+              ),
+            ]),
+            const SizedBox(height: 16),
+          ]),
         ),
       ),
       _actionBar(t),
@@ -331,6 +344,100 @@ class _EndpointConfigPaneState extends State<EndpointConfigPane>
         onSelectionChanged: (s) => setState(() => _mode = s.first),
       ),
     );
+  }
+
+  // The identity tuple as currently typed (unsaved) — the same shape _save
+  // persists, reused to probe the backend without writing anything.
+  DdbEndpoint _draft() {
+    final e = widget.endpoint;
+    final isAws = _mode == _EpMode.aws;
+    return DdbEndpoint(
+      id: e.id,
+      name: _name.text.trim(),
+      kind: isAws ? 'aws' : (e.kind == 'aws' ? 'url' : e.kind),
+      endpoint: isAws ? '' : _endpoint.text.trim(),
+      partitionID: e.partitionID,
+      region: isAws ? _region.text.trim() : '',
+      accessKeyId: isAws ? _ak.text.trim() : '',
+      secretKey: isAws ? _sk.text.trim() : '',
+      sessionToken: isAws ? _token.text.trim() : '',
+      source: e.source,
+    );
+  }
+
+  // Probe the backend described by the current field values via ListTables;
+  // reports reachability + table count without persisting.
+  Future<void> _testConnection() async {
+    final core = widget.core;
+    if (core == null) return;
+    setState(() {
+      _testing = true;
+      _testOk = null;
+      _testMsg = null;
+    });
+    final r = await core.epListTables(_draft().toStorageConfig());
+    if (!mounted) return;
+    setState(() {
+      _testing = false;
+      if (r['ok'] == true) {
+        _testOk = true;
+        _testMsg = trp('ep.testConnectionOk',
+            {'n': '${((r['tables'] as List?) ?? []).length}'});
+      } else {
+        _testOk = false;
+        _testMsg = r['error']?.toString() ?? tr('ep.testConnectionFailed');
+      }
+    });
+  }
+
+  // Mode switch plus the Test-connection probe and its result line.
+  Widget _connectionLead(AppTokens t) {
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Row(children: [
+        _modeSeg(),
+        const Spacer(),
+        if (widget.core != null)
+          CodexButton(
+            key: const ValueKey('ep-test-connection'),
+            variant: CodexButtonVariant.secondary,
+            semanticLabel: tr('ep.testConnection'),
+            onPressed: _testing ? null : _testConnection,
+            icon: const Icon(Icons.network_check, size: 15),
+            label: Text(tr('ep.testConnection')),
+          ),
+      ]),
+      if (_testing || _testMsg != null) ...[
+        const SizedBox(height: 10),
+        Row(children: [
+          if (_testing)
+            SizedBox.square(
+              dimension: 12,
+              child: CircularProgressIndicator(
+                  strokeWidth: 1.5, color: t.accent),
+            )
+          else
+            Icon(
+                _testOk == true
+                    ? Icons.check_circle_outline
+                    : Icons.error_outline,
+                size: 14,
+                color: _testOk == true ? t.success : t.danger),
+          const SizedBox(width: 8),
+          Flexible(
+            child: Text(
+              _testing ? tr('ep.ovChecking') : (_testMsg ?? ''),
+              style: Ts.style(
+                size: Ts.sm,
+                color: _testing
+                    ? t.text3
+                    : (_testOk == true ? t.success : t.danger),
+                monoFont: !_testing && _testOk != true,
+              ),
+            ),
+          ),
+        ]),
+      ],
+    ]);
   }
 
   // Same house grammar as ServiceConfigEditor: numbered section card (badge
@@ -417,7 +524,8 @@ class _EndpointConfigPaneState extends State<EndpointConfigPane>
         crossAxisAlignment: CrossAxisAlignment.stretch, children: rows);
   }
 
-  Widget _field(AppTokens t, TextEditingController c, String label, {Key? key}) {
+  Widget _field(AppTokens t, TextEditingController c, String label,
+      {Key? key}) {
     return Column(
         key: key,
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -431,7 +539,9 @@ class _EndpointConfigPaneState extends State<EndpointConfigPane>
                   height: 14 / 11)),
           const SizedBox(height: 5),
           CodexTextField(
-            key: key == null ? null : ValueKey('${(key as ValueKey).value}-input'),
+            key: key == null
+                ? null
+                : ValueKey('${(key as ValueKey).value}-input'),
             controller: c,
             height: Dim.ctlH,
             style: Ts.style(size: Ts.md, color: t.text, monoFont: true),

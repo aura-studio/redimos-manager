@@ -48,6 +48,7 @@ class CodexButton extends StatelessWidget {
     return _ActionSemantics(
       label: semanticLabel,
       enabled: onPressed != null,
+      onTap: onPressed,
       child: child,
     );
   }
@@ -158,6 +159,7 @@ class CodexIconButton extends StatelessWidget {
   Widget build(BuildContext context) => _ActionSemantics(
         label: semanticLabel,
         enabled: onPressed != null,
+        onTap: onPressed,
         child: SizedBox.square(
           dimension: Dim.ctlH,
           child: Focus(
@@ -183,11 +185,13 @@ class _ActionSemantics extends StatelessWidget {
   const _ActionSemantics({
     required this.label,
     required this.enabled,
+    required this.onTap,
     required this.child,
   });
 
   final String? label;
   final bool enabled;
+  final VoidCallback? onTap;
   final Widget child;
 
   @override
@@ -197,6 +201,7 @@ class _ActionSemantics extends StatelessWidget {
       label: label,
       button: true,
       enabled: enabled,
+      onTap: onTap,
       excludeSemantics: true,
       child: child,
     );

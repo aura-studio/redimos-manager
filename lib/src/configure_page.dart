@@ -6,13 +6,11 @@
 // switch. The pinned bottom bar carries a dirty indicator + Revert + Delete
 // (danger) + Save primary CTA.
 //
-// Data honesty: fields the saved RedimosConfig actually carries (name, port,
-// password, table, endpoint, region, credentials, version, multiDb, autoCreate,
-// autoRestart, runMode, extraFlags) are wired through to _collect(). The
-// mockup-only fields with no persisted counterpart (Group, Host, Database,
-// TLS, Read-only replica, Cache TTL, Write-through, Local DDB) render as
-// display-only placeholders — they are NOT collected and do not affect the
-// running config.
+// Data honesty: the parameter set is aligned with v1's configure page —
+// Name; Redis (Auth/Port/AutoRestart/Engine); Redimos (Table/Version/
+// AutoCreate/MultiDB); DynamoDB (Region/Endpoint/credentials + mode switch);
+// Extra flags rows. Every rendered field is persisted through _collect();
+// v1 carried no others, so the old mockup-only placeholders are gone.
 
 import 'dart:convert';
 
@@ -52,19 +50,29 @@ class ConfigEditorState extends State<ConfigEditor>
   late final TextEditingController _sk;
   late final TextEditingController _sessionToken;
   late final TextEditingController _pass;
-  // Mockup-only display placeholders (no persisted RedimosConfig field).
-  late final TextEditingController _group;
-  late final TextEditingController _host;
-  late final TextEditingController _database;
-  late final TextEditingController _cacheTtl;
-  // Extra flags as a single textarea ("--key value" per line), mockup section 5.
-  late final TextEditingController _flagsText;
+  // Extra flags as add/remove rows (the v1 grammar), section 5.
+  late List<FlagKV> _extraFlags;
+  final List<TextEditingController> _flagVals = [];
+
+  // Selectable redimos flags (the ones not already covered by the fields
+  // above) — the same list v1 offered.
+  static const List<String> _flagKeys = [
+    'databases',
+    'consistency',
+    'max-collection-result',
+    'max-command-bytes',
+    'retry-max-attempts',
+    'delete-batch-size',
+    'circuit-breaker-threshold',
+    'inst-id',
+    'scan-capacity',
+    'metrics-addr',
+    'slowlog-capacity',
+    'request-log',
+  ];
   late String _version;
   late bool _multiDb;
-  late bool _tls; // mockup-only
-  late bool _readOnlyReplica; // mockup-only
-  late bool _writeThrough; // mockup-only
-  late bool _localDdb; // mockup-only
+  late bool _localDdb; // drives the endpoint/AWS mode switch (v1 segmented ctrl)
   // DynamoDB target mode: 'endpoint' = a DynamoDB-compatible URL (Local/LocalStack/
   // custom), 'aws' = real AWS via region + credentials (endpoint cleared on save).
   late String _ddbMode;
@@ -115,14 +123,10 @@ class ConfigEditorState extends State<ConfigEditor>
     _sk = TextEditingController(text: c.secretKey);
     _sessionToken = TextEditingController(text: c.sessionToken);
     _pass = TextEditingController(text: c.requirepass);
-    _seedTransient();
-    _flagsText = TextEditingController(text: _flagsToText(c.extraFlags));
+    _seedFlags(c.extraFlags);
     _version = c.version;
     _multiDb = c.multiDb;
-    _tls = false;
-    _readOnlyReplica = false;
-    _writeThrough = true; // v2.3 mockup S3 shows Write-through ON (写入同步回源)
-    _localDdb = false;
+    _localDdb = _ddbModeOf(c) == 'endpoint';
     _autoCreate = c.autoCreateTable;
     _autoRestart = c.autoRestart;
     _runMode = c.runMode.isEmpty ? 'native' : c.runMode;
@@ -142,12 +146,10 @@ class ConfigEditorState extends State<ConfigEditor>
       _sk,
       _sessionToken,
       _pass,
-      _group,
-      _host,
-      _database,
-      _cacheTtl,
-      _flagsText,
     ]) {
+      ctl.dispose();
+    }
+    for (final ctl in _flagVals) {
       ctl.dispose();
     }
     _tableFocus.dispose();
@@ -174,34 +176,16 @@ class ConfigEditorState extends State<ConfigEditor>
     _sk.text = c.secretKey;
     _sessionToken.text = c.sessionToken;
     _pass.text = c.requirepass;
-    _group.text = 'production';
-    _host.text = '127.0.0.1';
-    _database.text = '3';
-    _cacheTtl.text = '300';
-    _flagsText.text = _flagsToText(c.extraFlags);
+    _seedFlags(c.extraFlags);
     setState(() {
       _version = c.version;
       _multiDb = c.multiDb;
-      _tls = false;
-      _readOnlyReplica = false;
-      _writeThrough = true; // mockup default (see initState)
-      _localDdb = false;
+      _localDdb = _ddbModeOf(c) == 'endpoint';
       _autoCreate = c.autoCreateTable;
       _autoRestart = c.autoRestart;
       _runMode = c.runMode.isEmpty ? 'native' : c.runMode;
       _ddbMode = _ddbModeOf(c);
     });
-  }
-
-  /// The mockup's form shows these four fields pre-filled with working
-  /// defaults. They are display-only (never read by _collect/save), so
-  /// seeding them is a pure presentation change — the v2.3 mockup is the
-  /// visual ground truth (pixel-fidelity-v23 CP 9.x).
-  void _seedTransient() {
-    _group = TextEditingController(text: 'production');
-    _host = TextEditingController(text: '127.0.0.1');
-    _database = TextEditingController(text: '3');
-    _cacheTtl = TextEditingController(text: '300');
   }
 
   /// Whether the form differs from the saved config.
@@ -210,27 +194,28 @@ class ConfigEditorState extends State<ConfigEditor>
 
   Future<void> saveNow() => widget.onSave(_collect());
 
-  // Serialize extra flags to the textarea's "--key value" lines.
-  static String _flagsToText(List<FlagKV> flags) => flags
-      .where((f) => f.key.trim().isNotEmpty)
-      .map((f) => '--${f.key.trim()} ${f.value}'.trim())
-      .join('\n');
-
-  // Parse the textarea back into FlagKV pairs: each non-empty line is
-  // "--key value" (or "key value"); a bare "--key" yields an empty value.
-  static List<FlagKV> _parseFlags(String text) {
-    final out = <FlagKV>[];
-    for (final raw in text.split('\n')) {
-      final line = raw.trim();
-      if (line.isEmpty) continue;
-      final stripped = line.startsWith('--') ? line.substring(2) : line;
-      final sp = stripped.indexOf(' ');
-      final key = (sp < 0 ? stripped : stripped.substring(0, sp)).trim();
-      final value = (sp < 0 ? '' : stripped.substring(sp + 1)).trim();
-      if (key.isNotEmpty) out.add(FlagKV(key: key, value: value));
+  // Rebuild the flag rows (and their value controllers) from a saved config.
+  void _seedFlags(List<FlagKV> flags) {
+    for (final ctl in _flagVals) {
+      ctl.dispose();
     }
-    return out;
+    _flagVals.clear();
+    _extraFlags = [for (final f in flags) FlagKV(key: f.key, value: f.value)];
+    for (final f in _extraFlags) {
+      _flagVals.add(TextEditingController(text: f.value));
+    }
   }
+
+  void _addFlag() => setState(() {
+        _extraFlags.add(FlagKV());
+        _flagVals.add(TextEditingController());
+      });
+
+  void _removeFlag(int i) => setState(() {
+        _flagVals[i].dispose();
+        _flagVals.removeAt(i);
+        _extraFlags.removeAt(i);
+      });
 
   RedimosConfig _collect() {
     final c = widget.config.copy();
@@ -251,7 +236,12 @@ class ConfigEditorState extends State<ConfigEditor>
     c.autoCreateTable = _autoCreate;
     c.autoRestart = _autoRestart;
     c.runMode = _runMode;
-    c.extraFlags = _parseFlags(_flagsText.text);
+    c.extraFlags = [
+      for (var i = 0; i < _extraFlags.length; i++)
+        if (_extraFlags[i].key.trim().isNotEmpty)
+          FlagKV(
+              key: _extraFlags[i].key.trim(), value: _flagVals[i].text.trim()),
+    ];
     return c;
   }
 
@@ -271,26 +261,14 @@ class ConfigEditorState extends State<ConfigEditor>
             // ── 1 · NAME (实例标识) ───────────────────────────
             _section(t, '1', 'Name', '实例标识', [
               _field(t, _name, 'Instance name'),
-              _field(t, _group, 'Group', placeholder: 'production'),
             ]),
 
-            // ── 2 · REDIS (上游连接) ──────────────────────────
+            // ── 2 · REDIS (上游连接) — v1 parameter set ────────
             _section(t, '2', 'Redis', '上游连接', [
-              _field(t, _host, 'Host', placeholder: '127.0.0.1'),
-              _field(t, _port, 'Port', number: true),
               _field(t, _pass, 'Password', obscure: true),
-              _field(t, _database, 'Database', number: true, placeholder: '0'),
-              _switchField(t, 'TLS', _tls, '启用 TLS', '不启用明文连接',
-                  (v) => setState(() => _tls = v)),
-              _switchField(t, 'Read-only replica', _readOnlyReplica, '只读副本',
-                  '可写', (v) => setState(() => _readOnlyReplica = v)),
-            ]),
-
-            // ── 3 · REDIMOS (代理引擎) ───────────────────────
-            // NOTE: mockup's "Proxy port" is the same persisted listen port as
-            // section 2's Port, so it is NOT duplicated here (a second field on
-            // the same controller would mirror the value and break clearing).
-            _section(t, '3', 'Redimos', '代理引擎', [
+              _field(t, _port, 'Port', number: true),
+              _switchField(t, 'AutoRestart', _autoRestart, '自动重启',
+                  '不自动重启', (v) => setState(() => _autoRestart = v)),
               _selectField<String>(
                   t,
                   'Engine mode',
@@ -300,17 +278,30 @@ class ConfigEditorState extends State<ConfigEditor>
                     ('docker', 'Docker image'),
                   ],
                   (v) => setState(() => _runMode = v ?? 'native')),
-              _field(t, _cacheTtl, 'Cache TTL (s)',
-                  number: true, placeholder: '300'),
-              _switchField(t, 'Write-through', _writeThrough, '写入同步回源', '直写后端',
-                  (v) => setState(() => _writeThrough = v)),
+            ]),
+
+            // ── 3 · REDIMOS (代理引擎) — v1 parameter set ──────
+            _section(t, '3', 'Redimos', '代理引擎', [
+              _field(t, _table, 'Table',
+                  focusNode: _tableFocus, placeholder: 'redimos-prod'),
+              _selectField<String>(
+                  t,
+                  tr('home.version'),
+                  _version,
+                  const [
+                    ('v1', 'v1'),
+                    ('v2', 'v2'),
+                  ],
+                  (v) => setState(() => _version = v ?? 'v2')),
+              _switchField(t, tr('home.autoCreate'), _autoCreate, '自动建表',
+                  '手动建表', (v) => setState(() => _autoCreate = v)),
+              _switchField(t, tr('home.multiDb'), _multiDb, '多 DB', '单 DB',
+                  (v) => setState(() => _multiDb = v)),
             ]),
 
             // ── 4 · DYNAMODB (持久化后端) ────────────────────
             _section(t, '4', 'DynamoDB', '持久化后端', [
               _field(t, _region, 'Region', placeholder: 'us-east-1'),
-              _field(t, _table, 'Table',
-                  focusNode: _tableFocus, placeholder: 'redimos-prod'),
               _field(t, _endpoint, 'Endpoint override',
                   placeholder: '留空使用 AWS 默认',
                   onChanged: (_) => setState(() {
@@ -336,33 +327,22 @@ class ConfigEditorState extends State<ConfigEditor>
               _field(t, _ak, tr('home.accessKeyId')),
               _field(t, _sk, tr('home.secretAccessKey'), obscure: true),
               _field(t, _sessionToken, tr('home.sessionToken'), obscure: true),
-              _selectField<String>(
-                  t,
-                  tr('home.version'),
-                  _version,
-                  const [
-                    ('v1', 'v1'),
-                    ('v2', 'v2'),
-                  ],
-                  (v) => setState(() => _version = v ?? 'v2')),
-              _switchField(t, tr('home.autoCreate'), _autoCreate, '自动建表',
-                  '手动建表', (v) => setState(() => _autoCreate = v)),
-              _switchField(t, tr('home.multiDb'), _multiDb, '多 DB', '单 DB',
-                  (v) => setState(() => _multiDb = v)),
             ]),
 
-            // ── 5 · EXTRA FLAGS (透传参数) — one-column textarea ──
-            _section(
-                t,
-                '5',
-                'Extra flags',
-                '透传参数',
-                [
-                  _field(t, _flagsText, 'Arguments',
-                      textarea: true,
-                      placeholder: '--max-clients 256\n--latency-trace off'),
-                ],
-                onecol: true),
+            // ── 5 · EXTRA FLAGS (透传参数) — v1-style add/remove rows ──
+            _section(t, '5', 'Extra flags', '透传参数', [
+              for (var i = 0; i < _extraFlags.length; i++) _flagRow(t, i),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: CodexButton(
+                  variant: CodexButtonVariant.secondary,
+                  semanticLabel: tr('home.addFlag'),
+                  onPressed: _addFlag,
+                  icon: const Icon(Icons.add, size: 15),
+                  label: Text(tr('home.addFlag')),
+                ),
+              ),
+            ], onecol: true),
 
             const SizedBox(height: 16),
           ]),
@@ -511,6 +491,51 @@ class ConfigEditorState extends State<ConfigEditor>
               : const EdgeInsets.symmetric(horizontal: 10),
         ),
         onChanged: onChanged ?? (_) => setState(() {}),
+      ),
+    ]);
+  }
+
+  // One flag row: dropdown over the known keys (left), value field (right),
+  // remove button at the row's end — the v1 layout in house components.
+  Widget _flagRow(AppTokens t, int i) {
+    final style = Ts.style(size: Ts.md, color: t.text, monoFont: true);
+    return Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
+      Expanded(
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          _fLabel(t, 'Key'),
+          const SizedBox(height: 5),
+          CodexSelectField<String>(
+            key: ValueKey('configure-flag-key-$i'),
+            value: _flagKeys.contains(_extraFlags[i].key)
+                ? _extraFlags[i].key
+                : null,
+            style: style,
+            items: [
+              for (final k in _flagKeys)
+                DropdownMenuItem<String>(
+                  value: k,
+                  child:
+                      Text(k, overflow: TextOverflow.ellipsis, style: style),
+                ),
+            ],
+            onChanged: (v) => setState(() => _extraFlags[i].key = v ?? ''),
+          ),
+        ]),
+      ),
+      const SizedBox(width: 16),
+      Expanded(
+        child: _field(t, _flagVals[i], 'Value'),
+      ),
+      const SizedBox(width: 8),
+      SizedBox(
+        height: Dim.ctlH,
+        child: CodexIconButton(
+          key: ValueKey('configure-flag-remove-$i'),
+          semanticLabel: tr('tbl.remove'),
+          tooltip: tr('tbl.remove'),
+          onPressed: () => _removeFlag(i),
+          icon: Icon(Icons.remove_circle_outline, size: 16, color: t.danger),
+        ),
       ),
     ]);
   }

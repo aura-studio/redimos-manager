@@ -10,6 +10,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:redimos_manager/src/home_chrome.dart';
 import 'package:redimos_manager/src/i18n.dart';
 import 'package:redimos_manager/src/models.dart';
+import 'package:redimos_manager/src/redis_connection.dart';
 import 'package:redimos_manager/src/ui_theme.dart';
 import 'package:redimos_manager/src/ui_tokens.dart';
 
@@ -47,6 +48,9 @@ ServiceInfo _svc(String id, String name,
 
 final _service = _svc('service-1', 'local-ddb');
 
+const _connection = RedisConnection(
+    id: 'conn-1', name: 'local-redis', host: '127.0.0.1', port: 6380);
+
 ChromeState _state({
   required Brightness brightness,
   EntityKind kind = EntityKind.instance,
@@ -54,6 +58,8 @@ ChromeState _state({
   String? selectedEndpointId,
   List<ServiceInfo> services = const [],
   String? selectedServiceId,
+  List<RedisConnection> connections = const [],
+  String? selectedConnectionId,
   String? hoveredCardId,
   String entityQuery = '',
   Map<String, InstanceStatus> statuses = const {},
@@ -67,6 +73,8 @@ ChromeState _state({
       selectedEndpointId: selectedEndpointId,
       services: services,
       selectedServiceId: selectedServiceId,
+      connections: connections,
+      selectedConnectionId: selectedConnectionId,
       hoveredCardId: hoveredCardId,
       entityQuery: entityQuery,
       tabLabels: const ['Browse'],
@@ -195,6 +203,7 @@ void main() {
           EntityKind.instance => _config.id,
           EntityKind.endpoint => _endpoint.id,
           EntityKind.service => _service.id,
+          EntityKind.connect => _connection.id,
         };
         await _pumpSidebar(
           tester,
@@ -207,6 +216,10 @@ void main() {
             services: kind == EntityKind.service ? [_service] : const [],
             selectedServiceId:
                 kind == EntityKind.service ? _service.id : null,
+            connections:
+                kind == EntityKind.connect ? const [_connection] : const [],
+            selectedConnectionId:
+                kind == EntityKind.connect ? _connection.id : null,
           ),
         );
 

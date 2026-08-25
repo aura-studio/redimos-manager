@@ -43,6 +43,7 @@ class _PlaygroundCore extends FakeNativeCore {
     required String script,
     int port = 0,
     String auth = '',
+    String host = '',
     RedimosConfig? config,
     int timeoutMs = 5000,
   }) async {

@@ -125,16 +125,27 @@ class TablePageView extends StatefulWidget {
   /// table on non-AWS endpoints; on AWS the view stays read-only.
   final bool allowOverrideWrites;
 
+  /// Explicitly marks the endpoint storage view. It must not depend on a
+  /// selected table being present because the endpoint screen can be restored
+  /// before its table selection is rebuilt.
+  final bool endpointMode;
+
   /// The endpoint Browser's bridge into this state (its MidBar "＋ Item" CTA
   /// → [TablePageViewState.createItem]); called once the state exists.
   final void Function(TablePageViewState)? onExplorerReady;
+
+  /// Endpoint mode: the left sidebar lists the endpoint's tables and row taps
+  /// bridge back through this callback (HomePage owns the selection).
+  final void Function(String table)? onOpenTable;
   const TablePageView(
       {super.key,
       required this.core,
       required this.config,
       this.tableOverride,
       this.allowOverrideWrites = false,
-      this.onExplorerReady});
+      this.endpointMode = false,
+      this.onExplorerReady,
+      this.onOpenTable});
 
   @override
   State<TablePageView> createState() => TablePageViewState();
@@ -163,22 +174,25 @@ class TablePageViewState extends State<TablePageView>
   final _skV2 = TextEditingController();
   bool _sortDesc = false;
   final _filters = <_FilterRow>[];
-  // v2.3 endpoint Browser: the single SCAN FILTER box in the valuepane head
-  // (client-side contains-filter over the loaded page's cell reprs; the full
-  // Scan/Query form still lives in the collapsed advanced card).
+  // v2.3 endpoint Browser: the single SCAN FILTER box (client-side
+  // contains-filter over the loaded page's cell reprs; the full Scan/Query
+  // form still lives in the collapsed advanced section). Both surfaces live in
+  // the popup opened from the top-left Filters button.
   final _scanFilter = TextEditingController();
-  // Flat mode: the scan filter lives in a right-hand sidebar instead of the
-  // crowded valuepane head. A view preference (like _pageSize) — survives
-  // table changes; closing the sidebar clears the filter so hidden filtering
-  // can never silently narrow the grid.
-  bool _filterSidebarOpen = true;
+  // The filter popup is a centred modal rendered inside the page's Stack
+  // (same grammar as the ＋ Item editor), so page setState rebuilds it.
+  bool _filterPopupOpen = false;
 
-  void _toggleFilterSidebar() => setState(() {
-        _filterSidebarOpen = !_filterSidebarOpen;
-        if (!_filterSidebarOpen && _scanFilter.text.isNotEmpty) {
-          _scanFilter.clear();
-        }
-      });
+  void _toggleFilterPopup() =>
+      setState(() => _filterPopupOpen = !_filterPopupOpen);
+  void _closeFilterPopup() {
+    if (_filterPopupOpen) setState(() => _filterPopupOpen = false);
+  }
+
+  // Endpoint mode: the table list shown in the left sidebar (same source as
+  // the Endpoint screen's table list).
+  List<Map<String, dynamic>> _endpointTables = const [];
+  bool _endpointTablesLoading = false;
 
   // results
   bool _running = false;
@@ -209,6 +223,7 @@ class TablePageViewState extends State<TablePageView>
     super.initState();
     widget.onExplorerReady?.call(this);
     _loadMeta();
+    _loadEndpointTables();
   }
 
   @override
@@ -223,6 +238,12 @@ class TablePageViewState extends State<TablePageView>
       _runGeneration++;
       _resetAll();
       _loadMeta();
+      // The sidebar list only depends on the endpoint identity — switching
+      // tables via the sidebar must not reload it.
+      if (oldWidget.config.id != widget.config.id ||
+          oldWidget.config.endpoint != widget.config.endpoint) {
+        _loadEndpointTables();
+      }
     }
   }
 
@@ -261,6 +282,7 @@ class TablePageViewState extends State<TablePageView>
     }
     _filters.clear();
     _panelOpen = !_flat;
+    _filterPopupOpen = false;
     _running = false;
     _page = null;
     _pageError = null;
@@ -314,6 +336,27 @@ class TablePageViewState extends State<TablePageView>
     }
   }
 
+  // The endpoint Table screen's left sidebar lists the endpoint's tables
+  // (the same source as the Endpoint screen's table list); a row tap bridges
+  // back through onOpenTable. Loaded once per endpoint identity — switching
+  // tables does not reload it (the header's refresh button does).
+  Future<void> _loadEndpointTables() async {
+    if (!widget.endpointMode) return;
+    final generation = _entityGeneration;
+    final config = widget.config;
+    setState(() => _endpointTablesLoading = true);
+    final r = await widget.core.epListTables(config);
+    if (!mounted || generation != _entityGeneration) return;
+    setState(() {
+      _endpointTablesLoading = false;
+      _endpointTables = r['ok'] == true
+          ? ((r['tables'] as List?) ?? [])
+              .map((e) => (e as Map).cast<String, dynamic>())
+              .toList()
+          : const [];
+    });
+  }
+
   TableTarget? get _target =>
       (_meta != null && _targetIdx < _meta!.targets.length)
           ? _meta!.targets[_targetIdx]
@@ -323,7 +366,11 @@ class TablePageViewState extends State<TablePageView>
   // advanced Scan/Query card and the in-page Create button are all folded
   // into the valuepane head (endpoint mode only; an instance's own Browse
   // keeps the full form, where Scan/Query IS the workflow).
-  bool get _flat => widget.tableOverride != null;
+  bool get _flat =>
+      widget.endpointMode ||
+      widget.config.table.trim().isEmpty ||
+      widget.config.id.startsWith('endpoint:') ||
+      widget.tableOverride != null;
 
   // MidBar bridge (T12): the endpoint Browser's "＋ Item" end-group CTA calls
   // this; it is exactly the toolbar's Create-item flow.
@@ -449,64 +496,83 @@ class TablePageViewState extends State<TablePageView>
   Widget build(BuildContext context) {
     super.build(context);
     final noTable = _effTable.trim().isEmpty;
-    final state = noTable
-        ? CodexContentState.empty
-        : _metaError != null
-            ? CodexContentState.error
-            : _meta == null
-                ? CodexContentState.loading
-                : CodexContentState.content;
+    // Endpoint mode always renders its own workbench (tables sidebar + card):
+    // the shell's empty/error placeholder would hide the sidebar before a
+    // table is picked, leaving no way to choose the first table. The meta
+    // error for a missing table is expected there, not an error state.
+    final state = _metaError != null && !(widget.endpointMode && noTable)
+        ? CodexContentState.error
+        : widget.endpointMode
+            ? CodexContentState.content
+            : noTable
+                ? CodexContentState.empty
+                : _meta == null
+                    ? CodexContentState.loading
+                    : CodexContentState.content;
     final showHeader = !noTable && (!_flat || _awsMode);
 
     return Theme(
       data: _denseTabTheme(context),
-      child: Stack(children: [
+      child: Stack(fit: StackFit.expand, children: [
         CodexStateShell(
-        key: const ValueKey('table-page-state'),
-        state: state,
-        toolbar: showHeader
-            ? Padding(
-                key: const ValueKey('table-page-header'),
-                padding: const EdgeInsets.fromLTRB(22, 14, 22, 0),
-                child: _headerRow(),
-              )
-            : null,
-        headerGap: showHeader ? 12 : 0,
-        message: noTable
-            ? tr('tbl.noTableConfigured')
-            : state == CodexContentState.error
-                ? tr('tbl.cannotReadTable')
-                : '',
-        detail: noTable ? tr('tbl.setTableNameToBrowse') : _metaError,
-        retryLabel: tr('tbl.retry'),
-        onRetry: state == CodexContentState.error ? _loadMeta : null,
-        icon: noTable ? const Icon(Icons.table_chart_outlined, size: 22) : null,
-        bodyPadding: const EdgeInsets.symmetric(horizontal: 32, vertical: 24),
-        content: state != CodexContentState.content
-            ? const SizedBox.shrink()
-            : SingleChildScrollView(
-                key: ValueKey('table-scroll-${widget.config.id}-$_effTable'),
-                // The same 22/18 page gutter every other v1.2 screen uses;
-                // the data surfaces sit inside elevated section cards.
-                padding: const EdgeInsets.fromLTRB(22, 18, 22, 18),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    // Instance Browse keeps the query card on top; flat mode
-                    // moves every filtering surface into the left sidebar.
-                    if (!_flat) _queryCard(),
-                    if (_pageError != null) ...[
-                      const SizedBox(height: 12),
-                      _banner(),
-                    ],
-                    if (_page != null) ...[
-                      const SizedBox(height: 12),
-                      _resultsRow(),
-                    ],
-                  ],
-                ),
-              ),
+          key: const ValueKey('table-page-state'),
+          state: state,
+          toolbar: showHeader
+              ? Padding(
+                  key: const ValueKey('table-page-header'),
+                  padding: const EdgeInsets.fromLTRB(22, 14, 22, 0),
+                  child: _headerRow(),
+                )
+              : null,
+          headerGap: showHeader ? 12 : 0,
+          message: noTable
+              ? tr('tbl.noTableConfigured')
+              : state == CodexContentState.error
+                  ? tr('tbl.cannotReadTable')
+                  : '',
+          detail: noTable ? tr('tbl.setTableNameToBrowse') : _metaError,
+          retryLabel: tr('tbl.retry'),
+          onRetry: state == CodexContentState.error ? _loadMeta : null,
+          icon:
+              noTable ? const Icon(Icons.table_chart_outlined, size: 22) : null,
+          bodyPadding: const EdgeInsets.symmetric(horizontal: 32, vertical: 24),
+          content: state != CodexContentState.content
+              ? const SizedBox.shrink()
+              : _flat
+                  ? _flatContent()
+                  : SingleChildScrollView(
+                      key: ValueKey(
+                          'table-scroll-${widget.config.id}-$_effTable'),
+                      padding: const EdgeInsets.fromLTRB(22, 18, 22, 18),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          _queryCard(),
+                          if (_pageError != null) ...[
+                            const SizedBox(height: 12),
+                            _banner(),
+                          ],
+                          if (_page != null) _resultsRow(),
+                        ],
+                      ),
+                    ),
         ),
+        if (_filterPopupOpen) ...[
+          Positioned.fill(
+            child: ModalBarrier(
+              dismissible: true,
+              onDismiss: _closeFilterPopup,
+              color: Colors.black.withValues(alpha: 0.28),
+            ),
+          ),
+          Center(
+            child: ConstrainedBox(
+              // Same modal grammar and footprint as the item editor (＋ Item).
+              constraints: const BoxConstraints(maxWidth: 900, maxHeight: 720),
+              child: SizedBox.expand(child: _filterPopupPanel()),
+            ),
+          ),
+        ],
         if (_editorOpen) ...[
           Positioned.fill(
             child: ModalBarrier(
@@ -538,9 +604,8 @@ class TablePageViewState extends State<TablePageView>
                     final wasNew = _editorIsNew;
                     setState(() => _editorOpen = false);
                     if (!saved) return;
-                    _toast(wasNew
-                        ? tr('tbl.itemCreated')
-                        : tr('tbl.itemSaved'));
+                    _toast(
+                        wasNew ? tr('tbl.itemCreated') : tr('tbl.itemSaved'));
                     _run(resetPaging: false);
                   },
                 ),
@@ -551,6 +616,18 @@ class TablePageViewState extends State<TablePageView>
       ]),
     );
   }
+
+  // Endpoint workbench content: the tables sidebar and the results card share
+  // the available viewport, with the table expanding into the remaining
+  // height. Before a table is picked the right-hand card is a placeholder.
+  Widget _flatContent() {
+    return Padding(
+      key: ValueKey('table-flat-content-${widget.config.id}-$_effTable'),
+      padding: const EdgeInsets.fromLTRB(22, 18, 22, 18),
+      child: _resultsRow(fill: true),
+    );
+  }
+
 
   // AWS mode (no endpoint) is read-only for item writes: the manager can't tell a
   // test account from production. Destructive table lifecycle (recreate / provision
@@ -669,59 +746,56 @@ class TablePageViewState extends State<TablePageView>
   // key conditions / typed filters / run+reset). Shared by the classic
   // instance-Browse query card and the flat mode's left filter sidebar.
   Widget _queryFormBody() {
-    return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Align(
-            alignment: Alignment.centerLeft,
-            child: SegmentedButton<bool>(
-              segments: [
-                ButtonSegment(
-                    value: false,
-                    label: Text(tr('tbl.scan')),
-                    icon: const Icon(Icons.list, size: 16)),
-                ButtonSegment(
-                    value: true,
-                    label: Text(tr('tbl.query')),
-                    icon: const Icon(Icons.search, size: 16)),
-              ],
-              selected: {_isQuery},
-              onSelectionChanged: (s) =>
-                  setState(() => _isQuery = s.first),
-            ),
-          ),
-          const SizedBox(height: 12),
-          _targetDropdown(),
-          const SizedBox(height: 12),
-          _projectionRow(),
-          if (_isQuery) ...[
-            const SizedBox(height: 12),
-            _queryKeys(),
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Align(
+        alignment: Alignment.centerLeft,
+        child: SegmentedButton<bool>(
+          segments: [
+            ButtonSegment(
+                value: false,
+                label: Text(tr('tbl.scan')),
+                icon: const Icon(Icons.list, size: 16)),
+            ButtonSegment(
+                value: true,
+                label: Text(tr('tbl.query')),
+                icon: const Icon(Icons.search, size: 16)),
           ],
-          const SizedBox(height: 12),
-          _filtersSection(),
-          const SizedBox(height: 12),
-          Row(children: [
-            CodexButton(
-              variant: CodexButtonVariant.primary,
-              semanticLabel: tr('tbl.run'),
-              onPressed: _running ? null : () => _run(),
-              label: _running
-                  ? const SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2))
-                  : Text(tr('tbl.run')),
-            ),
-            const SizedBox(width: 8),
-            CodexButton(
-              variant: CodexButtonVariant.ghost,
-              semanticLabel: tr('tbl.reset'),
-              onPressed: _reset,
-              label: Text(tr('tbl.reset')),
-            ),
-          ]),
-        ]);
+          selected: {_isQuery},
+          onSelectionChanged: (s) => setState(() => _isQuery = s.first),
+        ),
+      ),
+      const SizedBox(height: 12),
+      _targetDropdown(),
+      const SizedBox(height: 12),
+      _projectionRow(),
+      if (_isQuery) ...[
+        const SizedBox(height: 12),
+        _queryKeys(),
+      ],
+      const SizedBox(height: 12),
+      _filtersSection(),
+      const SizedBox(height: 12),
+      Row(children: [
+        CodexButton(
+          variant: CodexButtonVariant.primary,
+          semanticLabel: tr('tbl.run'),
+          onPressed: _running ? null : () => _run(),
+          label: _running
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2))
+              : Text(tr('tbl.run')),
+        ),
+        const SizedBox(width: 8),
+        CodexButton(
+          variant: CodexButtonVariant.ghost,
+          semanticLabel: tr('tbl.reset'),
+          onPressed: _reset,
+          label: Text(tr('tbl.reset')),
+        ),
+      ]),
+    ]);
   }
 
   Widget _targetDropdown() {
@@ -759,7 +833,8 @@ class TablePageViewState extends State<TablePageView>
           value: _projection,
           style: style,
           items: [
-            DropdownMenuItem(value: 'all', child: Text(tr('tbl.allAttributes'))),
+            DropdownMenuItem(
+                value: 'all', child: Text(tr('tbl.allAttributes'))),
             DropdownMenuItem(
                 value: 'specific', child: Text(tr('tbl.specificAttributes'))),
           ],
@@ -773,7 +848,8 @@ class TablePageViewState extends State<TablePageView>
             child: CodexTextField(
               controller: _projectInput,
               style: Ts.style(size: Ts.sm, color: t.text, monoFont: true),
-              decoration: InputDecoration(hintText: tr('tbl.enterAttributeName')),
+              decoration:
+                  InputDecoration(hintText: tr('tbl.enterAttributeName')),
               onSubmitted: (_) => _addProjectAttr(),
             ),
           ),
@@ -871,8 +947,8 @@ class TablePageViewState extends State<TablePageView>
               CodexTextField(
                   controller: _skV1,
                   style: mono,
-                  decoration: InputDecoration(
-                      hintText: tr('tbl.enterAttributeValue'))),
+                  decoration:
+                      InputDecoration(hintText: tr('tbl.enterAttributeValue'))),
               if (_skOp == 'between') ...[
                 const SizedBox(height: 6),
                 CodexTextField(
@@ -911,7 +987,8 @@ class TablePageViewState extends State<TablePageView>
       const SizedBox(height: 12),
       Row(children: [
         Text(tr('tbl.filters'),
-            style: Ts.style(size: Ts.md, weight: FontWeight.w700, color: t.text)),
+            style:
+                Ts.style(size: Ts.md, weight: FontWeight.w700, color: t.text)),
         const SizedBox(width: 8),
         Text(tr('tbl.optional'),
             style: Ts.style(size: Ts.sm, color: t.text3)
@@ -920,8 +997,7 @@ class TablePageViewState extends State<TablePageView>
       const SizedBox(height: 10),
       if (_filters.isNotEmpty) ...[
         Row(children: [
-          Expanded(
-              flex: _fFlex[0], child: _labelText(tr('tbl.attributeName'))),
+          Expanded(flex: _fFlex[0], child: _labelText(tr('tbl.attributeName'))),
           const SizedBox(width: 10),
           Expanded(flex: _fFlex[1], child: _labelText(tr('tbl.condition'))),
           const SizedBox(width: 10),
@@ -1072,26 +1148,28 @@ class TablePageViewState extends State<TablePageView>
         (t == null || t.isTable);
   }
 
-  Widget _resultsCard() {
+  Widget _resultsCard({bool fill = false}) {
     final p = _page!;
     final cols = p.cols.where((c) => !_hiddenCols.contains(c)).toList();
     final rows = _visibleRows(p);
     final t = _target;
     final selCount = _checked.length;
-    // The toolbar row: flat mode renders the v2.3 valuepane head (table name
-    // + key summary + SCAN FILTER + advanced toggle + pagination + ＋ Item);
-    // the instance Browse keeps the AWS-console "Items returned" toolbar.
-    final head = _flat ? _valuepaneHead(t) : _toolbar(t, p, rows, selCount);
-    final table = rows.isEmpty ? _emptyRows() : _dataTable(t, rows, cols);
+    final head = _flat ? _valuepaneHead() : _toolbar(t, p, rows, selCount);
+    final table =
+        rows.isEmpty ? _emptyRows() : _dataTable(t, rows, cols, expand: fill);
+    final footer = _paginationFooter(p);
     if (_flat) {
-      // v2.3 valuepane as a section card: the valuepane head IS the panel2
-      // head band; the data rows fill the ruled body.
       return CodexSurface(
         variant: CodexSurfaceVariant.elevated,
         padding: EdgeInsets.zero,
         child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [head, table]),
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            head,
+            if (fill) Expanded(child: table) else table,
+            footer,
+          ],
+        ),
       );
     }
     return CodexSurface(
@@ -1101,6 +1179,7 @@ class TablePageViewState extends State<TablePageView>
         head,
         const SizedBox(height: 8),
         table,
+        footer,
       ]),
     );
   }
@@ -1113,8 +1192,7 @@ class TablePageViewState extends State<TablePageView>
         child: Column(children: [
           Icon(Icons.inbox_outlined, size: 36, color: t.text3),
           const SizedBox(height: 8),
-          Text(tr('tbl.noItems'),
-              style: Ts.style(size: Ts.md, color: t.text2)),
+          Text(tr('tbl.noItems'), style: Ts.style(size: Ts.md, color: t.text2)),
           const SizedBox(height: 4),
           Text(tr('tbl.noItemsToDisplay'),
               style: Ts.style(size: Ts.sm, color: t.text3)),
@@ -1123,45 +1201,85 @@ class TablePageViewState extends State<TablePageView>
     );
   }
 
-  Widget _dataTable(TableTarget? t, List<TableItem> rows, List<String> cols) =>
-        CodexHorizontalScrollView(
-          child: DataTable(
-            columnSpacing: 16,
-            headingRowHeight: 30,
-            // Mockup .vtable td height = var(--row-h) = 30, fixed.
-            dataRowMinHeight: 30,
-            dataRowMaxHeight: 30,
-            // Keep the selection affordance visible at the far left, including
-            // the header checkbox that selects the currently loaded page.
-            showCheckboxColumn: true,
-            onSelectAll: (v) => setState(() {
-              _checked.clear();
-              if (v == true) _checked.addAll(rows.map((r) => r.ddbJson));
-            }),
-            columns: [
-              // v2.3 flat table leads with a 34px right-aligned line-number
-              // gutter (mockup .vtable .ln); the gutter header stays empty.
-              if (_flat) const DataColumn(label: SizedBox(width: 34)),
-              for (final c in cols)
-                DataColumn(
-                  label: _colHeader(c),
-                  onSort: (_, __) => setState(() {
-                    if (_sortCol == c) {
-                      _sortAsc = !_sortAsc;
-                    } else {
-                      _sortCol = c;
-                      _sortAsc = true;
-                    }
-                  }),
-                ),
-              DataColumn(label: Text(tr('tbl.rowActions'))),
-            ],
-            rows: [
-              for (var i = 0; i < rows.length; i++)
-                _dataRow(t, rows[i], i, cols),
-            ],
+  Widget _dataTable(
+    TableTarget? t,
+    List<TableItem> rows,
+    List<String> cols, {
+    double? height,
+    bool expand = false,
+  }) {
+    // Keep a bounded viewport so a large result page scrolls vertically inside
+    // the table while the intrinsic DataTable width remains horizontally
+    // draggable. Endpoint workbench mode expands into the available card
+    // height; short instance pages retain their compact intrinsic height.
+    final viewportHeight =
+        height ?? (rows.length * 30.0 + 30).clamp(120.0, 460.0).toDouble();
+    final viewport = CodexTableViewport(
+      child: DataTable(
+        columnSpacing: 16,
+        headingRowHeight: 30,
+        // Mockup .vtable td height = var(--row-h) = 30, fixed.
+        dataRowMinHeight: 30,
+        dataRowMaxHeight: 30,
+        // The built-in checkbox column centres its checkbox inside whatever
+        // width the Table layout hands it; a custom left-aligned leading
+        // column keeps the selection affordance pinned to the left edge.
+        showCheckboxColumn: false,
+        columns: [
+          DataColumn(
+            label: SizedBox(
+              width: 34,
+              child: Checkbox(
+                tristate: true,
+                value: rows.isNotEmpty &&
+                        rows.every((r) => _checked.contains(r.ddbJson))
+                    ? true
+                    : rows.any((r) => _checked.contains(r.ddbJson))
+                        ? null
+                        : false,
+                onChanged: (v) => setState(() {
+                  _checked.clear();
+                  if (v == true) {
+                    _checked.addAll(rows.map((r) => r.ddbJson));
+                  }
+                }),
+              ),
+            ),
           ),
-        );
+          // v2.3 flat table leads with a 34px right-aligned line-number
+          // gutter (mockup .vtable .ln); the header names it ID.
+          if (_flat)
+            DataColumn(
+              label: SizedBox(
+                width: 34,
+                child: Align(
+                  alignment: Alignment.centerRight,
+                  child: _colHeader('ID'),
+                ),
+              ),
+            ),
+          for (final c in cols)
+            DataColumn(
+              label: _colHeader(c),
+              onSort: (_, __) => setState(() {
+                if (_sortCol == c) {
+                  _sortAsc = !_sortAsc;
+                } else {
+                  _sortCol = c;
+                  _sortAsc = true;
+                }
+              }),
+            ),
+        ],
+        rows: [
+          for (var i = 0; i < rows.length; i++) _dataRow(t, rows[i], i, cols),
+        ],
+      ),
+    );
+    return expand
+        ? SizedBox.expand(child: viewport)
+        : SizedBox(height: viewportHeight, child: viewport);
+  }
 
   DataRow _dataRow(TableTarget? t, TableItem r, int i, List<String> cols) {
     final tok = AppTokens.of(context);
@@ -1183,6 +1301,24 @@ class TablePageViewState extends State<TablePageView>
         }
       }),
       cells: [
+        DataCell(
+          Align(
+            alignment: Alignment.centerLeft,
+            child: SizedBox(
+              width: 34,
+              child: Checkbox(
+                value: selected,
+                onChanged: (v) => setState(() {
+                  if (v == true) {
+                    _checked.add(r.ddbJson);
+                  } else {
+                    _checked.remove(r.ddbJson);
+                  }
+                }),
+              ),
+            ),
+          ),
+        ),
         if (_flat)
           DataCell(Container(
             width: 34,
@@ -1215,213 +1351,275 @@ class TablePageViewState extends State<TablePageView>
                       : _showItemViewer(r),
                 )
               : DataCell(_cellWidget(r.cells[c])),
-        DataCell(_rowActions(r)),
       ],
     );
   }
 
-  Widget _rowActions(TableItem row) {
-    final canWrite = _canWriteItems;
-    return Row(mainAxisSize: MainAxisSize.min, children: [
-      _semanticIconButton(
-        label: canWrite ? tr('tbl.editItem') : tr('tbl.viewItem'),
-        visualDensity: VisualDensity.compact,
-        onPressed: canWrite
-            ? () => _openEditor(from: row, isNew: false)
-            : () => _showItemViewer(row),
-        icon: Icon(canWrite ? Icons.edit_outlined : Icons.visibility_outlined,
-            size: 16),
-      ),
-      if (canWrite) ...[
-        _semanticIconButton(
-          label: tr('tbl.duplicateItem'),
-          visualDensity: VisualDensity.compact,
-          onPressed: () => _openEditor(from: row, isNew: true),
-          icon: const Icon(Icons.content_copy_outlined, size: 16),
-        ),
-        _semanticIconButton(
-          label: tr('tbl.deleteItem'),
-          visualDensity: VisualDensity.compact,
-          onPressed: () => _deleteRows([row]),
-          icon: const Icon(Icons.delete_outline, size: 16),
-        ),
-      ],
-    ]);
-  }
-
-  // Flat mode lays the filter sidebar and the results card out as sibling
-  // section cards (the house grammar): EVERY filtering surface (the SCAN
-  // FILTER box and the advanced Scan/Query form) lives in the left sidebar.
-  Widget _resultsRow() {
-    final card = _resultsCard();
-    if (!_flat || !_filterSidebarOpen) return card;
+  // Endpoint mode lays the endpoint's table list and the results card out as
+  // sibling section cards; a row tap switches the browsed table through
+  // onOpenTable. Filtering lives in the popup opened from the valuepane head.
+  Widget _resultsRow({bool fill = false}) {
+    final card = _page == null ? _endpointPlaceholderCard() : _resultsCard(fill: fill);
+    if (!widget.endpointMode) return card;
     return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      SizedBox(width: _panelOpen ? 420 : 248, child: _filterSidebarCard()),
+      SizedBox(
+        width: 248,
+        height: fill ? double.infinity : null,
+        child: _tablesSidebarCard(),
+      ),
       const SizedBox(width: 12),
       Expanded(child: card),
     ]);
   }
 
-  // Left-hand filter sidebar (flat mode): a section card holding the SCAN
-  // FILTER box; the head band toggles the advanced Scan/Query form, which
-  // expands inside the same card.
-  Widget _filterSidebarCard() {
-    final tok = AppTokens.of(context);
+  // Right-hand area before a table is picked: the sidebar already lists every
+  // table, so the data region stays blank. While a picked table's meta/page
+  // loads, show a quiet spinner instead.
+  Widget _endpointPlaceholderCard() {
+    if (_effTable.trim().isEmpty) {
+      final t = AppTokens.of(context);
+      final none = _endpointTables.isEmpty && !_endpointTablesLoading;
+      return Center(
+        child: Text(none ? tr('tbl.noTablesHint') : tr('tbl.selectTableHint'),
+            style: Ts.style(size: Ts.md, color: t.text3)),
+      );
+    }
+    final t = AppTokens.of(context);
     return CodexSurface(
       variant: CodexSurfaceVariant.elevated,
       padding: EdgeInsets.zero,
+      child: Center(
+        child: SizedBox.square(
+          dimension: 14,
+          child: CircularProgressIndicator(strokeWidth: 1.5, color: t.accent),
+        ),
+      ),
+    );
+  }
+
+  // Left-hand tables sidebar (endpoint mode): a section card listing every
+  // table on the endpoint; the current table is highlighted.
+  Widget _tablesSidebarCard() {
+    final tok = AppTokens.of(context);
+    return CodexSurface(
+      key: const ValueKey('table-sidebar-tables'),
+      variant: CodexSurfaceVariant.elevated,
+      padding: EdgeInsets.zero,
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        InkWell(
-          onTap: () => setState(() => _panelOpen = !_panelOpen),
-          child: Container(
-            color: tok.panel2,
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-            child: Row(children: [
-              Icon(_panelOpen ? Icons.expand_more : Icons.chevron_right,
-                  size: 16, color: tok.text3),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(tr('tbl.filters').toUpperCase(),
-                    overflow: TextOverflow.ellipsis,
-                    style: Ts.style(
-                        size: Ts.md,
-                        letterSpacing: 0.9,
-                        weight: FontWeight.w700,
-                        color: tok.text)),
-              ),
-            ]),
-          ),
+        Container(
+          color: tok.panel2,
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+          child: Row(children: [
+            Icon(Icons.table_chart_outlined, size: 15, color: tok.accent),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(tr('ep.tables').toUpperCase(),
+                  overflow: TextOverflow.ellipsis,
+                  style: Ts.style(
+                      size: Ts.md,
+                      letterSpacing: 0.9,
+                      weight: FontWeight.w700,
+                      color: tok.text)),
+            ),
+            _semanticIconButton(
+              label: tr('tbl.refresh'),
+              visualDensity: VisualDensity.compact,
+              onPressed:
+                  _endpointTablesLoading ? null : _loadEndpointTables,
+              icon: const Icon(Icons.refresh, size: 16),
+            ),
+          ]),
         ),
         const CodexDivider(),
-        Padding(
-          padding: const EdgeInsets.all(12),
-          child:
-              Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-            _labelText(tr('tbl.scanFilter')),
-            const SizedBox(height: 8),
-            SizedBox(
-              height: Dim.ctlH,
-              child: TextField(
-                controller: _scanFilter,
-                onChanged: (_) => setState(() {}),
-                style: Ts.style(size: Ts.sm, color: tok.text, monoFont: true),
-                decoration: InputDecoration(
-                  isDense: true,
-                  hintText: tr('tbl.filters'),
-                  hintStyle: Ts.style(size: Ts.sm, color: tok.text3),
-                  prefixIcon: Icon(Icons.search, size: 14, color: tok.text3),
-                  prefixIconConstraints:
-                      const BoxConstraints(minWidth: 28, minHeight: 26),
-                  contentPadding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+        Expanded(
+          child: _endpointTables.isEmpty
+              ? Center(
+                  child: Text(
+                    _endpointTablesLoading ? '' : tr('ep.noTables'),
+                    style: Ts.style(size: Ts.sm, color: tok.text3),
+                  ),
+                )
+              : ListView(
+                  padding: const EdgeInsets.fromLTRB(6, 6, 6, 10),
+                  children: [
+                    for (final t in _endpointTables) _tableSidebarRow(t),
+                  ],
                 ),
-              ),
-            ),
-            if (_panelOpen) ...[
-              const SizedBox(height: 12),
-              const CodexDivider(),
-              const SizedBox(height: 12),
-              _queryFormBody(),
-            ],
-          ]),
         ),
       ]),
     );
   }
 
-  // The v2.3 valuepane head: table name (15.5/700) + PK/SK summary + the
-  // single SCAN FILTER box + advanced-form toggle; refresh / pagination /
-  // preferences / Actions / ＋ Item on the right.
-  Widget _valuepaneHead(TableTarget? t) {
+  Widget _tableSidebarRow(Map<String, dynamic> t) {
     final tok = AppTokens.of(context);
-    final p = _page!;
-    // CP 9.x: inside the home chrome the valuepane is ~735px wide and this
-    // row's fixed children (filter box + right cluster) no longer fit. The
-    // wide layout (goldens / full screen) keeps the 200px filter box.
-    return LayoutBuilder(builder: (context, constraints) {
-      final compact = constraints.maxWidth < 800;
-      return Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        decoration: BoxDecoration(
-          color: tok.panel2,
-          border: Border(bottom: BorderSide(color: tok.hairline)),
-        ),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          Row(children: [
-            // Mockup .vp-title: the table name is a small uppercase eyebrow
-            // (11/600/text-3), NOT a large prominent heading.
-            Flexible(
-              child: Text(_effTable.toUpperCase(),
-                  overflow: TextOverflow.ellipsis,
-                  style: Ts.style(
-                      size: Ts.xs,
-                      weight: FontWeight.w600,
-                      letterSpacing: .8,
-                      color: tok.text3)),
-            ),
-            if (!compact && t != null) ...[
-              const SizedBox(width: 14),
-              Row(mainAxisSize: MainAxisSize.min, children: [
-                Text('PK ', style: Ts.style(size: Ts.md, color: tok.text3)),
-                Text(t.pk.name,
-                    style: Ts.style(
-                        size: Ts.md, weight: FontWeight.w600, color: tok.text)),
-                if (t.sk != null) ...[
-                  Text(' · SK ', style: Ts.style(size: Ts.md, color: tok.text3)),
-                  Text(t.sk!.name,
-                      style: Ts.style(
-                          size: Ts.md, weight: FontWeight.w600, color: tok.text)),
-                ],
-              ]),
-            ],
-            const Spacer(),
-            Text('${p.returned}',
+    final name = t['name']?.toString() ?? '?';
+    final count = (t['itemCount'] as num?)?.toInt();
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 2),
+      child: CodexTableRow(
+        key: ValueKey('table-sidebar-row-$name'),
+        selected: name == _effTable,
+        semanticLabel: name,
+        onTap: () => widget.onOpenTable?.call(name),
+        children: [
+          const SizedBox(width: 10),
+          Icon(Icons.table_chart_outlined, size: 14, color: tok.accent),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(name,
+                overflow: TextOverflow.ellipsis,
                 style: Ts.style(
                     size: Ts.md,
-                    weight: FontWeight.w600,
-                    color: tok.text2,
+                    weight: FontWeight.w500,
+                    color: tok.text,
+                    monoFont: true)),
+          ),
+          if (count != null && count >= 0) ...[
+            const SizedBox(width: 8),
+            Text('$count',
+                style: Ts.style(
+                    size: Ts.xs,
+                    color: tok.text3,
+                    monoFont: true,
                     tabularNums: true)),
-            _semanticIconButton(
-              label: tr('tbl.refresh'),
-              visualDensity: VisualDensity.compact,
-              onPressed: _running ? null : () => _run(),
-              icon: const Icon(Icons.refresh, size: 17),
+          ],
+          const SizedBox(width: 10),
+        ],
+      ),
+    );
+  }
+
+  // The filter popup opened from the top-left Filters button: the SCAN FILTER
+  // box plus the collapsible advanced Scan/Query form. It lives in the page's
+  // Stack (anchored to the button via _filterLink), so ordinary setState
+  // rebuilds it.
+  Widget _filterPopupPanel() {
+    final tok = AppTokens.of(context);
+    return CodexSurface(
+      key: const ValueKey('table-filter-popup'),
+      variant: CodexSurfaceVariant.elevated,
+      padding: EdgeInsets.zero,
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Container(
+          color: tok.panel2,
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          child: Row(children: [
+            Icon(Icons.filter_list, size: 15, color: tok.accent),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(tr('tbl.filters').toUpperCase(),
+                  overflow: TextOverflow.ellipsis,
+                  style: Ts.style(
+                      size: Ts.md,
+                      letterSpacing: 0.9,
+                      weight: FontWeight.w700,
+                      color: tok.text)),
             ),
             _semanticIconButton(
-              label: MaterialLocalizations.of(context).previousPageTooltip,
+              label: tr('tbl.close'),
               visualDensity: VisualDensity.compact,
-              onPressed: _pageIdx == 0 || _running ? null : _prevPage,
-              icon: const Icon(Icons.chevron_left, size: 20),
-            ),
-            Text('${_pageIdx + 1}',
-                style: Ts.style(size: Ts.md, tabularNums: true)),
-            _semanticIconButton(
-              label: MaterialLocalizations.of(context).nextPageTooltip,
-              visualDensity: VisualDensity.compact,
-              onPressed: p.hasNext && !_running ? _nextPage : null,
-              icon: const Icon(Icons.chevron_right, size: 20),
-            ),
-            _semanticIconButton(
-              label: tr('tbl.preferences'),
-              visualDensity: VisualDensity.compact,
-              onPressed: _openPreferences,
-              icon: const Icon(Icons.settings, size: 17),
-            ),
-            _semanticIconButton(
-              label: tr('tbl.filters'),
-              visualDensity: VisualDensity.compact,
-              selected: _filterSidebarOpen,
-              onPressed: _toggleFilterSidebar,
-              icon: const Icon(Icons.filter_list, size: 18),
+              onPressed: _closeFilterPopup,
+              icon: const Icon(Icons.close, size: 16),
             ),
           ]),
-          if (_canWriteItems) ...[
-            const SizedBox(height: 6),
-            _batchActionBar(p, _visibleRows(p), includeCreate: true),
-          ],
-        ]),
-      );
-    });
+        ),
+        const CodexDivider(),
+        Expanded(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _labelText(tr('tbl.scanFilter')),
+                const SizedBox(height: 8),
+                SizedBox(
+                  height: Dim.ctlH,
+                  child: TextField(
+                    key: const ValueKey('table-filter-popup-scan'),
+                    controller: _scanFilter,
+                    onChanged: (_) => setState(() {}),
+                    style:
+                        Ts.style(size: Ts.sm, color: tok.text, monoFont: true),
+                    decoration: InputDecoration(
+                      isDense: true,
+                      hintText: tr('tbl.filters'),
+                      hintStyle: Ts.style(size: Ts.sm, color: tok.text3),
+                      prefixIcon:
+                          Icon(Icons.search, size: 14, color: tok.text3),
+                      prefixIconConstraints:
+                          const BoxConstraints(minWidth: 28, minHeight: 26),
+                      contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 5),
+                    ),
+                  ),
+                ),
+                InkWell(
+                  onTap: () => setState(() => _panelOpen = !_panelOpen),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    child: Row(children: [
+                      Icon(
+                          _panelOpen
+                              ? Icons.expand_more
+                              : Icons.chevron_right,
+                          size: 16,
+                          color: tok.text3),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(tr('tbl.scanOrQueryItems').toUpperCase(),
+                            overflow: TextOverflow.ellipsis,
+                            style: Ts.style(
+                                size: Ts.md,
+                                letterSpacing: 0.9,
+                                weight: FontWeight.w700,
+                                color: tok.text)),
+                      ),
+                    ]),
+                  ),
+                ),
+                if (_panelOpen) ...[
+                  const CodexDivider(),
+                  const SizedBox(height: 12),
+                  _queryFormBody(),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ]),
+    );
+  }
+
+  // The v2.3 valuepane head, trimmed: the table identity lives in the tables
+  // sidebar, so the name / PK-SK / count row is gone. The head keeps the two
+  // ordinary actions on the left (the Filters popup trigger and Preferences)
+  // and the batch actions on the right.
+  Widget _valuepaneHead() {
+    final tok = AppTokens.of(context);
+    final p = _page!;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: tok.panel2,
+        border: Border(bottom: BorderSide(color: tok.hairline)),
+      ),
+      child: Row(children: [
+        _ghostButton(
+          Icons.filter_list,
+          tr('tbl.filters'),
+          _toggleFilterPopup,
+          highlighted:
+              _filterPopupOpen || _scanFilter.text.trim().isNotEmpty,
+        ),
+        const SizedBox(width: 8),
+        _ghostButton(
+            Icons.settings, tr('tbl.preferences'), _openPreferences),
+        if (_canWriteItems)
+          Expanded(
+            child: _batchActionBar(p, _visibleRows(p), includeCreate: true),
+          ),
+      ]),
+    );
   }
 
   // Ghost button (v2.3 .abtn.ghost — the ＋ Item grammar): a quiet 26px
@@ -1431,6 +1629,7 @@ class TablePageViewState extends State<TablePageView>
     String label,
     VoidCallback onPressed, {
     bool enabled = true,
+    bool highlighted = false,
   }) {
     final tok = AppTokens.of(context);
     return SizedBox(
@@ -1440,22 +1639,42 @@ class TablePageViewState extends State<TablePageView>
         icon: Icon(icon, size: 14),
         label:
             Text(label, style: Ts.style(size: Ts.md, weight: FontWeight.w500)),
-        style: OutlinedButton.styleFrom(
-          foregroundColor: tok.text2,
-          disabledForegroundColor: tok.text3,
-          side: BorderSide(color: tok.border),
-          shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(Dim.radiusS)),
-          padding: const EdgeInsets.symmetric(horizontal: 10),
+        style: ButtonStyle(
+          foregroundColor: WidgetStateProperty.resolveWith((states) {
+            if (states.contains(WidgetState.disabled)) {
+              return tok.text3.withValues(alpha: 0.30);
+            }
+            return highlighted ? tok.accent : tok.text2;
+          }),
+          backgroundColor: WidgetStateProperty.resolveWith((states) {
+            if (states.contains(WidgetState.disabled)) {
+              return tok.text3.withValues(alpha: 0.10);
+            }
+            return Colors.transparent;
+          }),
+          side: WidgetStateProperty.resolveWith((states) {
+            if (states.contains(WidgetState.disabled)) {
+              return BorderSide(color: tok.border.withValues(alpha: 0.35));
+            }
+            return BorderSide(color: highlighted ? tok.accent : tok.border);
+          }),
+          shape: WidgetStatePropertyAll(
+            RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(Dim.radiusS)),
+          ),
+          padding: const WidgetStatePropertyAll(
+            EdgeInsets.symmetric(horizontal: 10),
+          ),
         ),
       ),
     );
   }
 
   Widget _batchActionBar(
-      TablePage p, List<TableItem> rows, {
-      required bool includeCreate,
-    }) {
+    TablePage p,
+    List<TableItem> rows, {
+    required bool includeCreate,
+  }) {
     return Wrap(
       alignment: WrapAlignment.end,
       spacing: 4,
@@ -1480,32 +1699,31 @@ class TablePageViewState extends State<TablePageView>
       children: [
         _ghostButton(
           Icons.edit_outlined,
-          tr('tbl.editSelected'),
+          tr('tbl.editItem'),
           one ? () => _openEditor(from: selected.first, isNew: false) : () {},
           enabled: one,
         ),
         _ghostButton(
           Icons.content_copy_outlined,
-          tr('tbl.duplicateSelected'),
+          tr('tbl.duplicateItem'),
           one ? () => _openEditor(from: selected.first, isNew: true) : () {},
           enabled: one,
         ),
         _ghostButton(
           Icons.delete_outline,
-          tr('tbl.deleteSelected'),
+          tr('tbl.deleteItem'),
           any ? () => _deleteRows(selected) : () {},
           enabled: any,
         ),
         _ghostButton(
           Icons.download_outlined,
           tr('tbl.exportToCsv'),
-          rows.isEmpty ? () {} : () => _exportCsv(cols, rows),
-          enabled: rows.isNotEmpty,
+          any ? () => _exportCsv(cols, selected) : () {},
+          enabled: any,
         ),
       ],
     );
   }
-
 
   // The classic (instance Browse) toolbar — the AWS Explore-items layout.
   Widget _toolbar(
@@ -1514,14 +1732,17 @@ class TablePageViewState extends State<TablePageView>
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       Row(children: [
         Expanded(
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          child:
+              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text('${tr('tbl.itemsReturned')} (${p.returned})',
                 style: Ts.style(
                     size: Ts.md, weight: FontWeight.w600, color: tok.text)),
             Text(
               '${t != null && !t.isTable ? '${tr('tbl.indexPrefix')} ${t.name} · ' : ''}'
               '${tr('tbl.itemsScanned')}: ${p.scanned} · ${(p.efficiency * 100).round()}% · ${p.timeMs} ${tr('tbl.milliseconds')}'
-              '${selCount > 0 ? ' · ${trp('tbl.selectedCount', {'n': '$selCount'})}' : ''}',
+              '${selCount > 0 ? ' · ${trp('tbl.selectedCount', {
+                      'n': '$selCount'
+                    })}' : ''}',
               style: Ts.style(size: Ts.xs, color: tok.text3),
             ),
           ]),
@@ -1530,18 +1751,6 @@ class TablePageViewState extends State<TablePageView>
           label: tr('tbl.refresh'),
           onPressed: _running ? null : () => _run(),
           icon: const Icon(Icons.refresh, size: 17),
-        ),
-        _semanticIconButton(
-          label: MaterialLocalizations.of(context).previousPageTooltip,
-          onPressed: _pageIdx == 0 || _running ? null : _prevPage,
-          icon: const Icon(Icons.chevron_left, size: 20),
-        ),
-        Text('${_pageIdx + 1}',
-            style: Ts.style(size: Ts.md, tabularNums: true)),
-        _semanticIconButton(
-          label: MaterialLocalizations.of(context).nextPageTooltip,
-          onPressed: p.hasNext && !_running ? _nextPage : null,
-          icon: const Icon(Icons.chevron_right, size: 20),
         ),
         _semanticIconButton(
           label: tr('tbl.preferences'),
@@ -1554,6 +1763,49 @@ class TablePageViewState extends State<TablePageView>
         _batchActionBar(p, rows, includeCreate: true),
       ],
     ]);
+  }
+
+  Widget _paginationFooter(TablePage p) {
+    final tok = AppTokens.of(context);
+    return Container(
+      height: 48,
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      decoration: BoxDecoration(
+        border: Border(top: BorderSide(color: tok.hairline)),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          CodexButton(
+            variant: CodexButtonVariant.ghost,
+            semanticLabel: tr('tbl.previousPage'),
+            onPressed: _pageIdx == 0 || _running ? null : _prevPage,
+            label: Text(tr('tbl.previousPage')),
+          ),
+          const SizedBox(width: 16),
+          SizedBox(
+            width: 34,
+            child: Text(
+              '${_pageIdx + 1}',
+              textAlign: TextAlign.center,
+              style: Ts.style(
+                size: Ts.md,
+                weight: FontWeight.w700,
+                color: tok.text,
+                tabularNums: true,
+              ),
+            ),
+          ),
+          const SizedBox(width: 16),
+          CodexButton(
+            variant: CodexButtonVariant.ghost,
+            semanticLabel: tr('tbl.nextPage'),
+            onPressed: !p.hasNext || _running ? null : _nextPage,
+            label: Text(tr('tbl.nextPage')),
+          ),
+        ],
+      ),
+    );
   }
 
   // The partition-key cell — rendered as a link (the DataCell.onTap opens it).
@@ -1794,7 +2046,9 @@ class TablePageViewState extends State<TablePageView>
           child: SingleChildScrollView(
             child: SelectableText(pretty,
                 style: Ts.style(
-                    size: Ts.sm, color: AppTokens.of(context).text, monoFont: true)),
+                    size: Ts.sm,
+                    color: AppTokens.of(context).text,
+                    monoFont: true)),
           ),
         ),
         actions: [
@@ -1842,7 +2096,8 @@ class TablePageViewState extends State<TablePageView>
     final go = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text('${tr('tbl.delete')} ${keys.length} ${tr('tbl.itemsParen')}?'),
+        title:
+            Text('${tr('tbl.delete')} ${keys.length} ${tr('tbl.itemsParen')}?'),
         content: SizedBox(
           width: 440,
           child: Text(trp('tbl.deleteRawBody', {
@@ -1880,7 +2135,7 @@ class TablePageViewState extends State<TablePageView>
     _run(resetPaging: false);
   }
 
-  /// Export to CSV: the current page's visible columns/rows, written
+  /// Export to CSV: the selected rows over the visible columns, written
   /// to ~/Downloads (falls back to the clipboard if the write fails).
   Future<void> _exportCsv(List<String> cols, List<TableItem> rows) async {
     String q(String s) => '"${s.replaceAll('"', '""')}"';
@@ -1962,8 +2217,7 @@ class TablePageViewState extends State<TablePageView>
         borderRadius: BorderRadius.circular(Dim.radiusS),
       ),
       child: Text(name.isEmpty ? '—' : name,
-          style:
-              Ts.style(size: Ts.sm, color: t.text2, monoFont: true)),
+          style: Ts.style(size: Ts.sm, color: t.text2, monoFont: true)),
     );
   }
 }

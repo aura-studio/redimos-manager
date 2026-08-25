@@ -14,6 +14,7 @@ import 'package:flutter/semantics.dart';
 
 import 'i18n.dart';
 import 'models.dart';
+import 'redis_connection.dart';
 import 'theme_prefs.dart';
 import 'ui_fields.dart';
 import 'ui_primitives.dart';
@@ -22,8 +23,9 @@ import 'ui_surfaces.dart';
 import 'ui_tokens.dart';
 
 /// v2.3 rail entity kind — which group the entity sidebar lists. v1.2 adds
-/// Service as the third first-class entity (stage 12).
-enum EntityKind { instance, endpoint, service }
+/// Service as the third first-class entity (stage 12); the Connect module is
+/// the fourth (a persisted Redis client connection).
+enum EntityKind { instance, endpoint, service, connect }
 
 /// Immutable snapshot of everything the chrome renders (the HomePage state
 /// fields the former private builders read).
@@ -43,6 +45,8 @@ class ChromeState {
     required this.lang,
     this.services = const [],
     this.selectedServiceId,
+    this.connections = const [],
+    this.selectedConnectionId,
   });
 
   final EntityKind entityKind;
@@ -60,6 +64,11 @@ class ChromeState {
   /// selection (requirement 12.6).
   final List<ServiceInfo> services;
   final String? selectedServiceId;
+
+  /// Connect module: the persisted Redis client connections and the current
+  /// selection — separate from the other kinds' selections (12.6 pattern).
+  final List<RedisConnection> connections;
+  final String? selectedConnectionId;
 
   /// MidBar labels for the CURRENT mode (instance tabs or endpoint screens).
   final List<String> tabLabels;
@@ -90,8 +99,16 @@ class ChromeState {
     return null;
   }
 
+  RedisConnection? get selectedConnection {
+    for (final c in connections) {
+      if (c.id == selectedConnectionId) return c;
+    }
+    return null;
+  }
+
   bool get isEndpointMode => selectedEndpointId != null;
   bool get isServiceMode => entityKind == EntityKind.service;
+  bool get isConnectMode => entityKind == EntityKind.connect;
 }
 
 /// Every interaction the chrome offers. HomePage wires real handlers; the
@@ -112,6 +129,10 @@ class ChromeCallbacks {
     this.onSelectService = _noopId,
     this.onNewService = _noopVoid,
     this.onServiceStartStop = _noopSvc,
+    this.onSelectConnect = _noopId,
+    this.onNewConnect = _noopVoid,
+    this.onDeleteConnect = _noopId,
+    this.onNewEndpoint = _noopVoid,
   });
 
   final ValueChanged<EntityKind> onEntityKind;
@@ -132,6 +153,16 @@ class ChromeCallbacks {
   final ValueChanged<String> onSelectService;
   final VoidCallback onNewService;
   final void Function(ServiceInfo) onServiceStartStop;
+
+  // Connect module callbacks; defaults keep the capture/fixture construction
+  // sites compiling untouched.
+  final ValueChanged<String> onSelectConnect;
+  final VoidCallback onNewConnect;
+  final ValueChanged<String> onDeleteConnect;
+
+  // The endpoint group's New button creates an endpoint (a storage-style
+  // config), not an instance.
+  final VoidCallback onNewEndpoint;
 }
 
 void _noopId(String _) {}
@@ -168,7 +199,9 @@ class HomeChrome extends StatelessWidget {
               Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
             _topBar(),
             _midBar(),
-            Expanded(child: child),
+            Expanded(
+              child: SizedBox.expand(child: child),
+            ),
             _statusBar(),
           ]),
         ),
@@ -227,6 +260,7 @@ class HomeChrome extends StatelessWidget {
     return Builder(builder: (context) {
       final isSvc = state.isServiceMode;
       final isEp = !isSvc && state.isEndpointMode;
+      final isConn = !isSvc && !isEp && state.isConnectMode;
       String entity = '';
       String sub = '';
       if (isSvc) {
@@ -245,6 +279,12 @@ class HomeChrome extends StatelessWidget {
             'local' => 'Local DynamoDB',
             _ => e.endpoint,
           };
+        }
+      } else if (isConn) {
+        final c = state.selectedConnection;
+        if (c != null) {
+          entity = c.name.isEmpty ? tr('connect.unnamed') : c.name;
+          sub = '${c.host}:${c.port}';
         }
       } else {
         final c = state.selectedConfig;
@@ -397,6 +437,7 @@ class HomeChrome extends StatelessWidget {
       final t = AppTokens.of(context);
       final isSvc = state.isServiceMode;
       final isEp = !isSvc && state.isEndpointMode;
+      final isConn = !isSvc && !isEp && state.isConnectMode;
       Widget leading;
       if (isSvc) {
         final s = state.selectedService;
@@ -458,6 +499,32 @@ class HomeChrome extends StatelessWidget {
               sub,
               key: const ValueKey('home-statusbar-endpoint-summary'),
               style: Ts.style(size: Ts.xs, color: t.text2, monoFont: true),
+            ),
+          ],
+        );
+      } else if (isConn) {
+        final c = state.selectedConnection;
+        // A connection is a client object, not a managed process: neutral dot
+        // + static address summary, no operational paint.
+        leading = Row(
+          key: const ValueKey('home-statusbar-leading'),
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const CodexStatusDot(
+              key: ValueKey('home-statusbar-dot'),
+              status: CodexStatus.neutral,
+              semanticLabel: 'Connect client',
+            ),
+            const SizedBox(width: 7),
+            Text(
+              c == null ? '' : '${c.host}:${c.port} · db${c.database}',
+              key: const ValueKey('home-statusbar-host'),
+              style: Ts.style(
+                size: Ts.xs,
+                color: t.text2,
+                monoFont: true,
+                tabularNums: true,
+              ),
             ),
           ],
         );
@@ -763,6 +830,12 @@ class HomeChrome extends StatelessWidget {
                 _styleMenu(),
                 const SizedBox(height: 12),
                 _railItem(
+                  kind: EntityKind.connect,
+                  icon: Icons.settings_ethernet,
+                  label: tr('nav.connects'),
+                ),
+                const SizedBox(height: 6),
+                _railItem(
                   kind: EntityKind.instance,
                   icon: Icons.storage_outlined,
                   label: tr('nav.instances'),
@@ -804,6 +877,7 @@ class HomeChrome extends StatelessWidget {
       EntityKind.instance => 'instance',
       EntityKind.endpoint => 'endpoint',
       EntityKind.service => 'service',
+      EntityKind.connect => 'connect',
     };
     return Builder(builder: (context) {
       final t = AppTokens.of(context);
@@ -946,6 +1020,8 @@ class HomeChrome extends StatelessWidget {
       final t = AppTokens.of(context);
       final isInstance = state.entityKind == EntityKind.instance;
       final isService = state.entityKind == EntityKind.service;
+      final isConnect = state.entityKind == EntityKind.connect;
+      final isEp = state.entityKind == EntityKind.endpoint;
       final q = state.entityQuery.trim().toLowerCase();
       final items = isInstance
           ? state.configs
@@ -980,7 +1056,15 @@ class HomeChrome extends StatelessWidget {
                       s.config.engine.wire.contains(q) ||
                       ':${s.config.port}'.contains(q))
                   .map((s) => _serviceCard(context, s))
-              : state.endpoints
+              : isConnect
+                  ? state.connections
+                      .where((c) =>
+                          q.isEmpty ||
+                          c.name.toLowerCase().contains(q) ||
+                          c.host.toLowerCase().contains(q) ||
+                          ':${c.port}'.contains(q))
+                      .map((c) => _connectCard(context, c))
+                  : state.endpoints
                   .where((e) =>
                       q.isEmpty ||
                       e.name.toLowerCase().contains(q) ||
@@ -1016,7 +1100,9 @@ class HomeChrome extends StatelessWidget {
           ? state.configs.length
           : isService
               ? state.services.length
-              : state.endpoints.length;
+              : isConnect
+                  ? state.connections.length
+                  : state.endpoints.length;
       return Container(
         key: const ValueKey('entity-sidebar'),
         decoration: BoxDecoration(
@@ -1041,9 +1127,21 @@ class HomeChrome extends StatelessWidget {
                 child: CodexButton(
                   key: const ValueKey('entity-sidebar-new-action'),
                   variant: CodexButtonVariant.primary,
-                  onPressed: isService ? cb.onNewService : cb.onNewConfig,
+                  onPressed: isService
+                      ? cb.onNewService
+                      : isConnect
+                          ? cb.onNewConnect
+                          : isEp
+                              ? cb.onNewEndpoint
+                              : cb.onNewConfig,
                   icon: const Icon(Icons.add, size: 16),
-                  label: Text(isService ? tr('service.new') : tr('config.new')),
+                  label: Text(isService
+                      ? tr('service.new')
+                      : isConnect
+                          ? tr('connect.new')
+                          : isEp
+                              ? tr('ep.new')
+                              : tr('config.new')),
                 ),
               ),
             ),
@@ -1059,7 +1157,9 @@ class HomeChrome extends StatelessWidget {
                         ? tr('nav.instances')
                         : isService
                             ? tr('nav.services')
-                            : tr('nav.endpoints'))
+                            : isConnect
+                                ? tr('nav.connects')
+                                : tr('nav.endpoints'))
                     .toUpperCase(),
                 trailing: Container(
                   key: const ValueKey('entity-sidebar-count'),
@@ -1087,7 +1187,11 @@ class HomeChrome extends StatelessWidget {
                   ? Center(
                       key: const ValueKey('entity-sidebar-empty'),
                       child: Text(
-                        isService ? tr('service.noneYet') : tr('nav.noneYet'),
+                        isService
+                            ? tr('service.noneYet')
+                            : isConnect
+                                ? tr('connect.noneYet')
+                                : tr('nav.noneYet'),
                         style: Ts.style(size: Ts.md, color: t.text3),
                       ),
                     )
@@ -1156,6 +1260,46 @@ class HomeChrome extends StatelessWidget {
       trailing: _serviceStartStop(s),
       trailingVisible: state.hoveredCardId == s.id || live,
     );
+  }
+
+  // One Connect card: same shell grammar as the other entity cards; the
+  // trailing control deletes the connection (a client object has no
+  // start/stop lifecycle).
+  Widget _connectCard(BuildContext context, RedisConnection c) {
+    final t = AppTokens.of(context);
+    return _entityCardShell(
+      cardKey: c.id,
+      selected: c.id == state.selectedConnectionId,
+      hovered: c.id == state.hoveredCardId,
+      onTap: () => cb.onSelectConnect(c.id),
+      onHover: (h) => cb.onHoverCard(h ? c.id : null),
+      dot: Container(
+          width: 7,
+          height: 7,
+          decoration:
+              BoxDecoration(color: t.text3, shape: BoxShape.circle)),
+      badge: 'CONN',
+      name: c.name.isEmpty ? tr('connect.unnamed') : c.name,
+      sub: '${c.host}:${c.port} · db${c.database}',
+      sub2: '',
+      sub2Color: t.text3,
+      trailing: _connectDelete(c),
+      trailingVisible: state.hoveredCardId == c.id,
+    );
+  }
+
+  Widget _connectDelete(RedisConnection c) {
+    return Builder(builder: (context) {
+      final t = AppTokens.of(context);
+      return IconButton(
+        key: ValueKey('entity-card-${c.id}-connect-delete'),
+        tooltip: tr('connect.delete'),
+        visualDensity: VisualDensity.compact,
+        iconSize: 18,
+        icon: Icon(Icons.delete_outline, color: t.danger),
+        onPressed: () => cb.onDeleteConnect(c.id),
+      );
+    });
   }
 
   // Start/stop control for a Service card — mirrors the instance affordance.

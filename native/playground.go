@@ -527,6 +527,7 @@ func rm_playground_run(in *C.char) (ret *C.char) {
 		Script    string `json:"script"`
 		Port      int    `json:"port"`
 		Auth      string `json:"auth"`
+		Host      string `json:"host"`
 		Config    Config `json:"config"`
 		TimeoutMs int    `json:"timeoutMs"`
 	}
@@ -543,7 +544,11 @@ func rm_playground_run(in *C.char) (ret *C.char) {
 	var redisH *redisHost
 	var ddbH *ddbHost
 	if req.Kind == "redis" {
-		conn, err := respDial(fmt.Sprintf("127.0.0.1:%d", req.Port), 4*time.Second)
+		addr := "127.0.0.1"
+		if strings.TrimSpace(req.Host) != "" {
+			addr = req.Host
+		}
+		conn, err := respDial(fmt.Sprintf("%s:%d", addr, req.Port), 4*time.Second)
 		if err != nil {
 			return pgJSON(map[string]any{"ok": false, "error": "connect: " + err.Error()})
 		}

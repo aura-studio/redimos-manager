@@ -74,9 +74,9 @@ void main() {
         ]);
         expect(sparks.every((tile) => tile.sparkHeight == 52), isTrue);
         expect(find.byType(CustomPaint), findsNWidgets(3));
-        expect(find.byType(InfoTile), findsNWidgets(7));
+        expect(find.byType(InfoTile), findsNWidgets(8));
         expect(find.byType(CodexSectionHeader), findsNWidgets(2));
-        expect(find.byType(CodexSurface), findsNWidgets(10));
+        expect(find.byType(CodexSurface), findsNWidgets(11));
 
         final cpuValue = tester.widget<Text>(find.text('12.4%'));
         final memoryValue = tester.widget<Text>(find.text('412 MB'));

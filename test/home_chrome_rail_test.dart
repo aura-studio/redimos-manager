@@ -157,6 +157,7 @@ void main() {
           EntityKind.instance => 'instance',
           EntityKind.endpoint => 'endpoint',
           EntityKind.service => 'service',
+          EntityKind.connect => 'connect',
         };
         final indicator =
             find.byKey(ValueKey('main-rail-$activeName-indicator'));

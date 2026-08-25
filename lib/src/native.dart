@@ -523,6 +523,7 @@ class NativeCore {
     required String script,
     int port = 0,
     String auth = '',
+    String host = '',
     RedimosConfig? config,
     int timeoutMs = 5000,
   }) async {
@@ -533,6 +534,7 @@ class NativeCore {
       'script': script,
       'port': port,
       'auth': auth,
+      'host': host,
       'config': config?.toJson() ?? <String, dynamic>{},
       'timeoutMs': timeoutMs,
     });

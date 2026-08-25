@@ -5,6 +5,8 @@ import 'package:redimos_manager/src/i18n.dart';
 import 'package:redimos_manager/src/models.dart';
 import 'package:redimos_manager/src/ui_theme.dart';
 
+import 'fake_core.dart';
+
 // The Configure pane's identity editor has two modes behind a segment
 // control: Endpoint (a local URL) and AWS (Region + credentials). These
 // tests pin the field show/hide per mode and the save semantics — the
@@ -156,6 +158,28 @@ void main() {
     expect(saved!.accessKeyId, 'AKIA-NEW');
     expect(saved!.secretKey, 'secret-new');
     expect(saved!.sessionToken, '');
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('test connection probes the draft and reports the table count',
+      (tester) async {
+    tester.view.physicalSize = const Size(900, 720);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(MaterialApp(
+      theme: appTheme(Brightness.dark),
+      home: Scaffold(
+        body: EndpointConfigPane(
+            endpoint: _localEndpoint, core: FakeNativeCore()),
+      ),
+    ));
+    await tester.pump();
+
+    await tester.tap(find.byKey(const ValueKey('ep-test-connection')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 16));
+    await tester.pump();
+    expect(find.textContaining('Connected'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 }

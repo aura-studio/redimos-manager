@@ -34,6 +34,12 @@ class _RetentionCore extends FakeNativeCore {
   }
 }
 
+class _EmptyTablesCore extends FakeNativeCore {
+  @override
+  Future<Map<String, dynamic>> epListTables(RedimosConfig config) async =>
+      {'ok': true, 'tables': <Map<String, dynamic>>[]};
+}
+
 class _TabHarness extends StatefulWidget {
   final List<Widget> children;
 
@@ -67,7 +73,7 @@ class _TabHarnessState extends State<_TabHarness>
 }
 
 class _EndpointHarness extends StatefulWidget {
-  final _RetentionCore core;
+  final FakeNativeCore core;
   final DdbEndpoint endpoint;
 
   const _EndpointHarness({
@@ -94,7 +100,7 @@ class _EndpointHarnessState extends State<_EndpointHarness> {
         selectedTable: table,
         onOpenTable: (name) => setState(() {
           table = name;
-          index = 2;
+          index = 1;
         }),
       );
 }
@@ -363,27 +369,75 @@ void main() {
       size: const Size(1280, 700),
     );
     await tester.pump();
-    // Configure leads at 0 (v1 convention); every screen inflates once in the
-    // IndexedStack, so the table list loads exactly once at mount.
+    // Configure leads at 0; only the Table screen's sidebar loads the list.
     expect(core.endpointListCalls, 1);
 
-    key.currentState!.select(1); // Endpoint (the table list)
+    key.currentState!.select(1); // Table (the endpoint list tab is gone)
     await tester.pump();
-    await tester.tap(find.text('users').first);
+    // No table picked yet: the sidebar lists every table and the data area
+    // shows the pick-a-table hint — the "no table configured" error must not
+    // render.
+    expect(find.text(tr('tbl.noTableConfigured')), findsNothing);
+    expect(find.text(tr('tbl.selectTableHint')), findsOneWidget);
+    expect(find.byKey(const ValueKey('table-sidebar-tables')), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('table-sidebar-row-users')));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 16));
     await tester.pump(const Duration(milliseconds: 16));
-    // The row tap bridged into the Table screen and its scan rendered.
-    expect(key.currentState!.index, 2);
+    // The sidebar row tap selected the table and rendered its scan.
+    expect(key.currentState!.index, 1);
+    expect(find.byKey(const ValueKey('table-flat-content-endpoint:e1-users')), findsOneWidget);
+    expect(find.byKey(const ValueKey('table-sidebar-tables')), findsOneWidget);
+    expect(find.byKey(const ValueKey('table-sidebar-row-users')), findsOneWidget);
     expect(find.text('user#1001'), findsOneWidget);
 
-    key.currentState!.select(1); // back to the table list
+    // Filters live in a popup opened from the top-left button; the table and
+    // the tables sidebar stay visible underneath.
+    await tester.tap(find.text(tr('tbl.filters')));
     await tester.pump();
-    expect(find.text('sessions'), findsOneWidget);
-    expect(core.endpointListCalls, 1,
-        reason: 'returning to the list must not reload it');
+    expect(find.byKey(const ValueKey('table-filter-popup')), findsOneWidget);
+    expect(find.text('SCAN FILTER'), findsOneWidget);
+    expect(find.text('user#1001'), findsOneWidget);
+    await tester.tapAt(const Offset(6, 6)); // dismiss via the barrier
+    await tester.pump();
+    expect(find.byKey(const ValueKey('table-filter-popup')), findsNothing);
 
-    key.currentState!.select(2); // Table
+    // Editing and duplicating require exactly one selected row; exporting
+    // requires at least one.
+    OutlinedButton batchButton(String label) =>
+        tester.widget<OutlinedButton>(find.ancestor(
+          of: find.text(label),
+          matching: find.byType(OutlinedButton),
+        ));
+    expect(batchButton(tr('tbl.exportToCsv')).onPressed, isNull,
+        reason: 'export needs a selection');
+
+    final checkboxes = find.byType(Checkbox);
+    expect(checkboxes, findsNWidgets(7));
+    await tester.tap(checkboxes.at(1));
+    await tester.tap(checkboxes.at(2));
+    await tester.pump();
+    final editButton = find.ancestor(
+      of: find.text(tr('tbl.editItem')),
+      matching: find.byType(OutlinedButton),
+    );
+    final duplicateButton = find.ancestor(
+      of: find.text(tr('tbl.duplicateItem')),
+      matching: find.byType(OutlinedButton),
+    );
+    expect(tester.widget<OutlinedButton>(editButton).onPressed, isNull);
+    expect(tester.widget<OutlinedButton>(duplicateButton).onPressed, isNull);
+    expect(batchButton(tr('tbl.exportToCsv')).onPressed, isNotNull,
+        reason: 'export is enabled once rows are selected');
+
+    key.currentState!.select(0); // Configure
+    await tester.pump();
+    expect(find.text('sessions', skipOffstage: false), findsOneWidget,
+        reason: 'the tables sidebar stays mounted behind Configure');
+    expect(core.endpointListCalls, 1,
+        reason: 'switching screens must not reload the list');
+
+    key.currentState!.select(1); // Table
     await tester.pump();
     expect(
       find.text('user#1001'),
@@ -392,6 +446,33 @@ void main() {
     );
     expect(core.endpointListCalls, 1);
     expect(tester.takeException(), isNull);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('endpoint without tables shows a guidance hint', (tester) async {
+    final core = _EmptyTablesCore();
+    final key = GlobalKey<_EndpointHarnessState>();
+
+    await _pumpHarness(
+      tester,
+      _EndpointHarness(key: key, core: core, endpoint: fx.fixtureEndpoint),
+      size: const Size(1280, 700),
+    );
+    await tester.pump();
+
+    key.currentState!.select(1); // Table
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 16));
+    await tester.pump();
+    expect(find.text(tr('tbl.noTablesHint')), findsOneWidget);
+    expect(find.text(tr('tbl.selectTableHint')), findsNothing);
+    expect(tester.takeException(), isNull);
+
+    // Drain the scan's pending 16ms timers before teardown.
+    await tester.pump(const Duration(milliseconds: 16));
+    await tester.pump(const Duration(milliseconds: 16));
+    await tester.pump();
 
     await tester.pumpWidget(const SizedBox.shrink());
   });
@@ -552,9 +633,9 @@ void main() {
     await tester.pump();
     expect(core.endpointListCalls, 1);
 
-    key.currentState!.select(1); // Endpoint (Configure leads at 0)
+    key.currentState!.select(1); // Table (Configure leads at 0)
     await tester.pump();
-    await tester.tap(find.text('users').first);
+    await tester.tap(find.byKey(const ValueKey('table-sidebar-row-users')));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 16));
     await tester.pump(const Duration(milliseconds: 16));
@@ -568,14 +649,14 @@ void main() {
     await tester.pump();
 
     for (var round = 0; round < 4; round++) {
-      // 3 screens: Configure / Endpoint / Table.
-      for (var index = 0; index < 3; index++) {
+      // 2 screens: Configure / Table.
+      for (var index = 0; index < 2; index++) {
         key.currentState!.select(index);
         await tester.pump();
       }
     }
 
-    key.currentState!.select(2); // Table
+    key.currentState!.select(1); // Table
     await tester.pump();
     expect(
       find.text('user#1001'),

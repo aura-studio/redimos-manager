@@ -369,7 +369,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 16));
     expect(harness.kind, EntityKind.endpoint);
     expect(find.byKey(const ValueKey('endpoint-detail-ep-1')), findsOneWidget);
-    expect(find.byKey(const ValueKey('ep-tables-ep-1'), skipOffstage: false),
+    expect(find.byKey(const ValueKey('ep-table-ep-1'), skipOffstage: false),
         findsOneWidget);
     expect(find.byKey(const ValueKey('ep-ddbmon-ep-1'), skipOffstage: false),
         findsNothing);

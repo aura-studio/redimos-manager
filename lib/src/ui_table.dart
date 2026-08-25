@@ -160,24 +160,58 @@ class _CodexTableViewportState extends State<CodexTableViewport> {
 
   @override
   Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, constraints) => SingleChildScrollView(
-        controller: _vertical,
-        padding: widget.padding,
-        child: CodexHorizontalScrollView(
-          controller: _horizontal,
-          child: IntrinsicWidth(
-            child: ConstrainedBox(
-              constraints: BoxConstraints(
-                minWidth:
-                    constraints.hasBoundedWidth ? constraints.maxWidth : 0,
+    return LayoutBuilder(builder: (context, constraints) {
+      // Suppress the framework's auto-inserted vertical scrollbar: it would
+      // pin to the horizontally-scrollable content's right edge (off-screen).
+      // The explicit vertical Scrollbar below stays pinned to the viewport.
+      final content = ScrollConfiguration(
+        behavior:
+            ScrollConfiguration.of(context).copyWith(scrollbars: false),
+        child: SingleChildScrollView(
+          controller: _vertical,
+          padding: widget.padding,
+          child: widget.child,
+        ),
+      );
+      final verticalViewport = constraints.hasBoundedHeight
+          ? SizedBox(height: constraints.maxHeight, child: content)
+          : content;
+
+      // Both scrollbars wrap the OUTER axes so each track is pinned to a
+      // viewport edge (right / bottom) instead of an edge of the scrolled
+      // content. Visibility comes from the shared scrollbar theme: hidden
+      // when idle, revealed on hover.
+      return Actions(
+        actions: <Type, Action<Intent>>{
+          ScrollIntent: _AxisAwareScrollAction(),
+        },
+        child: Scrollbar(
+          controller: _vertical,
+          notificationPredicate: (notification) =>
+              notification.metrics.axis == Axis.vertical &&
+              notification.depth == 1,
+          child: Scrollbar(
+            controller: _horizontal,
+            notificationPredicate: (notification) =>
+                notification.depth == 0 &&
+                notification.metrics.axis == Axis.horizontal,
+            child: SingleChildScrollView(
+              controller: _horizontal,
+              scrollDirection: Axis.horizontal,
+              child: IntrinsicWidth(
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(
+                    minWidth:
+                        constraints.hasBoundedWidth ? constraints.maxWidth : 0,
+                  ),
+                  child: verticalViewport,
+                ),
               ),
-              child: widget.child,
             ),
           ),
         ),
-      ),
-    );
+      );
+    });
   }
 }
 

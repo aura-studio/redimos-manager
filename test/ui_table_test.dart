@@ -461,6 +461,18 @@ void main() {
         scrollbars.map((bar) => bar.controller).toSet(),
         {horizontal, vertical},
       );
+      // Transient like the vertical one: idle-hidden, hover-revealed via the
+      // shared scrollbar theme (no widget-level visibility override).
+      final horizontalScrollbar =
+          scrollbars.singleWhere((bar) => bar.controller == horizontal);
+      expect(horizontalScrollbar.thumbVisibility, isNull);
+      // Both tracks must be pinned to the VIEWPORT edges, not the scrolled
+      // content's edges (which would leave them off-screen after scrolling).
+      final viewportRect =
+          tester.getRect(find.byKey(const ValueKey('table-viewport-bounds')));
+      for (final bar in scrollbars) {
+        expect(tester.getRect(find.byWidget(bar)), viewportRect);
+      }
 
       final position =
           tester.getCenter(find.byKey(const ValueKey('table-viewport-bounds')));
