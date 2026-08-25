@@ -407,16 +407,32 @@ class _FormatViewerState extends State<FormatViewer> {
     );
     if (_editableText) {
       return LayoutBuilder(
-        builder: (context, constraints) => CodexTextField(
-          controller: _edit,
-          expands: true,
-          minLines: null,
-          maxLines: null,
-          textAlignVertical: TextAlignVertical.top,
-          height: constraints.maxHeight,
-          style: monoStyle,
-          decoration: const InputDecoration(
-            contentPadding: EdgeInsets.all(12),
+        builder: (context, constraints) => CodexSurface(
+          variant: CodexSurfaceVariant.sunken,
+          padding: EdgeInsets.zero,
+          child: SizedBox(
+            height: constraints.maxHeight,
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(12),
+              child: Align(
+                alignment: Alignment.topLeft,
+                child: TextField(
+                  key: const ValueKey('format-viewer-text-editor'),
+                  controller: _edit,
+                  minLines: 1,
+                  maxLines: null,
+                  textAlignVertical: TextAlignVertical.top,
+                  style: monoStyle,
+                  decoration: const InputDecoration(
+                    isCollapsed: true,
+                    border: InputBorder.none,
+                    enabledBorder: InputBorder.none,
+                    focusedBorder: InputBorder.none,
+                    contentPadding: EdgeInsets.zero,
+                  ),
+                ),
+              ),
+            ),
           ),
         ),
       );

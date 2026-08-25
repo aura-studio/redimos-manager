@@ -573,10 +573,10 @@ class _HomePageState extends State<HomePage>
 
   // Connect module: Configure leads, then the three Redis client screens.
   static const _connectTabKeys = [
-    'tab.configure',
-    'ep.browse',
-    'tab.console',
-    'tab.playground'
+    'connect.tabConfigure',
+    'connect.tabBrowse',
+    'connect.tabCommand',
+    'connect.tabScript',
   ];
   List<String> _connectTabLabels() =>
       [for (final k in _connectTabKeys) tr(k)];
