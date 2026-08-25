@@ -194,6 +194,7 @@ void main() {
         final editor = tester.widget<TextField>(find.byType(TextField));
         expect(editor.style?.fontFamily, Ts.monoFamily);
         expect(editor.style?.fontFamilyFallback, Ts.monoFallback);
+        expect(editor.textAlignVertical, TextAlignVertical.top);
         expect(editor.controller?.text, 'initial 中');
 
         await tester.enterText(find.byType(TextField), 'unsaved 中');

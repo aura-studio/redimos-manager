@@ -412,6 +412,7 @@ class _FormatViewerState extends State<FormatViewer> {
           expands: true,
           minLines: null,
           maxLines: null,
+          textAlignVertical: TextAlignVertical.top,
           height: constraints.maxHeight,
           style: monoStyle,
           decoration: const InputDecoration(
