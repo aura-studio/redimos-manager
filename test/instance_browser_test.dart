@@ -108,6 +108,23 @@ void main() {
         );
         expect(find.text('user:1001'), findsOneWidget);
         expect(find.text('cache'), findsNothing);
+        // Every scanned key uses the full type-badge row before any key is
+        // opened; TYPE replies update badges in place without layout shifts.
+        await _waitFor(
+          tester,
+          find.byKey(const ValueKey('browser-key-type-badge')),
+        );
+        // Tree and flat views are both kept alive, so each of the two scanned
+        // keys has one badge in each view.
+        expect(find.byKey(const ValueKey('browser-key-type-badge')),
+            findsNWidgets(4));
+        expect(
+          server.commands.where((c) => c.isNotEmpty && c.first == 'TYPE'),
+          containsAll([
+            equals(['TYPE', 'user:1001']),
+            equals(['TYPE', 'user:1002']),
+          ]),
+        );
 
         final userKey = find.byWidgetPredicate(
           (widget) => widget is Text && widget.data == 'user:1001',

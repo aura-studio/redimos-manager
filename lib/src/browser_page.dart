@@ -119,6 +119,9 @@ class _BrowserPageViewState extends State<BrowserPageView>
   bool _tree = true;
   int _db = 0;
   final _keys = <String>[];
+  // Key types are loaded immediately after SCAN so every sidebar leaf renders
+  // the full type-badge row from the outset (not only after the key is opened).
+  final _keyTypes = <String, String>{};
   String _cursor = '0';
   bool _scanning = false;
   bool _scanDone = false;
@@ -281,6 +284,7 @@ class _BrowserPageViewState extends State<BrowserPageView>
 
   void _resetLeft() {
     _keys.clear();
+    _keyTypes.clear();
     _cursor = '0';
     _scanDone = false;
   }
@@ -298,12 +302,20 @@ class _BrowserPageViewState extends State<BrowserPageView>
     try {
       final page = await c.scan(_cursor, match: match, count: 300);
       if (!mounted) return;
+      final fresh = [
+        for (final key in page.items)
+          if (!_keys.contains(key)) key,
+      ];
       setState(() {
-        _keys.addAll(page.items);
+        _keys.addAll(fresh);
         _cursor = page.cursor;
         _scanDone = page.done;
         _scanning = false;
       });
+      // TYPE is deliberately loaded after the SCAN rows paint: every row
+      // reserves the same badge footprint immediately, then the placeholder
+      // '?' is replaced with the real type without shifting the key label.
+      unawaited(_loadKeyTypes(c, fresh, _connGen));
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -311,6 +323,25 @@ class _BrowserPageViewState extends State<BrowserPageView>
         _connError = '$e';
       });
     }
+  }
+
+  /// Loads key types for the newly scanned leaves. Keep the connection
+  /// generation guard so replies from a stale host/db cannot repaint the new
+  /// connection's tree. Failures leave the reserved '?' badge in place.
+  Future<void> _loadKeyTypes(
+      RedisClient client, List<String> keys, int generation) async {
+    await Future.wait([
+      for (final key in keys)
+        () async {
+          try {
+            final type = await client.type(key);
+            if (!mounted || generation != _connGen) return;
+            setState(() => _keyTypes[key] = type);
+          } catch (_) {
+            // The key may have expired between SCAN and TYPE; keep '?'.
+          }
+        }(),
+    ]);
   }
 
   Future<void> _loadAll() async {
@@ -365,6 +396,9 @@ class _BrowserPageViewState extends State<BrowserPageView>
     });
     try {
       final type = await c.type(t.key);
+      if (mounted && _tabs.contains(t)) {
+        setState(() => _keyTypes[t.key] = type);
+      }
       final ttl = await c.ttl(t.key);
       t.type = type;
       t.ttl = ttl;
@@ -906,7 +940,7 @@ class _BrowserPageViewState extends State<BrowserPageView>
   Widget _leaf(String key, String label, int depth) {
     final sel = key == _selected;
     final tok = AppTokens.of(context);
-    final type = _tabType(key);
+    final type = _keyTypes[key] ?? _tabType(key) ?? '';
     return InkWell(
       onTap: () {
         if (_selectMode) {
@@ -943,11 +977,12 @@ class _BrowserPageViewState extends State<BrowserPageView>
                 color: Theme.of(context).colorScheme.primary,
               ),
             ),
-          // Mockup: each key row leads with a small 18x18 type badge.
-          if (type != null && type.isNotEmpty) ...[
-            _leafBadge(tok, type),
-            const SizedBox(width: 7),
-          ],
+          // Every key row leads with the same 18x18 type badge footprint.
+          // Before TYPE returns it shows '?', then updates in place without
+          // shifting the key label.
+          _leafBadge(tok, type),
+          const SizedBox(width: 7),
+
           // Mockup .kname: mono 12px, ellipsis.
           Expanded(
             child: Text(label,
@@ -967,6 +1002,7 @@ class _BrowserPageViewState extends State<BrowserPageView>
   Widget _leafBadge(AppTokens tok, String type) {
     final c = tok.typeColors(type);
     return Container(
+      key: const ValueKey('browser-key-type-badge'),
       width: 18,
       height: 18,
       alignment: Alignment.center,
